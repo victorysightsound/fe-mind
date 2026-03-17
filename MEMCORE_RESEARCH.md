@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-16
 **Status:** Research Complete
-**Related:** `MEMCORE_ARCHITECTURE.md` (implementation spec), `PIRDLY_DECISIONS.md` (decisions 027-033)
+**Related:** `MEMCORE_ARCHITECTURE.md` (implementation spec), `DECISIONS.md` (decisions 001-016), `research/gap_analysis_2026_03.md` (March 2026 gap analysis)
 
 ---
 

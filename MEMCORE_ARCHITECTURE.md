@@ -66,11 +66,14 @@ memcore/
 │   │   ├── vector.rs          # Brute-force dot product (+ optional sqlite-vec ANN)
 │   │   ├── hybrid.rs          # Reciprocal Rank Fusion merge
 │   │   ├── graph.rs           # Relationship traversal via recursive CTEs
+│   │   ├── reranker.rs        # Cross-encoder reranking (post-RRF, feature-gated)
+│   │   ├── query_expand.rs    # Time-aware query expansion (temporal expressions → date ranges)
 │   │   └── scoring.rs         # Post-search scoring (activation, recency, type boosts)
 │   │
 │   ├── embeddings/
 │   │   ├── mod.rs
 │   │   ├── candle.rs          # CandleBackend: all-MiniLM-L6-v2 (feature-gated)
+│   │   ├── fastembed.rs       # FastembedBackend: 25+ models + reranking (feature-gated)
 │   │   ├── noop.rs            # NoopBackend: zero vectors (testing)
 │   │   ├── fallback.rs        # FallbackBackend: graceful degradation
 │   │   └── indexer.rs         # Background batch indexer, content-hash skip
@@ -81,12 +84,24 @@ memcore/
 │   │   ├── consolidation.rs   # Extract → Consolidate → Store pipeline
 │   │   ├── activation.rs      # ACT-R forgetting curve + access tracking
 │   │   ├── relations.rs       # Graph relationships (memory_relations table)
-│   │   └── temporal.rs        # valid_from / valid_until support
+│   │   ├── temporal.rs        # valid_from / valid_until support
+│   │   ├── hierarchy.rs       # Three-tier memory (episode → summary → fact)
+│   │   ├── evolution.rs       # Post-write hooks, memory-writes-back-to-memory
+│   │   └── pruning.rs         # Activation-based pruning with policy controls
 │   │
 │   ├── context/
 │   │   ├── mod.rs
 │   │   ├── budget.rs          # Token-budget-aware context assembly
 │   │   └── priority.rs        # Priority-ranked selection by memory type
+│   │
+│   ├── ingest/
+│   │   ├── mod.rs
+│   │   ├── passthrough.rs     # Default: store text as-is
+│   │   └── fact_extract.rs    # LLM-assisted atomic fact extraction
+│   │
+│   ├── callbacks/
+│   │   ├── mod.rs
+│   │   └── llm.rs             # LlmCallback trait (consumer-provided LLM access)
 │   │
 │   └── interface/
 │       ├── mod.rs
@@ -141,14 +156,28 @@ mcp-server = ["dep:axum", "dep:tower", "dep:serde_json"]
 # Two-tier memory (global + project databases)
 two-tier = []
 
-# Everything
+# fastembed-rs backend (25+ models, reranking, SPLADE sparse embeddings)
+fastembed = ["dep:fastembed"]
+
+# Cross-encoder reranking (post-RRF refinement)
+reranking = ["fastembed"]
+
+# Encryption at rest via SQLCipher
+encryption = ["rusqlite/bundled-sqlcipher"]
+encryption-vendored = ["encryption", "rusqlite/bundled-sqlcipher-vendored-openssl"]
+
+# OS keychain integration for encryption key storage
+keychain = ["dep:keyring"]
+
+# Everything (native)
 full = [
     "vector-search",
     "graph-memory",
     "temporal",
     "consolidation",
     "activation-model",
-    "two-tier"
+    "two-tier",
+    "reranking"
 ]
 ```
 
@@ -158,7 +187,9 @@ full = [
 fts5 (default, always on)
   └── vector-search
        ├── local-embeddings (candle)
-       └── vector-indexed (sqlite-vec, optional)
+       ├── vector-indexed (sqlite-vec, optional)
+       └── fastembed (alternative to candle, adds reranking + SPLADE)
+            └── reranking (cross-encoder post-RRF)
 
 graph-memory (independent, SQLite-only)
 temporal (independent, schema addition)
@@ -166,6 +197,8 @@ consolidation (independent, logic only)
 activation-model (independent, logic only)
 two-tier (independent, multi-db management)
 mcp-server (independent, network stack)
+encryption (swaps bundled SQLite for bundled SQLCipher)
+  └── keychain (OS keychain key storage)
 ```
 
 ### Binary Size Impact
@@ -175,8 +208,11 @@ mcp-server (independent, network stack)
 | `default` (FTS5 only) | ~2MB (just rusqlite) |
 | `+ graph-memory + temporal + consolidation + activation-model` | ~2.5MB (pure logic, no new deps) |
 | `+ vector-search` (candle) | ~30-35MB |
-| `+ vector-indexed` (sqlite-vec) | ~35-40MB |
+| `+ fastembed` (ONNX + reranking) | ~35-40MB |
+| `+ vector-indexed` (sqlite-vec) | +~5MB |
 | `+ mcp-server` (axum) | +~5MB |
+| `+ encryption` (SQLCipher) | +~500KB-1MB over plain SQLite |
+| `+ keychain` (keyring) | +~200-500KB |
 | `full` (everything) | ~40-45MB |
 
 ---
@@ -192,7 +228,7 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 
-/// Cognitive memory type classification (CoALA framework)
+/// Cognitive memory type classification (CoALA framework + Hindsight)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryType {
     /// What happened — events, sessions, iteration logs
@@ -204,6 +240,10 @@ pub enum MemoryType {
     /// How to do things — workflows, error patterns, solutions
     /// Strengthens with validation. Most valuable when proven.
     Procedural,
+    /// What I conclude — agent-synthesized conclusions that can be revised.
+    /// Has confidence score and provenance chain. Challengeable.
+    /// (Under consideration — see Decision Q3)
+    // Belief,
 }
 
 /// Consumers implement this for their memory types.
@@ -420,6 +460,114 @@ pub enum ConsolidationAction {
 | `SimilarityDedup` | O(n) | Vector similarity threshold, near-duplicate detection |
 | `LLMConsolidation` | External | Uses LLM to classify ADD/UPDATE/DELETE/NOOP (Mem0 pattern) |
 
+### LlmCallback (Decision 015)
+
+```rust
+/// Consumer-provided LLM access for all LLM-assisted operations.
+/// MemCore never calls an LLM directly — the consumer controls model,
+/// cost, and retry behavior.
+#[async_trait]
+pub trait LlmCallback: Send + Sync {
+    /// Given a prompt, return the LLM's response.
+    async fn complete(&self, prompt: &str) -> Result<String>;
+}
+```
+
+Used by: `LLMConsolidation`, `LlmIngest`, `EvolutionStrategy`, `reflect()`. All LLM-dependent features work (degraded) when no callback is provided.
+
+### IngestStrategy (Decision 012)
+
+```rust
+/// Controls how raw input is processed before storage.
+/// Default: store as-is. LLM-assisted: extract atomic facts.
+#[async_trait]
+pub trait IngestStrategy: Send + Sync {
+    async fn extract(&self, raw: &str) -> Result<Vec<ExtractedFact>>;
+}
+
+pub struct ExtractedFact {
+    pub text: String,
+    pub category: Option<String>,
+    pub memory_type: MemoryType,
+    pub importance: u8,
+}
+```
+
+**Shipped implementations:**
+
+| Strategy | Cost | Description |
+|----------|------|-------------|
+| `PassthroughIngest` | Zero | Store text as-is (default) |
+| `LlmIngest` | LLM tokens | Extract atomic facts via LlmCallback |
+
+### RerankerBackend (Decision 013)
+
+```rust
+/// Cross-encoder reranking applied after RRF merge, before final scoring.
+#[async_trait]
+pub trait RerankerBackend: Send + Sync {
+    /// Rerank candidates by query-document relevance.
+    async fn rerank(
+        &self,
+        query: &str,
+        candidates: Vec<ScoredResult>,
+    ) -> Result<Vec<ScoredResult>>;
+}
+```
+
+**Shipped implementations:**
+
+| Backend | Feature Flag | Models |
+|---------|-------------|--------|
+| `FastembedReranker` | `reranking` | BGE-reranker-base, BGE-reranker-v2-m3, jina-reranker-v1-turbo-en |
+
+### EvolutionStrategy (Decision 014)
+
+```rust
+/// Post-write hook: when a new memory is stored, optionally update
+/// related existing memories (their metadata, keywords, links).
+#[async_trait]
+pub trait EvolutionStrategy: Send + Sync {
+    /// Given a newly stored memory and its top-k similar existing memories,
+    /// return updates to apply to existing memories.
+    async fn evolve(
+        &self,
+        new_memory: &dyn MemoryRecord,
+        similar: &[ScoredResult],
+    ) -> Result<Vec<EvolutionAction>>;
+}
+
+pub enum EvolutionAction {
+    /// Update metadata on an existing memory
+    UpdateMetadata { target_id: i64, metadata: HashMap<String, String> },
+    /// Create a relationship between memories
+    Relate { source_id: i64, target_id: i64, relation: RelationType },
+    /// No changes needed
+    Noop,
+}
+```
+
+### PruningPolicy (Decision 010)
+
+```rust
+pub struct PruningPolicy {
+    /// Minimum age before eligible for pruning
+    pub min_age_days: u32,              // default: 30
+    /// Activation must be below this threshold
+    pub max_activation: f32,            // default: -2.0
+    /// Only prune these memory types (default: [Episodic])
+    pub pruneable_types: Vec<MemoryType>,
+    /// Never prune memories with graph relationships
+    pub respect_graph_links: bool,      // default: true
+    /// Never prune memories referenced by higher-tier summaries
+    pub respect_hierarchy: bool,        // default: true
+    /// Never prune memories with importance >= this value
+    pub min_importance_exempt: u8,      // default: 8
+    /// Soft delete (archive) vs hard delete
+    pub soft_delete: bool,              // default: true
+}
+```
+
 ---
 
 ## Storage Layer
@@ -429,12 +577,35 @@ pub enum ConsolidationAction {
 Every database connection is configured with:
 
 ```sql
+-- Encryption (feature: encryption) — MUST be first statement
+PRAGMA key = '<consumer-provided key>';
+
 PRAGMA journal_mode = WAL;          -- Concurrent reads during writes
 PRAGMA synchronous = NORMAL;        -- Safe in WAL, avoids FSYNC per write
 PRAGMA temp_store = MEMORY;         -- Temp tables in RAM
 PRAGMA mmap_size = 268435456;       -- 256MB memory-mapped I/O
 PRAGMA cache_size = -64000;         -- 64MB page cache
 PRAGMA foreign_keys = ON;           -- Enforce relationships
+```
+
+### Encryption Configuration (Decision 008)
+
+```rust
+#[cfg(feature = "encryption")]
+pub enum EncryptionKey {
+    /// Raw passphrase — SQLCipher derives the key via PBKDF2 (256K iterations)
+    Passphrase(String),
+    /// Pre-derived raw key bytes (256-bit AES key)
+    RawKey([u8; 32]),
+}
+
+/// Optional OS keychain helper (feature: keychain)
+#[cfg(feature = "keychain")]
+pub mod keychain {
+    /// Retrieve or generate an encryption key from the OS keychain.
+    /// macOS Keychain, Windows Credential Manager, Linux Secret Service.
+    pub fn get_or_create_key(database_name: &str) -> Result<EncryptionKey>;
+}
 ```
 
 ### Core Schema
@@ -452,6 +623,10 @@ CREATE TABLE IF NOT EXISTS memories (
     embedding_status TEXT DEFAULT 'pending' CHECK(embedding_status IN ('pending','success','failed')),
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+
+    -- Memory hierarchy (Decision 010)
+    tier            INTEGER NOT NULL DEFAULT 0 CHECK(tier BETWEEN 0 AND 2),
+    source_ids      TEXT,              -- JSON array of source memory IDs (provenance)
 
     -- Temporal validity (feature: temporal)
     valid_from      TEXT,
@@ -550,6 +725,19 @@ pub enum SearchMode {
     Hybrid,
     /// Auto-detect: Hybrid if vector available, Keyword otherwise
     Auto,
+    /// Return all matches above threshold (for aggregation queries).
+    /// Bypasses top-k limits. Critical for multi-session reasoning.
+    Exhaustive { min_score: f32 },
+}
+
+/// Controls which memory tiers are searched (Decision 010)
+pub enum SearchDepth {
+    /// Search summaries and facts only — tiers 1+2 (default, fastest)
+    Standard,
+    /// Also search raw episodes if summary results are sparse
+    Deep,
+    /// Search all tiers (slowest, most complete, for forensic/audit)
+    Forensic,
 }
 ```
 
@@ -1023,14 +1211,48 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// Promote frequently-seen project memories to global
     #[cfg(feature = "two-tier")]
     pub fn promote_to_global(&self, memory_id: i64) -> Result<()>;
+
+    // --- Consolidation & Pruning (Decision 010) ---
+
+    /// Consolidate old episodic memories into summaries/facts.
+    /// LLM callback optional — degraded mode uses vector clustering.
+    #[cfg(feature = "consolidation")]
+    pub async fn consolidate(
+        &self,
+        policy: &ConsolidationPolicy,
+        llm: Option<&dyn LlmCallback>,
+    ) -> Result<ConsolidationReport>;
+
+    /// Prune memories meeting all policy criteria (activation, age, type, links).
+    #[cfg(feature = "consolidation")]
+    pub fn prune(&self, policy: &PruningPolicy) -> Result<PruneReport>;
+
+    /// Run consolidation + pruning as a single maintenance pass.
+    #[cfg(feature = "consolidation")]
+    pub async fn maintain(
+        &self,
+        consolidation: &ConsolidationPolicy,
+        pruning: &PruningPolicy,
+        llm: Option<&dyn LlmCallback>,
+    ) -> Result<MaintenanceReport>;
+
+    /// Synthesize higher-order insights from accumulated memories.
+    /// Stores results as Semantic Tier 2 memories with provenance links.
+    #[cfg(feature = "consolidation")]
+    pub async fn reflect(
+        &self,
+        llm: &dyn LlmCallback,
+    ) -> Result<ReflectionReport>;
 }
 
 // Fluent search API
 impl<T: MemoryRecord> SearchBuilder<T> {
     pub fn mode(self, mode: SearchMode) -> Self;
+    pub fn depth(self, depth: SearchDepth) -> Self;  // Decision 010
     pub fn limit(self, n: usize) -> Self;
     pub fn category(self, cat: &str) -> Self;
     pub fn memory_type(self, t: MemoryType) -> Self;
+    pub fn tier(self, tier: u8) -> Self;              // Filter by tier
     pub fn min_score(self, score: f32) -> Self;
     #[cfg(feature = "temporal")]
     pub fn valid_at(self, time: DateTime<Utc>) -> Self;
@@ -1191,12 +1413,15 @@ tracing = "0.1"       # Structured logging
 
 ```toml
 [dependencies]
-# local-embeddings
+# local-embeddings (candle)
 candle-core = { version = "0.9", optional = true }
 candle-nn = { version = "0.9", optional = true }
 candle-transformers = { version = "0.9", optional = true }
 tokenizers = { version = "0.22", optional = true }
 hf-hub = { version = "0.4", optional = true }
+
+# fastembed (alternative embedding + reranking)
+fastembed = { version = "5.12", optional = true }
 
 # vector-indexed
 # sqlite-vec = { version = "...", optional = true }  # TBD: Rust bindings maturity
@@ -1204,25 +1429,45 @@ hf-hub = { version = "0.4", optional = true }
 # mcp-server
 axum = { version = "0.7", optional = true }
 tower = { version = "0.4", optional = true }
+
+# keychain (encryption key storage)
+keyring = { version = "3.6", optional = true }
 ```
 
 ---
 
 ## Summary
 
-MemCore is a **composable, feature-gated memory engine** that unifies proven patterns from Memloft, Dial, and published research into a single Rust crate. It provides:
+MemCore is a **composable, feature-gated memory engine** that unifies proven patterns from Memloft, Dial, published research, and the 2025-2026 agent memory landscape into a single Rust crate. It provides:
 
-- **FTS5 keyword search** with Porter stemming and BM25 ranking (always on)
-- **Vector search** via candle with hybrid RRF merge (feature-gated)
-- **Graph relationships** via SQLite with recursive CTE traversal (feature-gated)
-- **Cognitive memory types** with type-appropriate decay rates
-- **ACT-R activation model** replacing ad-hoc decay/tier/trust systems
-- **Consolidation pipeline** preventing duplicate and stale memories
+**Core (always on):**
+- **FTS5 keyword search** with Porter stemming and BM25 ranking
 - **Token-budget context assembly** for LLM prompt injection
+- **Three-tier memory hierarchy** (episodes → summaries → facts) with tier-aware search
+- **Cognitive memory types** (Episodic/Semantic/Procedural) with type-appropriate behavior
+
+**Feature-gated:**
+- **Vector search** via candle or fastembed with hybrid RRF merge
+- **Cross-encoder reranking** via fastembed (post-RRF refinement)
+- **Graph relationships** via SQLite recursive CTE traversal
+- **ACT-R activation model** — research-backed decay replacing ad-hoc systems
+- **Consolidation pipeline** — hash dedup / similarity dedup / LLM-assisted
+- **Memory evolution** — post-write hooks that update related existing memories
+- **Fact extraction at ingest** — `IngestStrategy` trait for atomic fact extraction
 - **Two-tier memory** (global + project) with automatic promotion
+- **Temporal validity** — bi-temporal tracking of when facts were true
+- **Encryption at rest** via SQLCipher (preserves FTS5/WAL/vector)
+- **MCP server** interface for direct LLM tool access
 - **Background embedding indexer** with content-hash skip
 - **Graceful degradation** — always falls back to FTS5 if vector unavailable
 
-The `MemoryRecord` trait lets any project define its own memory types while getting the full engine for free. Feature flags ensure zero cost for unused capabilities.
+**Design principles:**
+- `MemoryRecord` trait lets any project define its own memory types
+- `LlmCallback` trait lets consumers control all LLM operations (model, cost, retries)
+- Feature flags ensure zero cost for unused capabilities (2MB to ~45MB)
+- Library, not framework — consumer controls scheduling and lifecycle
+- WASM-compatible for browser deployment (SQLite+FTS5 via `sqlite-wasm-rs`)
 
-**Target: ~4-5K lines of Rust for the core engine.**
+**LongMemEval target: 93-96%** (competitive with OMEGA's #1 ranking of 95.4%)
+
+**Target: ~6-8K lines of Rust for the full engine.**
