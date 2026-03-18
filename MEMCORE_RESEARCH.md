@@ -451,20 +451,20 @@ Where:
 
 | Approach | Binary Impact | Latency | Dependencies | Offline? |
 |----------|--------------|---------|-------------|----------|
-| **Candle** (all-MiniLM-L6-v2) | +30MB | ~8ms/embed | Pure Rust | Yes |
+| **Candle** (ModernBERT/BERT) | +30MB | ~8ms/embed | Pure Rust | Yes |
 | **ort** (ONNX Runtime) | +350MB, 80+ deps | ~5ms/embed | C++ runtime | Yes |
 | **API** (OpenAI, Cohere) | +5MB (HTTP client) | ~100-500ms | Network | No |
-| **fastembed-rs** | Uses ort internally | ~5ms/embed | Same as ort | Yes |
+| ~~**fastembed-rs**~~ | ~~Uses ort internally~~ | ~~~5ms/embed~~ | ~~Same as ort~~ | ~~Yes~~ |
 
-**Decision:** Candle. The ~3ms latency difference vs. ort is irrelevant for agent memory workloads (embedding happens in background). The dependency and binary size savings are significant. Candle also supports WASM (relevant for future WebView GUI).
+**Decision:** Candle with custom embedding module (Decision 016, updated 2026-03-18). The ~3ms latency difference vs. ort is irrelevant for agent memory workloads (embedding happens in background). The dependency and binary size savings are significant. Candle also supports WASM. fastembed-rs was evaluated and rejected due to single-maintainer risk, pre-release ort pin, and 50-150MB C++ shared library dependency.
 
 **Model choice:** granite-embedding-small-english-r2 (Decision 017)
 - 384 dimensions (compact vectors, compatible with bge-small WASM fallback)
 - 47M parameters, ModernBERT architecture with Flash Attention 2
 - 8,192 token context (captures full error traces, code blocks, decision rationale)
 - MTEB-v2 retrieval: 53.9 (matches bge-small), CoIR code retrieval: 53.8 (17% better than bge-small)
-- Loaded via fastembed custom model path; MemCore wraps with auto-download and caching
-- WASM fallback: bge-small-en-v1.5 (same 384-dim, cross-compatible vectors)
+- Loaded via candle-transformers native ModernBERT; model.safetensors auto-downloaded from HuggingFace and cached at `~/.cache/memcore/models/`
+- WASM fallback: bge-small-en-v1.5 via candle BERT (same 384-dim, cross-compatible vectors)
 
 ### Vector Storage: Brute Force vs. ANN
 

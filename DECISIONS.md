@@ -286,23 +286,26 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 ## Decision 013: Cross-Encoder Reranking
 
-**Date:** 2026-03-17
+**Date:** 2026-03-17 (updated: 2026-03-18 — switched from fastembed to candle BERT after Decision 016)
 
-**Decision:** Add an optional `RerankerBackend` trait for post-retrieval cross-encoder reranking, with fastembed-rs as the recommended implementation.
+**Decision:** Add an optional `RerankerBackend` trait for post-retrieval cross-encoder reranking, implemented via candle's standard BERT model with a classification head.
 
-**Context:** Hindsight uses four parallel retrieval strategies with cross-encoder reranking (91.4% LongMemEval). fastembed-rs v5.12.0 (March 2026) provides 3 reranking models in Rust. Reranking after RRF fusion is now standard in competitive memory systems.
+**Context:** Hindsight uses four parallel retrieval strategies with cross-encoder reranking (91.4% LongMemEval). Reranking after RRF fusion is now standard in competitive memory systems. Cross-encoders are architecturally just BERT + linear classifier that score (query, document) pairs jointly — candle already has BERT support, so no additional dependencies beyond what `local-embeddings` provides.
 
 **Rationale:**
 - Cross-encoder reranking improves precision by scoring query-document pairs jointly
 - RRF merge is effective but operates on independent rankings — reranking captures cross-attention
-- fastembed-rs provides BGE-reranker-base, BGE-reranker-v2-m3, jina-reranker-v1-turbo-en
+- A cross-encoder is a standard BERT model with a single-output classification head — candle already has `BertModel`
+- Default model: `cross-encoder/ms-marco-MiniLM-L-6-v2` (22M params, safetensors available on HF)
+- Shares candle deps with the embedding module — zero additional binary size
 - Feature-gated so projects that don't need it pay zero cost
 
 **Consequences:**
-- `RerankerBackend` trait with `rerank()` method
+- `RerankerBackend` trait with `rerank(query, documents) -> Vec<f32>` method
+- `CandleReranker` implementation (~50-80 lines) using candle BERT + linear head
 - Applied after RRF merge, before final scoring
-- Feature-gated behind `reranking`
-- fastembed-rs recommended; consumer can provide custom implementation
+- Feature-gated behind `reranking` (depends on `local-embeddings`)
+- Consumer can provide custom `RerankerBackend` implementation
 
 ---
 
@@ -349,38 +352,42 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 ---
 
-## Decision 016: fastembed-rs as Primary Embedding Backend
+## Decision 016: Custom Candle Embedding Module (Replaces fastembed-rs)
 
-**Date:** 2026-03-17
+**Date:** 2026-03-17 (updated: 2026-03-18 — replaced fastembed with custom candle)
 
-**Decision:** Use fastembed-rs as the primary embedding backend on native targets. Retain candle as WASM-only fallback. Both backends share the same default model for vector compatibility.
+**Decision:** Build a custom embedding module (~100-130 lines) inside MemCore using candle-transformers' native ModernBERT implementation. Drop fastembed-rs entirely.
 
-**Context:** fastembed-rs v5.13.0 provides 44+ embedding models, 4 reranking models, SPLADE sparse embeddings, synchronous API, no Tokio dependency. Significantly more capable than raw candle for native use.
+**Context:** fastembed-rs stability assessment (March 2026) revealed: single maintainer (Anush008/Qdrant, bus factor 1), pinned to pre-release `ort =2.0.0-rc.11`, ships 50-150MB C++ ONNX Runtime shared library, uses `anyhow` in library crate, yearly breaking major versions. candle-transformers already has native ModernBERT support (PR #2791, merged March 2025), and granite-small-r2 ships safetensors weights that candle loads directly.
 
 **Rationale:**
-- 44+ models vs manually loading one — consumers choose the best model for their domain
-- Built-in reranking (Decision 013) without additional integration work
-- SPLADE sparse embeddings for better keyword-aware retrieval
-- Simpler API: one crate vs candle-core + candle-nn + candle-transformers + tokenizers + hf-hub
-- Synchronous — no Tokio dependency for embedding operations
-- Custom model support via `try_new_from_user_defined()` for models not yet in fastembed
+- Pure Rust — no C++ shared library, no ONNX Runtime, aligns with design principle #5
+- candle-transformers has native ModernBERT (GeGLU, alternating attention, RoPE) — no architecture gaps
+- granite-small-r2 ships `model.safetensors` (95MB), `config.json`, `tokenizer.json` — everything candle needs
+- Eliminates: fastembed (single-maintainer), ort (pre-release pin), ndarray, anyhow (transitive)
+- ~100-130 lines replaces an external crate with full ownership
+- `EmbeddingBackend` trait still lets consumers plug in fastembed or anything else if they want
+- HuggingFace maintains candle — larger team, stronger long-term backing than fastembed
 
 **Consequences:**
-- `FastembedBackend` is the primary backend on native targets (feature: `fastembed`)
-- `CandleBackend` is the WASM-only fallback (feature: `local-embeddings`)
-- Both use the same default model (`bge-small-en-v1.5`, 384-dim) for vector cross-compatibility
-- Conditional compilation via `cfg(target_family = "wasm")` selects the right backend
-- Reranking available only on native (fastembed); WASM clients defer to server-side reranking
+- `CandleBackend` is the primary backend on all native targets (feature: `local-embeddings`)
+- Native default model: `granite-embedding-small-english-r2` (ModernBERT, 384-dim, 8K context)
+- WASM fallback: `bge-small-en-v1.5` (standard BERT, 384-dim, cross-compatible vectors)
+- WASM can't use granite because ModernBERT ops may not compile cleanly to WASM, model is 95MB (too large for browser), and WASM is single-threaded
+- Cross-model vector compatibility: both produce 384-dim vectors, but similarity scores degrade slightly when query and document use different models
+- Dependencies: `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`, `hf-hub`
+- Model cached at `~/.cache/memcore/models/`, auto-downloaded on first use
+- No `FastembedBackend` in MemCore — removed from codebase
 
 ---
 
 ## Decision 017: Default Embedding Model — granite-small-r2
 
-**Date:** 2026-03-17 (updated: granite promoted to default)
+**Date:** 2026-03-17 (updated: 2026-03-18 — removed fastembed references after Decision 016 revision)
 
-**Decision:** Use `granite-embedding-small-english-r2` (IBM, 47M params, 384-dim, 8K context) as the default embedding model on native targets. Use `bge-small-en-v1.5` (384-dim) as the WASM fallback and zero-config native fallback. Drop `all-MiniLM-L6-v2`.
+**Decision:** Use `granite-embedding-small-english-r2` (IBM, 47M params, 384-dim, 8K context) as the default embedding model on native targets. Use `bge-small-en-v1.5` (384-dim) as the WASM fallback. Drop `all-MiniLM-L6-v2`.
 
-**Context:** Benchmarked three 384-dim models for agent memory retrieval. granite-small-r2 scores 17% better than bge-small on code retrieval (CoIR 53.8 vs 45.8) and has 16x longer context (8K vs 512 tokens). It's not built into fastembed natively, but MemCore wraps the custom model loading behind a clean API with auto-download and caching — consumers never see the boilerplate.
+**Context:** Benchmarked three 384-dim models for agent memory retrieval. granite-small-r2 scores 17% better than bge-small on code retrieval (CoIR 53.8 vs 45.8) and has 16x longer context (8K vs 512 tokens). Loaded via candle-transformers' native ModernBERT implementation with safetensors weights.
 
 **Rationale:**
 - Code retrieval (CoIR): granite 53.8 vs bge-small 45.8 — 17% better on the workload that matters most for dev tool memory
@@ -388,14 +395,14 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 - Standard retrieval matches bge-small exactly (MTEB-v2: 53.9 vs 53.9)
 - Same 384 dimensions — vectors cross-compatible with bge-small (WASM fallback)
 - ModernBERT architecture with Flash Attention 2 keeps inference fast despite 47M params
-- Apache 2.0 license, ONNX Q8 variant is ~52MB
-- MemCore's `MemCoreModel` enum abstracts the custom loading — one line: `FastembedBackend::new()?`
+- Apache 2.0 license, safetensors weights are 95MB
+- candle-transformers has native ModernBERT support — no ONNX conversion needed
 
 **Consequences:**
-- Default `FastembedBackend::new()` auto-downloads granite-small-r2 ONNX from HuggingFace, caches at `~/.cache/memcore/models/`
-- `MemCoreModel::BgeSmallV15` available as zero-config fallback (uses fastembed built-in)
-- `CandleBackend` (WASM) uses `bge-small-en-v1.5` (same 384-dim, compatible vectors)
-- `all-MiniLM-L6-v2` available in fastembed but not recommended or referenced
+- `CandleBackend::new()` auto-downloads granite-small-r2 safetensors from HuggingFace, caches at `~/.cache/memcore/models/`
+- WASM backend uses `bge-small-en-v1.5` (standard BERT, 384-dim, cross-compatible vectors)
+- Cross-model note: granite and bge-small produce compatible 384-dim vectors but similarity precision degrades slightly when query and document use different models
+- `all-MiniLM-L6-v2` not used
 
 ---
 

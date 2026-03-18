@@ -72,9 +72,10 @@ memcore/
 │   │
 │   ├── embeddings/
 │   │   ├── mod.rs
-│   │   ├── candle.rs          # CandleBackend: bge-small-en-v1.5 for WASM (feature-gated)
-│   │   ├── fastembed.rs       # FastembedBackend: granite-small-r2 default (feature-gated)
-│   │   ├── models.rs          # Model auto-download, caching, and custom model helpers
+│   │   ├── candle_native.rs   # CandleNativeBackend: granite-small-r2 via ModernBERT (native targets)
+│   │   ├── candle_wasm.rs     # CandleWasmBackend: bge-small-en-v1.5 via BERT (WASM targets)
+│   │   ├── models.rs          # Model auto-download, caching via hf-hub
+│   │   ├── pooling.rs         # Mean pooling + L2 normalization (shared between backends)
 │   │   ├── noop.rs            # NoopBackend: zero vectors (testing)
 │   │   ├── fallback.rs        # FallbackBackend: graceful degradation
 │   │   └── indexer.rs         # Background batch indexer, content-hash skip
@@ -123,7 +124,8 @@ default = ["fts5"]
 # Core search (always available)
 fts5 = []                       # FTS5 + Porter stemming + BM25
 
-# Vector search (adds candle dependency)
+# Vector search — custom candle embedding module (pure Rust, no ONNX Runtime)
+# Native: granite-small-r2 via ModernBERT | WASM: bge-small-en-v1.5 via BERT
 local-embeddings = [
     "dep:candle-core",
     "dep:candle-nn",
@@ -135,6 +137,9 @@ vector-search = ["local-embeddings"]
 
 # ANN indexing for >100K scale
 vector-indexed = ["vector-search", "dep:sqlite-vec"]
+
+# Cross-encoder reranking (post-RRF refinement, uses candle BERT)
+reranking = ["local-embeddings"]
 
 # Graph memory (SQLite relationship tables)
 graph-memory = []
@@ -157,12 +162,6 @@ mcp-server = ["dep:axum", "dep:tower", "dep:serde_json"]
 # Two-tier memory (global + project databases)
 two-tier = []
 
-# fastembed-rs backend (25+ models, reranking, SPLADE sparse embeddings)
-fastembed = ["dep:fastembed"]
-
-# Cross-encoder reranking (post-RRF refinement)
-reranking = ["fastembed"]
-
 # Encryption at rest via SQLCipher
 encryption = ["rusqlite/bundled-sqlcipher"]
 encryption-vendored = ["encryption", "rusqlite/bundled-sqlcipher-vendored-openssl"]
@@ -173,12 +172,12 @@ keychain = ["dep:keyring"]
 # Everything (native)
 full = [
     "vector-search",
+    "reranking",
     "graph-memory",
     "temporal",
     "consolidation",
     "activation-model",
-    "two-tier",
-    "reranking"
+    "two-tier"
 ]
 ```
 
@@ -187,10 +186,9 @@ full = [
 ```
 fts5 (default, always on)
   └── vector-search
-       ├── local-embeddings (candle)
-       ├── vector-indexed (sqlite-vec, optional)
-       └── fastembed (alternative to candle, adds reranking + SPLADE)
-            └── reranking (cross-encoder post-RRF)
+       ├── local-embeddings (candle — pure Rust, native + WASM)
+       ├── vector-indexed (sqlite-vec, optional ANN for >100K)
+       └── reranking (cross-encoder via candle BERT, post-RRF)
 
 graph-memory (independent, SQLite-only)
 temporal (independent, schema addition)
@@ -208,13 +206,13 @@ encryption (swaps bundled SQLite for bundled SQLCipher)
 |-----------------|--------------------------|
 | `default` (FTS5 only) | ~2MB (just rusqlite) |
 | `+ graph-memory + temporal + consolidation + activation-model` | ~2.5MB (pure logic, no new deps) |
-| `+ vector-search` (candle) | ~30-35MB |
-| `+ fastembed` (ONNX + reranking) | ~35-40MB |
+| `+ vector-search` (candle, pure Rust) | ~30-35MB |
+| `+ reranking` (candle BERT cross-encoder) | +~0 (shares candle deps) |
 | `+ vector-indexed` (sqlite-vec) | +~5MB |
 | `+ mcp-server` (axum) | +~5MB |
 | `+ encryption` (SQLCipher) | +~500KB-1MB over plain SQLite |
 | `+ keychain` (keyring) | +~200-500KB |
-| `full` (everything) | ~40-45MB |
+| `full` (everything) | ~35-40MB |
 
 ---
 
@@ -380,82 +378,244 @@ pub trait EmbeddingBackend: Send + Sync {
 
 **Shipped implementations:**
 
-| Backend | Feature Flag | Default Model | Use Case |
-|---------|-------------|---------------|----------|
-| `FastembedBackend` | `fastembed` | `granite-small-r2` (384-dim, 8K context) | **Primary.** Native targets. Auto-downloads model on first use. |
-| `CandleBackend` | `local-embeddings` | `bge-small-en-v1.5` (384-dim) | **WASM fallback.** Pure Rust, compiles to wasm32. |
-| `NoopBackend` | (always available) | N/A | Testing, returns zero vectors |
-| `FallbackBackend` | (always available) | N/A | Wraps `Option<Box<dyn EmbeddingBackend>>`, degrades gracefully |
+| Backend | Feature Flag | Default Model | Target | Use Case |
+|---------|-------------|---------------|--------|----------|
+| `CandleNativeBackend` | `local-embeddings` | `granite-small-r2` (ModernBERT, 384-dim, 8K ctx) | Native | **Primary.** Pure Rust. Auto-downloads safetensors on first use. |
+| `CandleWasmBackend` | `local-embeddings` | `bge-small-en-v1.5` (BERT, 384-dim, 512 ctx) | WASM | **Browser.** Standard BERT, smaller model, proven in candle WASM demos. |
+| `NoopBackend` | (always available) | N/A | Any | Testing, returns zero vectors |
+| `FallbackBackend` | (always available) | N/A | Any | Wraps `Option<Box<dyn EmbeddingBackend>>`, degrades gracefully to FTS5-only |
 
-**Model management:**
+**Model comparison (384-dim class):**
 
-MemCore wraps fastembed's custom model loading behind a clean API. Models are auto-downloaded from HuggingFace on first use and cached in `~/.cache/memcore/models/`. The consumer never deals with ONNX files directly.
+| Model | Architecture | Params | Retrieval (MTEB) | Code Retrieval (CoIR) | Max Tokens | Status |
+|-------|-------------|--------|-----------------|----------------------|------------|--------|
+| `granite-embedding-small-english-r2` | ModernBERT | 47M | 53.9 | **53.8** | **8,192** | **Default** (native) |
+| `bge-small-en-v1.5` | BERT | 33M | 53.9 | 45.8 | 512 | **Default** (WASM) |
+| `all-MiniLM-L6-v2` | BERT | 22M | ~41.9 | — | 256 | Not used |
 
-```rust
-/// Built-in model presets — MemCore handles download, caching, and loading.
-pub enum MemCoreModel {
-    /// IBM granite-embedding-small-english-r2 (47M params, 384-dim, 8K context)
-    /// Best code retrieval. Default.
-    GraniteSmallR2,
-    /// BAAI bge-small-en-v1.5 (33M params, 384-dim, 512 context)
-    /// Built into fastembed natively. Zero-config fallback.
-    BgeSmallV15,
-    /// Custom ONNX model from a local path or HuggingFace repo.
-    Custom { repo_id: String },
-}
+**Cross-model vector compatibility:** Both models produce 384-dimensional vectors. Memories embedded by granite on native can be searched by bge-small in WASM and vice versa. Similarity precision degrades slightly (~5-10%) when query and document were embedded by different models, but FTS5 handles the majority of queries anyway.
 
-impl FastembedBackend {
-    /// Create with default model (granite-small-r2).
-    /// Auto-downloads on first use, cached for subsequent calls.
-    pub fn new() -> Result<Self> {
-        Self::with_model(MemCoreModel::GraniteSmallR2)
-    }
+**Why WASM can't use granite-small-r2:**
+1. ModernBERT architecture (GeGLU activation, alternating local/global attention, RoPE) — ops may not all compile cleanly to WASM
+2. Model weights are 95MB — too large for browser download
+3. WASM is single-threaded — 47M param inference would be slow
+4. candle's WASM support is proven with standard BERT, not ModernBERT
 
-    /// Create with a specific model preset.
-    pub fn with_model(model: MemCoreModel) -> Result<Self> {
-        match model {
-            MemCoreModel::GraniteSmallR2 => {
-                // Download from onnx-community/granite-embedding-small-english-r2-ONNX
-                // Load via fastembed try_new_from_user_defined()
-                // Cache at ~/.cache/memcore/models/granite-small-r2/
-            }
-            MemCoreModel::BgeSmallV15 => {
-                // Use fastembed's built-in BGESmallENV15
-                // Zero setup, fastembed handles everything
-            }
-            MemCoreModel::Custom { repo_id } => {
-                // Download from HuggingFace repo, load as user-defined model
-            }
-        }
-    }
+---
+
+### Embedding Module — Implementation Reference
+
+This section provides everything needed to implement the custom candle embedding backends. All code patterns are derived from candle's official BERT example and the ModernBERT module in candle-transformers.
+
+**Model files (auto-downloaded from HuggingFace, cached at `~/.cache/memcore/models/`):**
+
+| File | Source Repo | Size | Purpose |
+|------|------------|------|---------|
+| `model.safetensors` | `ibm-granite/granite-embedding-small-english-r2` | 95MB | Model weights |
+| `config.json` | Same | 1.3KB | Architecture config |
+| `tokenizer.json` | Same | 3.6MB | Tokenizer vocabulary and rules |
+
+**granite-small-r2 config.json key fields:**
+```json
+{
+  "model_type": "modernbert",
+  "architectures": ["ModernBertModel"],
+  "hidden_size": 384,
+  "num_hidden_layers": 12,
+  "num_attention_heads": 12,
+  "intermediate_size": 1536,
+  "max_position_embeddings": 8192,
+  "vocab_size": 50368,
+  "classifier_pooling": "mean",
+  "global_attn_every_n_layers": 3,
+  "global_rope_theta": 80000,
+  "local_attention": 128,
+  "local_rope_theta": 10000.0,
+  "layer_norm_eps": 1e-05,
+  "pad_token_id": 50283
 }
 ```
 
-**Dual-backend pattern (native + WASM):**
+**Candle API mapping:**
 
-Both backends produce 384-dimensional vectors, so embeddings stored by one can be searched by the other. Conditional compilation selects the right backend:
+| Operation | Candle API | Module |
+|-----------|-----------|--------|
+| Load config | `serde_json::from_str::<modernbert::Config>(&json)` | `candle_transformers::models::modernbert` |
+| Load weights | `VarBuilder::from_mmaped_safetensors(&[path], DType::F32, &device)` | `candle_nn` |
+| Build model | `ModernBert::load(vb, &config)` | `candle_transformers::models::modernbert` |
+| Tokenize | `Tokenizer::from_file(path)` + `encode_batch()` | `tokenizers` crate |
+| Forward pass | `model.forward(&token_ids, &attention_mask)` → hidden states `[batch, seq_len, 384]` | — |
+| Mean pooling | Mask-weighted sum / mask count (see below) | Custom (~5 lines) |
+| L2 normalize | `v.broadcast_div(&v.sqr()?.sum_keepdim(1)?.sqrt()?)` | Custom (1 line) |
+| Download model | `Api::new()?.repo(Repo::with_revision(...)).get("model.safetensors")` | `hf_hub` crate |
+
+**CandleNativeBackend implementation (~100-130 lines total):**
 
 ```rust
-#[cfg(all(feature = "fastembed", not(target_family = "wasm")))]
+use candle_core::{Device, DType, Tensor};
+use candle_nn::VarBuilder;
+use candle_transformers::models::modernbert::{Config, ModernBert};
+use hf_hub::{api::sync::Api, Repo, RepoType};
+use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
+use std::path::PathBuf;
+
+const MODEL_REPO: &str = "ibm-granite/granite-embedding-small-english-r2";
+const CACHE_DIR: &str = ".cache/memcore/models/granite-small-r2";
+
+pub struct CandleNativeBackend {
+    model: ModernBert,
+    tokenizer: Tokenizer,
+    device: Device,
+}
+
+impl CandleNativeBackend {
+    pub fn new() -> Result<Self> {
+        let device = Device::Cpu;
+
+        // Download model files from HuggingFace (cached after first use)
+        let repo = Repo::with_revision(
+            MODEL_REPO.to_string(),
+            RepoType::Model,
+            "main".to_string(),
+        );
+        let api = Api::new()?;
+        let api = api.repo(repo);
+        let config_path = api.get("config.json")?;
+        let tokenizer_path = api.get("tokenizer.json")?;
+        let weights_path = api.get("model.safetensors")?;
+
+        // Load config
+        let config: Config = serde_json::from_str(
+            &std::fs::read_to_string(&config_path)?
+        )?;
+
+        // Load tokenizer
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        // Load model weights from safetensors (memory-mapped for efficiency)
+        let vb = unsafe {
+            VarBuilder::from_mmaped_safetensors(
+                &[weights_path], DType::F32, &device
+            )?
+        };
+        let model = ModernBert::load(vb, &config)?;
+
+        Ok(Self { model, tokenizer, device })
+    }
+}
+
+#[async_trait]
+impl EmbeddingBackend for CandleNativeBackend {
+    async fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        let results = self.embed_batch(&[text]).await?;
+        Ok(results.into_iter().next().unwrap())
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        // Configure tokenizer for batch — pad to longest in batch
+        let mut tokenizer = self.tokenizer.clone();
+        tokenizer.with_padding(Some(PaddingParams {
+            strategy: PaddingStrategy::BatchLongest,
+            ..Default::default()
+        }));
+
+        // Tokenize batch
+        let encodings = tokenizer.encode_batch(texts.to_vec(), true)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        // Build input tensors
+        let token_ids: Vec<Tensor> = encodings.iter()
+            .map(|enc| Tensor::new(enc.get_ids(), &self.device))
+            .collect::<Result<Vec<_>>>()?;
+        let attention_masks: Vec<Tensor> = encodings.iter()
+            .map(|enc| Tensor::new(enc.get_attention_mask(), &self.device))
+            .collect::<Result<Vec<_>>>()?;
+
+        let token_ids = Tensor::stack(&token_ids, 0)?;
+        let attention_mask = Tensor::stack(&attention_masks, 0)?;
+
+        // Forward pass → hidden states [batch, seq_len, 384]
+        let hidden_states = self.model.forward(&token_ids, &attention_mask)?;
+
+        // Mean pooling (mask-weighted)
+        let mask_f32 = attention_mask.to_dtype(DType::F32)?.unsqueeze(2)?;
+        let sum_embeddings = hidden_states.broadcast_mul(&mask_f32)?.sum(1)?;
+        let sum_mask = mask_f32.sum(1)?;
+        let pooled = sum_embeddings.broadcast_div(&sum_mask)?;
+
+        // L2 normalize
+        let normalized = pooled.broadcast_div(
+            &pooled.sqr()?.sum_keepdim(1)?.sqrt()?
+        )?;
+
+        // Convert to Vec<Vec<f32>>
+        let batch_size = texts.len();
+        let mut results = Vec::with_capacity(batch_size);
+        for i in 0..batch_size {
+            results.push(normalized.get(i)?.to_vec1::<f32>()?);
+        }
+        Ok(results)
+    }
+
+    fn dimensions(&self) -> usize { 384 }
+    fn is_available(&self) -> bool { true }
+    fn model_name(&self) -> &str { "granite-embedding-small-english-r2" }
+}
+```
+
+**CandleWasmBackend** follows the same pattern but uses:
+- `candle_transformers::models::bert::{BertModel, Config}` instead of `modernbert`
+- Model repo: `BAAI/bge-small-en-v1.5`
+- Standard BERT `forward(&token_ids, &token_type_ids, Some(&attention_mask))` signature
+
+**Mean pooling (shared `pooling.rs`):**
+
+```rust
+use candle_core::{DType, Tensor, Result};
+
+/// Attention-mask-weighted mean pooling over token dimension.
+/// Input: hidden_states [batch, seq_len, hidden_dim], mask [batch, seq_len]
+/// Output: [batch, hidden_dim]
+pub fn mean_pool(hidden_states: &Tensor, attention_mask: &Tensor) -> Result<Tensor> {
+    let mask = attention_mask.to_dtype(DType::F32)?.unsqueeze(2)?;
+    let sum_embeddings = hidden_states.broadcast_mul(&mask)?.sum(1)?;
+    let sum_mask = mask.sum(1)?;
+    sum_embeddings.broadcast_div(&sum_mask)
+}
+
+/// L2 normalization along the last dimension.
+/// Input: [batch, hidden_dim] → Output: [batch, hidden_dim] with unit norm
+pub fn normalize_l2(v: &Tensor) -> Result<Tensor> {
+    v.broadcast_div(&v.sqr()?.sum_keepdim(1)?.sqrt()?)
+}
+```
+
+**Dual-backend conditional compilation:**
+
+```rust
+// src/embeddings/mod.rs
+
+#[cfg(not(target_family = "wasm"))]
+mod candle_native;
+#[cfg(target_family = "wasm")]
+mod candle_wasm;
+
+mod pooling;
+mod noop;
+mod fallback;
+
+/// Create the default embedding backend for the current platform.
+#[cfg(all(feature = "local-embeddings", not(target_family = "wasm")))]
 pub fn default_backend() -> Result<Box<dyn EmbeddingBackend>> {
-    // granite-small-r2: best code retrieval, 8K context
-    Ok(Box::new(FastembedBackend::new()?))
+    Ok(Box::new(candle_native::CandleNativeBackend::new()?))
 }
 
 #[cfg(all(feature = "local-embeddings", target_family = "wasm"))]
 pub fn default_backend() -> Result<Box<dyn EmbeddingBackend>> {
-    // bge-small-en-v1.5: same 384-dim, compatible vectors
-    Ok(Box::new(CandleBackend::new("bge-small-en-v1.5")?))
+    Ok(Box::new(candle_wasm::CandleWasmBackend::new()?))
 }
 ```
-
-**Model comparison (384-dim class):**
-
-| Model | Params | Retrieval (MTEB) | Code Retrieval (CoIR) | Max Tokens | Status |
-|-------|--------|-----------------|----------------------|------------|--------|
-| `granite-embedding-small-english-r2` | 47M | 53.9 | **53.8** | **8,192** | **Default** (native) |
-| `bge-small-en-v1.5` | 33M | 53.9 | 45.8 | 512 | **Default** (WASM), fallback (native) |
-| `all-MiniLM-L6-v2` | 22M | ~41.9 | — | 256 | Available but not recommended |
 
 **User-provided implementations (not shipped):**
 
@@ -463,6 +623,59 @@ pub fn default_backend() -> Result<Box<dyn EmbeddingBackend>> {
 |---------|----------|
 | `ApiBackend` | Remote embedding API (OpenAI, Cohere) — useful for WASM hybrid |
 | Custom | Any embedding source via `EmbeddingBackend` trait |
+
+---
+
+### Cross-Encoder Reranking — Implementation Reference
+
+Cross-encoder reranking uses a BERT model with a classification head that scores (query, document) pairs jointly. This is architecturally different from bi-encoder embeddings — the cross-encoder sees both texts simultaneously, capturing cross-attention patterns.
+
+**How it works:**
+1. Concatenate query + document as a single input: `[CLS] query [SEP] document [SEP]`
+2. Run through BERT → take CLS token output
+3. Pass through linear classification head → single score (sigmoid)
+4. Higher score = more relevant
+
+**Implementation (~50-80 lines):** Uses candle's standard BERT model (same crate already in deps) with a cross-encoder model from HuggingFace:
+
+```rust
+use candle_transformers::models::bert::{BertModel, Config as BertConfig};
+
+pub struct CandleReranker {
+    model: BertModel,
+    classifier: candle_nn::Linear,  // Single output logit
+    tokenizer: Tokenizer,
+    device: Device,
+}
+
+impl CandleReranker {
+    pub fn new() -> Result<Self> {
+        // Default: cross-encoder/ms-marco-MiniLM-L-6-v2 (22M params, safetensors available)
+        // Alternative: BAAI/bge-reranker-base (110M params, more accurate)
+        // ...load model, tokenizer, classifier head from safetensors...
+    }
+}
+
+impl RerankerBackend for CandleReranker {
+    fn rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<f32>> {
+        // For each document: tokenize (query, document) pair, forward, sigmoid
+        let mut scores = Vec::with_capacity(documents.len());
+        for doc in documents {
+            let encoding = self.tokenizer.encode((query, *doc), true)?;
+            let token_ids = Tensor::new(encoding.get_ids(), &self.device)?.unsqueeze(0)?;
+            let token_type_ids = Tensor::new(encoding.get_type_ids(), &self.device)?.unsqueeze(0)?;
+            let output = self.model.forward(&token_ids, &token_type_ids, None)?;
+            let cls = output.i((.., 0, ..))?.contiguous()?;  // CLS token
+            let logit = cls.apply(&self.classifier)?;
+            let score = sigmoid(logit.to_scalar::<f32>()?);
+            scores.push(score);
+        }
+        Ok(scores)
+    }
+}
+```
+
+**Reranking is optional and applied after RRF merge, before final scoring.** For MemCore's scale (<100K memories, search returns top 20-50 candidates), reranking adds ~50-100ms per query. Whether this is worthwhile depends on the consumer — it's behind the `reranking` feature flag.
 
 ### ScoringStrategy
 
@@ -1491,9 +1704,6 @@ candle-transformers = { version = "0.9", optional = true }
 tokenizers = { version = "0.22", optional = true }
 hf-hub = { version = "0.4", optional = true }
 
-# fastembed (alternative embedding + reranking)
-fastembed = { version = "5.12", optional = true }
-
 # vector-indexed
 # sqlite-vec = { version = "...", optional = true }  # TBD: Rust bindings maturity
 
@@ -1518,8 +1728,8 @@ MemCore is a **composable, feature-gated memory engine** that unifies proven pat
 - **Cognitive memory types** (Episodic/Semantic/Procedural) with type-appropriate behavior
 
 **Feature-gated:**
-- **Vector search** via candle or fastembed with hybrid RRF merge
-- **Cross-encoder reranking** via fastembed (post-RRF refinement)
+- **Vector search** via custom candle module (pure Rust) with hybrid RRF merge
+- **Cross-encoder reranking** via candle BERT (post-RRF refinement)
 - **Graph relationships** via SQLite recursive CTE traversal
 - **ACT-R activation model** — research-backed decay replacing ad-hoc systems
 - **Consolidation pipeline** — hash dedup / similarity dedup / LLM-assisted
