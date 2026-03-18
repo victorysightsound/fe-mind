@@ -458,13 +458,13 @@ Where:
 
 **Decision:** Candle. The ~3ms latency difference vs. ort is irrelevant for agent memory workloads (embedding happens in background). The dependency and binary size savings are significant. Candle also supports WASM (relevant for future WebView GUI).
 
-**Model choice:** bge-small-en-v1.5 (Decision 017, supersedes original choice of all-MiniLM-L6-v2)
-- 384 dimensions (compact vectors, fast similarity)
-- 33M parameters (~134MB model file, ~52MB quantized)
-- 12 layers vs MiniLM's 6 — significantly better contextual understanding
-- MTEB retrieval: 51.68 vs MiniLM's ~41.9 (+10 points)
-- Built-in default in fastembed-rs — zero configuration
-- Upgrade path: `granite-embedding-small-english-r2` (47M params, 8K context, 17% better code retrieval)
+**Model choice:** granite-embedding-small-english-r2 (Decision 017)
+- 384 dimensions (compact vectors, compatible with bge-small WASM fallback)
+- 47M parameters, ModernBERT architecture with Flash Attention 2
+- 8,192 token context (captures full error traces, code blocks, decision rationale)
+- MTEB-v2 retrieval: 53.9 (matches bge-small), CoIR code retrieval: 53.8 (17% better than bge-small)
+- Loaded via fastembed custom model path; MemCore wraps with auto-download and caching
+- WASM fallback: bge-small-en-v1.5 (same 384-dim, cross-compatible vectors)
 
 ### Vector Storage: Brute Force vs. ANN
 

@@ -73,7 +73,8 @@ memcore/
 │   ├── embeddings/
 │   │   ├── mod.rs
 │   │   ├── candle.rs          # CandleBackend: bge-small-en-v1.5 for WASM (feature-gated)
-│   │   ├── fastembed.rs       # FastembedBackend: bge-small default, 44+ models (feature-gated)
+│   │   ├── fastembed.rs       # FastembedBackend: granite-small-r2 default (feature-gated)
+│   │   ├── models.rs          # Model auto-download, caching, and custom model helpers
 │   │   ├── noop.rs            # NoopBackend: zero vectors (testing)
 │   │   ├── fallback.rs        # FallbackBackend: graceful degradation
 │   │   └── indexer.rs         # Background batch indexer, content-hash skip
@@ -381,49 +382,80 @@ pub trait EmbeddingBackend: Send + Sync {
 
 | Backend | Feature Flag | Default Model | Use Case |
 |---------|-------------|---------------|----------|
-| `FastembedBackend` | `fastembed` | `bge-small-en-v1.5` (384-dim) | **Primary.** Native targets. 44+ models, reranking, SPLADE. |
+| `FastembedBackend` | `fastembed` | `granite-small-r2` (384-dim, 8K context) | **Primary.** Native targets. Auto-downloads model on first use. |
 | `CandleBackend` | `local-embeddings` | `bge-small-en-v1.5` (384-dim) | **WASM fallback.** Pure Rust, compiles to wasm32. |
 | `NoopBackend` | (always available) | N/A | Testing, returns zero vectors |
 | `FallbackBackend` | (always available) | N/A | Wraps `Option<Box<dyn EmbeddingBackend>>`, degrades gracefully |
 
+**Model management:**
+
+MemCore wraps fastembed's custom model loading behind a clean API. Models are auto-downloaded from HuggingFace on first use and cached in `~/.cache/memcore/models/`. The consumer never deals with ONNX files directly.
+
+```rust
+/// Built-in model presets — MemCore handles download, caching, and loading.
+pub enum MemCoreModel {
+    /// IBM granite-embedding-small-english-r2 (47M params, 384-dim, 8K context)
+    /// Best code retrieval. Default.
+    GraniteSmallR2,
+    /// BAAI bge-small-en-v1.5 (33M params, 384-dim, 512 context)
+    /// Built into fastembed natively. Zero-config fallback.
+    BgeSmallV15,
+    /// Custom ONNX model from a local path or HuggingFace repo.
+    Custom { repo_id: String },
+}
+
+impl FastembedBackend {
+    /// Create with default model (granite-small-r2).
+    /// Auto-downloads on first use, cached for subsequent calls.
+    pub fn new() -> Result<Self> {
+        Self::with_model(MemCoreModel::GraniteSmallR2)
+    }
+
+    /// Create with a specific model preset.
+    pub fn with_model(model: MemCoreModel) -> Result<Self> {
+        match model {
+            MemCoreModel::GraniteSmallR2 => {
+                // Download from onnx-community/granite-embedding-small-english-r2-ONNX
+                // Load via fastembed try_new_from_user_defined()
+                // Cache at ~/.cache/memcore/models/granite-small-r2/
+            }
+            MemCoreModel::BgeSmallV15 => {
+                // Use fastembed's built-in BGESmallENV15
+                // Zero setup, fastembed handles everything
+            }
+            MemCoreModel::Custom { repo_id } => {
+                // Download from HuggingFace repo, load as user-defined model
+            }
+        }
+    }
+}
+```
+
 **Dual-backend pattern (native + WASM):**
 
-Both backends use the same default model (`bge-small-en-v1.5`, 384 dimensions) so vectors are cross-compatible. Conditional compilation selects the right backend:
+Both backends produce 384-dimensional vectors, so embeddings stored by one can be searched by the other. Conditional compilation selects the right backend:
 
 ```rust
 #[cfg(all(feature = "fastembed", not(target_family = "wasm")))]
 pub fn default_backend() -> Result<Box<dyn EmbeddingBackend>> {
-    Ok(Box::new(FastembedBackend::new(EmbeddingModel::BGESmallENV15)?))
+    // granite-small-r2: best code retrieval, 8K context
+    Ok(Box::new(FastembedBackend::new()?))
 }
 
 #[cfg(all(feature = "local-embeddings", target_family = "wasm"))]
 pub fn default_backend() -> Result<Box<dyn EmbeddingBackend>> {
+    // bge-small-en-v1.5: same 384-dim, compatible vectors
     Ok(Box::new(CandleBackend::new("bge-small-en-v1.5")?))
 }
 ```
 
-**Recommended model for code-heavy agent memory:**
-
-For development tool memory systems (error messages, stack traces, code snippets), `granite-embedding-small-english-r2` (IBM, 47M params, 384-dim, 8K context) scores 17% better than `bge-small` on code retrieval benchmarks (CoIR). It is not built into fastembed but can be loaded via the custom model path:
-
-```rust
-// Load granite via fastembed's custom model support
-let model = TextEmbedding::try_new_from_user_defined(
-    UserDefinedEmbeddingModel {
-        onnx_file: include_bytes!("models/granite-small-r2-q8.onnx").to_vec(),
-        // ... tokenizer files from onnx-community/granite-embedding-small-english-r2-ONNX
-    },
-    InitOptionsUserDefined::default(),
-)?;
-```
-
 **Model comparison (384-dim class):**
 
-| Model | Params | Retrieval (MTEB) | Code Retrieval (CoIR) | Max Tokens | In fastembed |
-|-------|--------|-----------------|----------------------|------------|-------------|
-| `granite-embedding-small-english-r2` | 47M | 53.9 | **53.8** | **8,192** | Custom load |
-| `bge-small-en-v1.5` | 33M | **53.9** | 45.8 | 512 | Built-in (default) |
-| `all-MiniLM-L6-v2` | 22M | ~41.9 | — | 256 | Built-in |
+| Model | Params | Retrieval (MTEB) | Code Retrieval (CoIR) | Max Tokens | Status |
+|-------|--------|-----------------|----------------------|------------|--------|
+| `granite-embedding-small-english-r2` | 47M | 53.9 | **53.8** | **8,192** | **Default** (native) |
+| `bge-small-en-v1.5` | 33M | 53.9 | 45.8 | 512 | **Default** (WASM), fallback (native) |
+| `all-MiniLM-L6-v2` | 22M | ~41.9 | — | 256 | Available but not recommended |
 
 **User-provided implementations (not shipped):**
 

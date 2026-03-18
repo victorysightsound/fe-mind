@@ -374,27 +374,28 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 ---
 
-## Decision 017: Default Embedding Model — bge-small-en-v1.5
+## Decision 017: Default Embedding Model — granite-small-r2
 
-**Date:** 2026-03-17
+**Date:** 2026-03-17 (updated: granite promoted to default)
 
-**Decision:** Use `bge-small-en-v1.5` (BAAI, 33M params, 384-dim) as the default embedding model. Drop `all-MiniLM-L6-v2` as the reference model. Document `granite-embedding-small-english-r2` as the recommended upgrade for code-heavy workloads.
+**Decision:** Use `granite-embedding-small-english-r2` (IBM, 47M params, 384-dim, 8K context) as the default embedding model on native targets. Use `bge-small-en-v1.5` (384-dim) as the WASM fallback and zero-config native fallback. Drop `all-MiniLM-L6-v2`.
 
-**Context:** Benchmarked three 384-dim models for agent memory retrieval. all-MiniLM-L6-v2 is the most popular but weakest on retrieval. bge-small-en-v1.5 beats it by ~10 points on MTEB retrieval. granite-embedding-small-english-r2 (IBM, 47M params) matches bge-small on standard retrieval and scores 17% better on code retrieval (CoIR), with 8K token context vs 512.
+**Context:** Benchmarked three 384-dim models for agent memory retrieval. granite-small-r2 scores 17% better than bge-small on code retrieval (CoIR 53.8 vs 45.8) and has 16x longer context (8K vs 512 tokens). It's not built into fastembed natively, but MemCore wraps the custom model loading behind a clean API with auto-download and caching — consumers never see the boilerplate.
 
 **Rationale:**
-- `bge-small-en-v1.5` MTEB retrieval: 51.68 vs all-MiniLM-L6-v2's ~41.9 (10 point gap)
-- `bge-small-en-v1.5` is fastembed's built-in default — zero configuration needed
-- 512-token context handles most memory entries; 5ms/embed is negligible for memory workloads
-- `granite-small-r2` scores 53.8 on code retrieval (vs bge-small's 45.8) and has 8K context, but requires custom model loading in fastembed — better as a documented upgrade path
-- Same 384 dimensions across all three — vectors are cross-compatible
+- Code retrieval (CoIR): granite 53.8 vs bge-small 45.8 — 17% better on the workload that matters most for dev tool memory
+- 8K token context captures full error traces, decision rationale, and code blocks without truncation
+- Standard retrieval matches bge-small exactly (MTEB-v2: 53.9 vs 53.9)
+- Same 384 dimensions — vectors cross-compatible with bge-small (WASM fallback)
+- ModernBERT architecture with Flash Attention 2 keeps inference fast despite 47M params
+- Apache 2.0 license, ONNX Q8 variant is ~52MB
+- MemCore's `MemCoreModel` enum abstracts the custom loading — one line: `FastembedBackend::new()?`
 
 **Consequences:**
-- Default `FastembedBackend` uses `EmbeddingModel::BGESmallENV15`
-- Default `CandleBackend` (WASM) loads `bge-small-en-v1.5` weights
-- Architecture doc and examples reference `bge-small-en-v1.5`, not `all-MiniLM-L6-v2`
-- `granite-small-r2` documented as recommended upgrade for code-heavy memory systems
-- `all-MiniLM-L6-v2` remains available in fastembed but not recommended
+- Default `FastembedBackend::new()` auto-downloads granite-small-r2 ONNX from HuggingFace, caches at `~/.cache/memcore/models/`
+- `MemCoreModel::BgeSmallV15` available as zero-config fallback (uses fastembed built-in)
+- `CandleBackend` (WASM) uses `bge-small-en-v1.5` (same 384-dim, compatible vectors)
+- `all-MiniLM-L6-v2` available in fastembed but not recommended or referenced
 
 ---
 
