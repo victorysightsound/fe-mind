@@ -72,8 +72,8 @@ memcore/
 │   │
 │   ├── embeddings/
 │   │   ├── mod.rs
-│   │   ├── candle.rs          # CandleBackend: all-MiniLM-L6-v2 (feature-gated)
-│   │   ├── fastembed.rs       # FastembedBackend: 25+ models + reranking (feature-gated)
+│   │   ├── candle.rs          # CandleBackend: bge-small-en-v1.5 for WASM (feature-gated)
+│   │   ├── fastembed.rs       # FastembedBackend: bge-small default, 44+ models (feature-gated)
 │   │   ├── noop.rs            # NoopBackend: zero vectors (testing)
 │   │   ├── fallback.rs        # FallbackBackend: graceful degradation
 │   │   └── indexer.rs         # Background batch indexer, content-hash skip
@@ -379,19 +379,58 @@ pub trait EmbeddingBackend: Send + Sync {
 
 **Shipped implementations:**
 
-| Backend | Feature Flag | Use Case |
-|---------|-------------|----------|
-| `CandleBackend` | `local-embeddings` | Local CPU inference, all-MiniLM-L6-v2 |
-| `NoopBackend` | (always available) | Testing, returns zero vectors |
-| `FallbackBackend` | (always available) | Wraps `Option<Box<dyn EmbeddingBackend>>`, degrades gracefully |
+| Backend | Feature Flag | Default Model | Use Case |
+|---------|-------------|---------------|----------|
+| `FastembedBackend` | `fastembed` | `bge-small-en-v1.5` (384-dim) | **Primary.** Native targets. 44+ models, reranking, SPLADE. |
+| `CandleBackend` | `local-embeddings` | `bge-small-en-v1.5` (384-dim) | **WASM fallback.** Pure Rust, compiles to wasm32. |
+| `NoopBackend` | (always available) | N/A | Testing, returns zero vectors |
+| `FallbackBackend` | (always available) | N/A | Wraps `Option<Box<dyn EmbeddingBackend>>`, degrades gracefully |
+
+**Dual-backend pattern (native + WASM):**
+
+Both backends use the same default model (`bge-small-en-v1.5`, 384 dimensions) so vectors are cross-compatible. Conditional compilation selects the right backend:
+
+```rust
+#[cfg(all(feature = "fastembed", not(target_family = "wasm")))]
+pub fn default_backend() -> Result<Box<dyn EmbeddingBackend>> {
+    Ok(Box::new(FastembedBackend::new(EmbeddingModel::BGESmallENV15)?))
+}
+
+#[cfg(all(feature = "local-embeddings", target_family = "wasm"))]
+pub fn default_backend() -> Result<Box<dyn EmbeddingBackend>> {
+    Ok(Box::new(CandleBackend::new("bge-small-en-v1.5")?))
+}
+```
+
+**Recommended model for code-heavy agent memory:**
+
+For development tool memory systems (error messages, stack traces, code snippets), `granite-embedding-small-english-r2` (IBM, 47M params, 384-dim, 8K context) scores 17% better than `bge-small` on code retrieval benchmarks (CoIR). It is not built into fastembed but can be loaded via the custom model path:
+
+```rust
+// Load granite via fastembed's custom model support
+let model = TextEmbedding::try_new_from_user_defined(
+    UserDefinedEmbeddingModel {
+        onnx_file: include_bytes!("models/granite-small-r2-q8.onnx").to_vec(),
+        // ... tokenizer files from onnx-community/granite-embedding-small-english-r2-ONNX
+    },
+    InitOptionsUserDefined::default(),
+)?;
+```
+
+**Model comparison (384-dim class):**
+
+| Model | Params | Retrieval (MTEB) | Code Retrieval (CoIR) | Max Tokens | In fastembed |
+|-------|--------|-----------------|----------------------|------------|-------------|
+| `granite-embedding-small-english-r2` | 47M | 53.9 | **53.8** | **8,192** | Custom load |
+| `bge-small-en-v1.5` | 33M | **53.9** | 45.8 | 512 | Built-in (default) |
+| `all-MiniLM-L6-v2` | 22M | ~41.9 | — | 256 | Built-in |
 
 **User-provided implementations (not shipped):**
 
 | Backend | Use Case |
 |---------|----------|
-| `OrtBackend` | GPU inference for high throughput |
-| `ApiBackend` | Remote embedding API (OpenAI, Cohere) |
-| Custom | Any embedding source |
+| `ApiBackend` | Remote embedding API (OpenAI, Cohere) — useful for WASM hybrid |
+| Custom | Any embedding source via `EmbeddingBackend` trait |
 
 ### ScoringStrategy
 

@@ -458,12 +458,13 @@ Where:
 
 **Decision:** Candle. The ~3ms latency difference vs. ort is irrelevant for agent memory workloads (embedding happens in background). The dependency and binary size savings are significant. Candle also supports WASM (relevant for future WebView GUI).
 
-**Model choice:** all-MiniLM-L6-v2
+**Model choice:** bge-small-en-v1.5 (Decision 017, supersedes original choice of all-MiniLM-L6-v2)
 - 384 dimensions (compact vectors, fast similarity)
-- 22M parameters (~80MB model file)
-- Trained on 1B+ sentence pairs
-- Top-tier performance for its size class
-- Widely used, well-tested, available on HuggingFace Hub
+- 33M parameters (~134MB model file, ~52MB quantized)
+- 12 layers vs MiniLM's 6 — significantly better contextual understanding
+- MTEB retrieval: 51.68 vs MiniLM's ~41.9 (+10 points)
+- Built-in default in fastembed-rs — zero configuration
+- Upgrade path: `granite-embedding-small-english-r2` (47M params, 8K context, 17% better code retrieval)
 
 ### Vector Storage: Brute Force vs. ANN
 

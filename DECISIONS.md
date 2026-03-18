@@ -349,26 +349,52 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 ---
 
-## Decision 016: Evaluate fastembed-rs as Embedding Backend
+## Decision 016: fastembed-rs as Primary Embedding Backend
 
 **Date:** 2026-03-17
 
-**Decision:** Evaluate fastembed-rs as an alternative/complement to raw candle for embeddings and reranking.
+**Decision:** Use fastembed-rs as the primary embedding backend on native targets. Retain candle as WASM-only fallback. Both backends share the same default model for vector compatibility.
 
-**Context:** fastembed-rs v5.12.0 (March 2026) provides 25+ embedding models, 3 reranking models, SPLADE sparse embeddings, dual ONNX/candle backends, synchronous API, no Tokio dependency. This is significantly more capable than raw candle for MemCore's use case.
+**Context:** fastembed-rs v5.13.0 provides 44+ embedding models, 4 reranking models, SPLADE sparse embeddings, synchronous API, no Tokio dependency. Significantly more capable than raw candle for native use.
 
 **Rationale:**
-- 25+ models vs just all-MiniLM-L6-v2 — consumers choose the best model for their domain
+- 44+ models vs manually loading one — consumers choose the best model for their domain
 - Built-in reranking (Decision 013) without additional integration work
 - SPLADE sparse embeddings for better keyword-aware retrieval
 - Simpler API: one crate vs candle-core + candle-nn + candle-transformers + tokenizers + hf-hub
-- `EmbeddingBackend` trait means non-breaking addition alongside `CandleBackend`
+- Synchronous — no Tokio dependency for embedding operations
+- Custom model support via `try_new_from_user_defined()` for models not yet in fastembed
 
 **Consequences:**
-- Ship `FastembedBackend` as a new embedding backend option
-- Feature-gated behind `fastembed` feature flag
-- `CandleBackend` remains for WASM (fastembed depends on ONNX which doesn't target WASM)
-- Evaluate `bge-small-en-v1.5` as default model (slightly better MTEB scores than MiniLM)
+- `FastembedBackend` is the primary backend on native targets (feature: `fastembed`)
+- `CandleBackend` is the WASM-only fallback (feature: `local-embeddings`)
+- Both use the same default model (`bge-small-en-v1.5`, 384-dim) for vector cross-compatibility
+- Conditional compilation via `cfg(target_family = "wasm")` selects the right backend
+- Reranking available only on native (fastembed); WASM clients defer to server-side reranking
+
+---
+
+## Decision 017: Default Embedding Model — bge-small-en-v1.5
+
+**Date:** 2026-03-17
+
+**Decision:** Use `bge-small-en-v1.5` (BAAI, 33M params, 384-dim) as the default embedding model. Drop `all-MiniLM-L6-v2` as the reference model. Document `granite-embedding-small-english-r2` as the recommended upgrade for code-heavy workloads.
+
+**Context:** Benchmarked three 384-dim models for agent memory retrieval. all-MiniLM-L6-v2 is the most popular but weakest on retrieval. bge-small-en-v1.5 beats it by ~10 points on MTEB retrieval. granite-embedding-small-english-r2 (IBM, 47M params) matches bge-small on standard retrieval and scores 17% better on code retrieval (CoIR), with 8K token context vs 512.
+
+**Rationale:**
+- `bge-small-en-v1.5` MTEB retrieval: 51.68 vs all-MiniLM-L6-v2's ~41.9 (10 point gap)
+- `bge-small-en-v1.5` is fastembed's built-in default — zero configuration needed
+- 512-token context handles most memory entries; 5ms/embed is negligible for memory workloads
+- `granite-small-r2` scores 53.8 on code retrieval (vs bge-small's 45.8) and has 8K context, but requires custom model loading in fastembed — better as a documented upgrade path
+- Same 384 dimensions across all three — vectors are cross-compatible
+
+**Consequences:**
+- Default `FastembedBackend` uses `EmbeddingModel::BGESmallENV15`
+- Default `CandleBackend` (WASM) loads `bge-small-en-v1.5` weights
+- Architecture doc and examples reference `bge-small-en-v1.5`, not `all-MiniLM-L6-v2`
+- `granite-small-r2` documented as recommended upgrade for code-heavy memory systems
+- `all-MiniLM-L6-v2` remains available in fastembed but not recommended
 
 ---
 
