@@ -1,4 +1,4 @@
-# MemCore: Universal Memory Engine Architecture
+# MindCore: Universal Memory Engine Architecture
 
 **Version:** 0.1.0 (Design)
 **Date:** 2026-03-16
@@ -8,20 +8,20 @@
 
 ## Overview
 
-**MemCore** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications. It handles persistent storage, keyword search (FTS5), vector search (candle), hybrid retrieval (RRF), graph relationships, memory consolidation, cognitive decay modeling, and token-budget-aware context assembly.
+**MindCore** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications. It handles persistent storage, keyword search (FTS5), vector search (candle), hybrid retrieval (RRF), graph relationships, memory consolidation, cognitive decay modeling, and token-budget-aware context assembly.
 
 ### Design Principles
 
-1. **Library, not framework** — projects call into MemCore, they are not structured around it
+1. **Library, not framework** — projects call into MindCore, they are not structured around it
 2. **Feature-gated everything** — heavy dependencies behind compile-time flags, zero cost when unused
-3. **Opinionated about mechanics, unopinionated about schema** — MemCore handles how to store/search/decay; the consumer defines what a "memory" is
+3. **Opinionated about mechanics, unopinionated about schema** — MindCore handles how to store/search/decay; the consumer defines what a "memory" is
 4. **Local-first** — SQLite-backed, single-file databases, no cloud dependency
 5. **Pure Rust where possible** — candle over ort, SQLite over Postgres
 6. **Proven patterns only** — every component is battle-tested in Memloft, Dial, or published research
 
 ### Origin
 
-MemCore extracts and unifies patterns from three projects:
+MindCore extracts and unifies patterns from three projects:
 
 | Source | Contribution |
 |--------|-------------|
@@ -41,7 +41,7 @@ Additionally informed by research into:
 ## Crate Structure
 
 ```
-memcore/
+mindcore/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs                 # Public API: MemoryEngine<T>
@@ -133,7 +133,7 @@ local-embeddings = [
     "dep:tokenizers",
     "dep:hf-hub"
 ]
-vector-search = ["local-embeddings"]
+vector-search = ["local-embeddings", "dep:tokio"]
 
 # ANN indexing for >100K scale
 vector-indexed = ["vector-search", "dep:sqlite-vec"]
@@ -202,11 +202,13 @@ encryption (swaps bundled SQLite for bundled SQLCipher)
 
 ### Binary Size Impact
 
+**Minimum Rust version: 1.75+** (required for native async fn in traits).
+
 | Features Enabled | Approximate Binary Impact |
 |-----------------|--------------------------|
-| `default` (FTS5 only) | ~2MB (just rusqlite) |
+| `default` (FTS5 only) | ~2MB (just rusqlite, no async runtime) |
 | `+ graph-memory + temporal + consolidation + activation-model` | ~2.5MB (pure logic, no new deps) |
-| `+ vector-search` (candle, pure Rust) | ~30-35MB |
+| `+ vector-search` (candle, pure Rust, pulls in tokio) | ~30-35MB |
 | `+ reranking` (candle BERT cross-encoder) | +~0 (shares candle deps) |
 | `+ vector-indexed` (sqlite-vec) | +~5MB |
 | `+ mcp-server` (axum) | +~5MB |
@@ -246,7 +248,7 @@ pub enum MemoryType {
 }
 
 /// Consumers implement this for their memory types.
-/// MemCore handles storage, indexing, search, and decay.
+/// MindCore handles storage, indexing, search, and decay.
 pub trait MemoryRecord: Send + Sync + Serialize + DeserializeOwned + 'static {
     /// Unique identifier
     fn id(&self) -> Option<i64>;
@@ -350,7 +352,7 @@ impl MemoryRecord for Memory {
 ### EmbeddingBackend
 
 ```rust
-#[async_trait]
+/// Requires Rust 1.75+ (native async fn in traits, no async-trait macro).
 pub trait EmbeddingBackend: Send + Sync {
     /// Generate embedding for a single text
     async fn embed(&self, text: &str) -> Result<Vec<f32>>;
@@ -393,7 +395,17 @@ pub trait EmbeddingBackend: Send + Sync {
 | `bge-small-en-v1.5` | BERT | 33M | 53.9 | 45.8 | 512 | **Default** (WASM) |
 | `all-MiniLM-L6-v2` | BERT | 22M | ~41.9 | — | 256 | Not used |
 
-**Cross-model vector compatibility:** Both models produce 384-dimensional vectors. Memories embedded by granite on native can be searched by bge-small in WASM and vice versa. Similarity precision degrades slightly (~5-10%) when query and document were embedded by different models, but FTS5 handles the majority of queries anyway.
+**Cross-model vector compatibility:** Both models produce 384-dimensional vectors, but vectors from different models occupy **different embedding spaces** and cross-model similarity scores are unreliable — they should not be used for ranking. When the current `EmbeddingBackend::model_name()` differs from the `model_name` stored alongside a vector in `memory_vectors`, the engine **skips vector search for those records** and falls back to FTS5-only retrieval. This means a native-to-WASM transition (or any model change) effectively disables vector search until `reindex_all()` is run with the new model. This is by design — incorrect similarity scores are worse than no similarity scores.
+
+**Matryoshka representation learning:** `granite-small-r2` supports Matryoshka embeddings — vectors can be truncated to lower dimensions (384 -> 256 -> 128) with graceful quality degradation. This enables storage/speed tradeoffs: 128-dim vectors use 1/3 the storage and scan 3x faster, at the cost of ~2-5% retrieval accuracy loss. Configure via `dimensions_override: Option<usize>` on the backend:
+
+```rust
+let backend = CandleNativeBackend::builder()
+    .dimensions_override(Some(256))  // Truncate 384-dim to 256-dim
+    .build()?;
+```
+
+When `dimensions_override` is set, the backend truncates and re-normalizes vectors after embedding. The `dimensions` field in `memory_vectors` records the actual stored dimension so mixed-dimension databases are detectable. `bge-small-en-v1.5` does not support Matryoshka truncation — its full 384 dimensions are always required.
 
 **Why WASM can't use granite-small-r2:**
 1. ModernBERT architecture (GeGLU activation, alternating local/global attention, RoPE) — ops may not all compile cleanly to WASM
@@ -407,7 +419,7 @@ pub trait EmbeddingBackend: Send + Sync {
 
 This section provides everything needed to implement the custom candle embedding backends. All code patterns are derived from candle's official BERT example and the ModernBERT module in candle-transformers.
 
-**Model files (auto-downloaded from HuggingFace, cached at `~/.cache/memcore/models/`):**
+**Model files (auto-downloaded from HuggingFace, cached at `~/.cache/mindcore/models/`):**
 
 | File | Source Repo | Size | Purpose |
 |------|------------|------|---------|
@@ -460,16 +472,25 @@ use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
 use std::path::PathBuf;
 
 const MODEL_REPO: &str = "ibm-granite/granite-embedding-small-english-r2";
-const CACHE_DIR: &str = ".cache/memcore/models/granite-small-r2";
+const CACHE_DIR: &str = ".cache/mindcore/models/granite-small-r2";
 
 pub struct CandleNativeBackend {
     model: ModernBert,
     tokenizer: Tokenizer,
     device: Device,
+    /// Optional Matryoshka dimension override (e.g., 256 or 128).
+    /// When set, vectors are truncated and re-normalized after embedding.
+    dimensions_override: Option<usize>,
 }
 
 impl CandleNativeBackend {
     pub fn new() -> Result<Self> {
+        // Auto-detect best available device:
+        // - Device::Metal on macOS if available (significant speedup for batch embedding)
+        // - Device::Cuda(0) on Linux/Windows with NVIDIA GPU
+        // - Device::Cpu as fallback (always works)
+        // GPU acceleration benefits the background indexer most (batch of 32+).
+        // Single-query embedding is fast enough on CPU (~8ms).
         let device = Device::Cpu;
 
         // Download model files from HuggingFace (cached after first use)
@@ -503,9 +524,28 @@ impl CandleNativeBackend {
 
         Ok(Self { model, tokenizer, device })
     }
+
+    /// Construct with a progress callback for first-run model download (~95MB).
+    /// The callback receives (bytes_downloaded, total_bytes).
+    pub fn with_progress(callback: impl Fn(u64, u64) + Send + 'static) -> Result<Self> {
+        // Same as new() but passes callback to hf-hub download
+        todo!()
+    }
+
+    /// Construct from a local directory containing pre-downloaded model files.
+    /// Useful for bundled/offline deployments where HuggingFace download is not desired.
+    /// Expected files: model.safetensors, config.json, tokenizer.json
+    pub fn from_path(model_dir: impl Into<PathBuf>) -> Result<Self> {
+        todo!()
+    }
 }
 
-#[async_trait]
+// First-run experience: CandleNativeBackend::new() downloads ~95MB of model files
+// from HuggingFace on first use (cached at ~/.cache/mindcore/models/ afterward).
+// If the download fails (no network, HF rate limit), FallbackBackend degrades
+// gracefully to FTS5-only search — no panic, no error to the consumer unless
+// they explicitly requested SearchMode::Vector.
+
 impl EmbeddingBackend for CandleNativeBackend {
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
         let results = self.embed_batch(&[text]).await?;
@@ -675,7 +715,7 @@ impl RerankerBackend for CandleReranker {
 }
 ```
 
-**Reranking is optional and applied after RRF merge, before final scoring.** For MemCore's scale (<100K memories, search returns top 20-50 candidates), reranking adds ~50-100ms per query. Whether this is worthwhile depends on the consumer — it's behind the `reranking` feature flag.
+**Reranking is optional and applied after RRF merge, before final scoring.** For MindCore's scale (<100K memories, search returns top 20-50 candidates), reranking adds ~50-100ms per query. Whether this is worthwhile depends on the consumer — it's behind the `reranking` feature flag.
 
 ### ScoringStrategy
 
@@ -748,9 +788,8 @@ pub enum ConsolidationAction {
 
 ```rust
 /// Consumer-provided LLM access for all LLM-assisted operations.
-/// MemCore never calls an LLM directly — the consumer controls model,
+/// MindCore never calls an LLM directly — the consumer controls model,
 /// cost, and retry behavior.
-#[async_trait]
 pub trait LlmCallback: Send + Sync {
     /// Given a prompt, return the LLM's response.
     async fn complete(&self, prompt: &str) -> Result<String>;
@@ -764,7 +803,6 @@ Used by: `LLMConsolidation`, `LlmIngest`, `EvolutionStrategy`, `reflect()`. All 
 ```rust
 /// Controls how raw input is processed before storage.
 /// Default: store as-is. LLM-assisted: extract atomic facts.
-#[async_trait]
 pub trait IngestStrategy: Send + Sync {
     async fn extract(&self, raw: &str) -> Result<Vec<ExtractedFact>>;
 }
@@ -788,7 +826,6 @@ pub struct ExtractedFact {
 
 ```rust
 /// Cross-encoder reranking applied after RRF merge, before final scoring.
-#[async_trait]
 pub trait RerankerBackend: Send + Sync {
     /// Rerank candidates by query-document relevance.
     async fn rerank(
@@ -803,14 +840,13 @@ pub trait RerankerBackend: Send + Sync {
 
 | Backend | Feature Flag | Models |
 |---------|-------------|--------|
-| `FastembedReranker` | `reranking` | BGE-reranker-base, BGE-reranker-v2-m3, jina-reranker-v1-turbo-en |
+| `CandleReranker` | `reranking` | `cross-encoder/ms-marco-MiniLM-L-6-v2` (default, 22M params), `BAAI/bge-reranker-base` (optional, 110M params) |
 
 ### EvolutionStrategy (Decision 014)
 
 ```rust
 /// Post-write hook: when a new memory is stored, optionally update
 /// related existing memories (their metadata, keywords, links).
-#[async_trait]
 pub trait EvolutionStrategy: Send + Sync {
     /// Given a newly stored memory and its top-k similar existing memories,
     /// return updates to apply to existing memories.
@@ -851,6 +887,47 @@ pub struct PruningPolicy {
     pub soft_delete: bool,              // default: true
 }
 ```
+
+### Error Types
+
+All fallible MindCore operations return `mindcore::Result<T>`, backed by a unified error enum:
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum MindCoreError {
+    #[error("database error: {0}")]
+    Database(#[from] rusqlite::Error),
+    #[error("embedding error: {0}")]
+    Embedding(String),
+    #[error("model not available: {0}")]
+    ModelNotAvailable(String),
+    #[error("serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("model mismatch: stored with '{stored}', current backend is '{current}'")]
+    ModelMismatch { stored: String, current: String },
+    #[error("migration error: {0}")]
+    Migration(String),
+    #[error("encryption error: {0}")]
+    Encryption(String),
+    #[error("consolidation error: {0}")]
+    Consolidation(String),
+    #[error("llm callback error: {0}")]
+    LlmCallback(String),
+}
+
+pub type Result<T> = std::result::Result<T, MindCoreError>;
+```
+
+`ModelMismatch` is returned when an operation explicitly requires vector similarity but the stored vectors were produced by a different model than the current backend. In normal search flow this does not surface as an error — the engine silently falls back to FTS5. It is only raised when the caller explicitly requests `SearchMode::Vector` and no compatible vectors exist.
+
+### Thread Safety
+
+`MemoryEngine` is `Send + Sync` and safe to share across threads:
+
+- **Writer:** A single `Mutex<Connection>` serializes all write operations (store, update, delete, schema migrations). SQLite only supports one writer at a time; the mutex ensures this without runtime errors.
+- **Readers:** A connection pool (sized to `num_cpus`, minimum 2) provides concurrent read access. WAL mode allows readers to proceed without blocking on the writer.
+- **Shared ownership:** For use across threads or async tasks, wrap in `Arc<MemoryEngine<T>>`. The engine itself holds no thread-local state.
+- **Background indexer:** The embedding indexer runs on a dedicated OS thread via `std::thread::spawn`, not on a tokio runtime. It pulls pending items from the database, calls `EmbeddingBackend::embed_batch` (using a thread-local tokio `Runtime::block_on` for the async trait methods), and writes vectors back. This keeps the async runtime optional for consumers who only use synchronous operations.
 
 ---
 
@@ -921,6 +998,13 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 
 -- FTS5 full-text search index
+-- Note: This creates an independent content copy. The searchable_text is stored in
+-- both the `memories` table and the FTS5 shadow tables, roughly doubling text storage.
+-- Future optimization: use `content=memories, content_rowid=id` to make FTS5 a
+-- content-less index that reads from the memories table directly. This eliminates
+-- duplication at the cost of more complex update triggers (FTS5 content-sync must
+-- handle DELETE-before-UPDATE pattern). For databases under 100K memories the
+-- duplication is negligible; optimize when storage becomes a concern.
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     searchable_text,
     category,
@@ -985,8 +1069,8 @@ CREATE INDEX IF NOT EXISTS idx_relations_type ON memory_relations(relation);
 ### Two-Tier Memory (feature: `two-tier`)
 
 ```
-~/.memcore/global.db     — Cross-project memories (error patterns, language learnings)
-./.memcore/memory.db     — Project-specific memories (architecture decisions, conventions)
+~/.mindcore/global.db     — Cross-project memories (error patterns, language learnings)
+./.mindcore/memory.db     — Project-specific memories (architecture decisions, conventions)
 ```
 
 Both databases share the same schema. The engine queries both and merges results, with project memories receiving a scoring boost over global memories.
@@ -1250,7 +1334,7 @@ fn compute_activation(&self, memory_id: i64) -> Result<f32> {
 
 ### What This Replaces
 
-| Previous System | In Dial | In Memloft | MemCore Equivalent |
+| Previous System | In Dial | In Memloft | MindCore Equivalent |
 |----------------|---------|------------|-------------------|
 | Trust scoring | `confidence` 0.0-1.0, adjusted by success/failure | N/A | Activation + `ValidatedBy` relations |
 | Tier system | N/A | working/long_term/archive with multipliers | Activation naturally creates tiers |
@@ -1259,6 +1343,30 @@ fn compute_activation(&self, memory_id: i64) -> Result<f32> {
 | Recency boost | N/A | Exponential decay, 30-day half-life | Part of activation formula |
 
 One model replaces five separate mechanisms.
+
+### Access Log Maintenance
+
+The `memory_access_log` table grows with every search retrieval. Without maintenance, it becomes an unbounded append-only log. MindCore uses two strategies to keep it manageable:
+
+**Compaction:** Accesses older than 90 days are aggregated into summary records. A periodic maintenance pass replaces individual access rows with a single summary row per memory:
+
+```sql
+-- Aggregate old accesses into summary records
+INSERT INTO memory_access_log (memory_id, accessed_at, query_text)
+SELECT memory_id, MAX(accessed_at), '[compacted: ' || COUNT(*) || ' accesses]'
+FROM memory_access_log
+WHERE accessed_at < datetime('now', '-90 days')
+GROUP BY memory_id;
+
+-- Remove the individual old rows (replaced by summaries above)
+DELETE FROM memory_access_log
+WHERE accessed_at < datetime('now', '-90 days')
+  AND query_text NOT LIKE '[compacted:%';
+```
+
+The activation formula uses the compacted count to approximate the contribution of old accesses without storing each one individually.
+
+**Cached activation:** Recomputing activation from the full access log on every search is wasteful. Instead, a `memory_activation_cache` column on the `memories` table stores the last-computed activation score. This cache is refreshed when a memory is accessed (incremental update) or periodically during maintenance. Search scoring reads from the cache rather than recomputing from the log.
 
 ---
 
@@ -1448,10 +1556,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// Create a new engine with builder pattern
     pub fn builder() -> MemoryEngineBuilder<T>;
 
-    // --- CRUD ---
+    // --- CRUD (all synchronous — these are SQLite queries) ---
 
-    /// Store a new memory (runs consolidation if enabled)
-    pub async fn store(&self, record: T) -> Result<StoreResult>;
+    /// Store a new memory (runs consolidation if enabled).
+    /// Embedding is queued for background indexing, not done inline.
+    pub fn store(&self, record: T) -> Result<StoreResult>;
 
     /// Retrieve a memory by ID
     pub fn get(&self, id: i64) -> Result<Option<T>>;
@@ -1540,16 +1649,20 @@ impl<T: MemoryRecord> SearchBuilder<T> {
     pub fn min_score(self, score: f32) -> Self;
     #[cfg(feature = "temporal")]
     pub fn valid_at(self, time: DateTime<Utc>) -> Self;
-    pub async fn execute(self) -> Result<Vec<ScoredResult<T>>>;
+    /// Execute the search. Synchronous — vector similarity uses pre-computed
+    /// embeddings from the background indexer, not inline inference.
+    pub fn execute(self) -> Result<Vec<ScoredResult<T>>>;
 }
 ```
+
+> **Sync vs. async boundary:** Core operations (`store`, `get`, `update`, `delete`, `search().execute()`, `build()`) are synchronous — they only touch SQLite. Async is reserved for operations involving inference or network I/O: `EmbeddingBackend::embed/embed_batch`, `IngestStrategy::extract`, `RerankerBackend::rerank`, `EvolutionStrategy::evolve`, `LlmCallback::complete`, and the background embedding indexer.
 
 ### Builder Pattern
 
 ```rust
 let engine = MemoryEngine::<Learning>::builder()
     .database("path/to/memory.db")
-    .global_database("~/.memcore/global.db")          // optional, two-tier
+    .global_database("~/.mindcore/global.db")          // optional, two-tier
     .embedding_backend(CandleBackend::new()?)          // optional, vector-search
     .scoring(CompositeScorer::new(vec![
         Box::new(RecencyScorer::new(Duration::days(30))),
@@ -1557,8 +1670,7 @@ let engine = MemoryEngine::<Learning>::builder()
         Box::new(ActivationScorer::default()),
     ]))
     .consolidation(SimilarityDedup::new(0.90))         // optional
-    .build()
-    .await?;
+    .build()?;
 ```
 
 ---
@@ -1595,43 +1707,43 @@ For personal/project use, you will likely never exceed 10K memories per database
 
 ## Migration Path for Existing Projects
 
-### Dial → MemCore
+### Dial → MindCore
 
-| Dial Component | MemCore Equivalent | Migration |
+| Dial Component | MindCore Equivalent | Migration |
 |---------------|-------------------|-----------|
 | `learnings` table + FTS5 | `MemoryEngine<Learning>` | Implement `MemoryRecord` for `Learning` |
 | `failure_patterns` table | `MemoryEngine<FailurePattern>` | Implement `MemoryRecord` for `FailurePattern` |
 | `solutions` table + trust | `MemoryEngine<Solution>` with `TrustScorer` | Implement `MemoryRecord`, use `ValidatedBy` relations |
 | `find_similar_completed_tasks()` | `engine.search().mode(Auto)` | Direct replacement, gains vector search |
 | `assemble_context()` | `engine.assemble_context()` | Direct replacement |
-| Stop-word stripping | Built into MemCore FTS5 | Automatic |
-| Porter stemming | Built into MemCore FTS5 | Automatic |
+| Stop-word stripping | Built into MindCore FTS5 | Automatic |
+| Porter stemming | Built into MindCore FTS5 | Automatic |
 
 **What Dial gains:** Vector search for task similarity, graph relationships between errors/solutions/learnings, activation-based decay replacing manual trust scoring, consolidation preventing duplicate learnings.
 
-### Memloft → MemCore
+### Memloft → MindCore
 
-| Memloft Component | MemCore Equivalent | Migration |
+| Memloft Component | MindCore Equivalent | Migration |
 |-------------------|-------------------|-----------|
 | `memory` table + FTS5 | `MemoryEngine<Memory>` | Implement `MemoryRecord` for `Memory` |
-| `memory_vectors` table | Built into MemCore | Automatic |
-| `HybridSearcher` with RRF | Built into MemCore | Automatic |
+| `memory_vectors` table | Built into MindCore | Automatic |
+| `HybridSearcher` with RRF | Built into MindCore | Automatic |
 | `LocalBackend` (candle) | `CandleBackend` | Direct port |
 | `FallbackBackend` | `FallbackBackend` | Direct port |
-| `EmbeddingIndexer` | Built into MemCore | Automatic |
+| `EmbeddingIndexer` | Built into MindCore | Automatic |
 | Tier system (working/long_term/archive) | `ActivationScorer` + `MemoryTypeScorer` | Activation model replaces tiers |
 | Content-hash dedup | `HashDedup` consolidation | Direct port |
 
 **What Memloft gains:** Cognitive memory types, activation-based decay, graph relationships, token-budget context assembly, two-tier global/project memory, consolidation pipeline.
 
-### PIRDLY → MemCore
+### PIRDLY → MindCore
 
-PIRDLY uses MemCore as its memory system from the start:
+PIRDLY uses MindCore as its memory system from the start:
 
 ```toml
 # PIRDLY's Cargo.toml
 [dependencies]
-memcore = { version = "0.1", features = ["full"] }
+mindcore = { version = "0.1", features = ["full"] }
 ```
 
 PIRDLY implements `MemoryRecord` for its types (learnings, error patterns, project context) and gets the full memory engine with no custom memory code needed.
@@ -1688,15 +1800,18 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 sha2 = "0.10"         # Content hashing
-async-trait = "0.1"
-tokio = { version = "1", features = ["rt", "sync"] }
 tracing = "0.1"       # Structured logging
 ```
+
+**Note:** MindCore requires **Rust 1.75+** for native async trait support (no `async-trait` proc macro needed).
 
 ### Feature-Gated
 
 ```toml
 [dependencies]
+# async runtime (only needed for vector-search background indexer and embedding inference)
+tokio = { version = "1", features = ["rt", "sync"], optional = true }
+
 # local-embeddings (candle)
 candle-core = { version = "0.9", optional = true }
 candle-nn = { version = "0.9", optional = true }
@@ -1719,7 +1834,7 @@ keyring = { version = "3.6", optional = true }
 
 ## Summary
 
-MemCore is a **composable, feature-gated memory engine** that unifies proven patterns from Memloft, Dial, published research, and the 2025-2026 agent memory landscape into a single Rust crate. It provides:
+MindCore is a **composable, feature-gated memory engine** that unifies proven patterns from Memloft, Dial, published research, and the 2025-2026 agent memory landscape into a single Rust crate. It provides:
 
 **Core (always on):**
 - **FTS5 keyword search** with Porter stemming and BM25 ranking

@@ -1,8 +1,8 @@
-# MemCore: Research & Specification
+# MindCore: Research & Specification
 
 **Date:** 2026-03-16
 **Status:** Research Complete
-**Related:** `MEMCORE_ARCHITECTURE.md` (implementation spec), `DECISIONS.md` (decisions 001-016), `research/gap_analysis_2026_03.md` (March 2026 gap analysis)
+**Related:** `MINDCORE_ARCHITECTURE.md` (implementation spec), `DECISIONS.md` (decisions 001-016), `research/gap_analysis_2026_03.md` (March 2026 gap analysis)
 
 ---
 
@@ -51,7 +51,7 @@ Every project re-invents the same wheel with slightly different spokes.
 
 - Dial v4.1.0 shipped with FTS5 memory (proven in production)
 - Memloft shipped with hybrid RRF search (proven in production)
-- PIRDLY is pre-build, so its memory system can be designed around MemCore from day one
+- PIRDLY is pre-build, so its memory system can be designed around MindCore from day one
 - The agent memory space is exploding (Mem0 at 37K stars, OMEGA at #1 LongMemEval) — patterns are well-documented
 
 ---
@@ -79,7 +79,7 @@ These require cloud services, API keys, and network connectivity. They don't fit
 | **MemOS** | Python | SQLite + hybrid | FTS5 + vector | Graph memory, multi-modal |
 | **memU** | Python | — | — | Proactive intent detection |
 
-These are closest to what MemCore does, but none are in Rust and none are designed as a library crate.
+These are closest to what MindCore does, but none are in Rust and none are designed as a library crate.
 
 #### Framework-Embedded (Not Standalone)
 | Project | Language | Notes |
@@ -101,7 +101,7 @@ These have memory subsystems but they're coupled to their parent frameworks.
 - Token-budget context assembly
 - Graph relationships
 
-MemCore fills this gap.
+MindCore fills this gap.
 
 ---
 
@@ -138,7 +138,7 @@ Dial v4.1.0 implements a learning-based memory system for an autonomous AI codin
 - No relationships — can't express "this solution fixed this error"
 - Trust scoring is manual and fragile (arbitrary 0.05 decay per 30 days)
 
-**What MemCore Extracts:**
+**What MindCore Extracts:**
 - FTS5 + Porter stemming configuration
 - Stop-word list
 - Token-budget context assembly algorithm
@@ -180,7 +180,7 @@ Memloft implements a personal memory system with hybrid search:
 - No cognitive type distinction (all memories treated the same)
 - No consolidation beyond exact-hash dedup
 
-**What MemCore Extracts:**
+**What MindCore Extracts:**
 - RRF merge algorithm with dynamic k-values
 - CandleBackend implementation
 - FallbackBackend wrapper pattern
@@ -206,7 +206,7 @@ PIRDLY's architecture document specifies:
   - Permanent: Invalid config, missing tools → surface to user, don't retry
 - **MCP Server:** Expose memory as MCP tools for direct LLM access
 
-**What PIRDLY Contributes to MemCore:**
+**What PIRDLY Contributes to MindCore:**
 - Two-tier database management (global + project)
 - Promotion logic for cross-project patterns
 - Error classification model
@@ -218,7 +218,7 @@ PIRDLY's architecture document specifies:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                         MemCore                                  │
+│                         MindCore                                  │
 │                                                                  │
 │  ┌─────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
 │  │    Dial      │  │   Memloft    │  │      PIRDLY          │   │
@@ -259,7 +259,7 @@ PIRDLY's architecture document specifies:
 | **Semantic** | What I know | "The project uses PostgreSQL", "The API requires JWT auth" | Stable — facts don't decay unless superseded |
 | **Procedural** | How to do things | "When you see error X, fix with Y", build workflows | Strengthens with use — proven patterns become more valuable |
 
-**Why This Matters for MemCore:**
+**Why This Matters for MindCore:**
 
 Current systems (Dial, Memloft) treat all memories equally. A learning from yesterday gets the same base score as a learning from six months ago. CoALA's type classification enables:
 
@@ -267,7 +267,7 @@ Current systems (Dial, Memloft) treat all memories equally. A learning from yest
 2. **Type-appropriate scoring** — procedural memories that have been validated are boosted
 3. **Type-appropriate storage** — episodic memories can be pruned aggressively, semantic memories archived carefully
 
-**MemCore Implementation:** The `MemoryType` enum (Episodic/Semantic/Procedural) on the `MemoryRecord` trait. Each type gets different decay parameters in the activation model.
+**MindCore Implementation:** The `MemoryType` enum (Episodic/Semantic/Procedural) on the `MemoryRecord` trait. Each type gets different decay parameters in the activation model.
 
 ---
 
@@ -307,7 +307,7 @@ Where:
 
 One formula replaces five mechanisms.
 
-**MemCore Implementation:** The `ActivationScorer` computes activation from the `memory_access_log` table at query time. Different decay rates per `MemoryType`.
+**MindCore Implementation:** The `ActivationScorer` computes activation from the `memory_access_log` table at query time. Different decay rates per `MemoryType`.
 
 **Calibration (decay rate `d` by memory type):**
 
@@ -345,7 +345,7 @@ Without consolidation, a memory system that records "the build failed because of
 
 Mem0 uses an LLM to classify ADD/UPDATE/DELETE/NOOP. This is accurate but costs tokens.
 
-**MemCore Implementation:** Three strategies, increasing in cost and accuracy:
+**MindCore Implementation:** Three strategies, increasing in cost and accuracy:
 
 | Strategy | Cost | Accuracy | How |
 |----------|------|----------|-----|
@@ -382,7 +382,7 @@ Agent memory systems that don't model temporal validity will:
 2. Contradict themselves (both "use Express.js" and "use Fastify" are "true")
 3. Confuse the LLM with conflicting context
 
-**MemCore Implementation:** Optional `valid_from` and `valid_until` fields on `MemoryRecord`, feature-gated behind `temporal`. Search can filter by `valid_at(timestamp)` to get the truth as of a specific point in time.
+**MindCore Implementation:** Optional `valid_from` and `valid_until` fields on `MemoryRecord`, feature-gated behind `temporal`. Search can filter by `valid_at(timestamp)` to get the truth as of a specific point in time.
 
 ---
 
@@ -397,7 +397,7 @@ Agent memory systems that don't model temporal validity will:
 - <50ms query latency (hybrid search, 10K memories)
 - #1 on LongMemEval benchmark (95.4%)
 
-**MemCore's Take:** The ACT-R activation model subsumes OMEGA's forgetting intelligence. Memories naturally decay through the power-law formula. Memories that are accessed frequently (like proven error patterns) stay strong. No need for explicit "exempt from decay" rules — the math handles it.
+**MindCore's Take:** The ACT-R activation model subsumes OMEGA's forgetting intelligence. Memories naturally decay through the power-law formula. Memories that are accessed frequently (like proven error patterns) stay strong. No need for explicit "exempt from decay" rules — the math handles it.
 
 ---
 
@@ -427,7 +427,7 @@ Where:
 - Question words → lower vector k (favor semantic matches)
 - Default → equal k values
 
-**MemCore Implementation:** Direct port from Memloft with the dynamic k-value logic.
+**MindCore Implementation:** Direct port from Memloft with the dynamic k-value logic.
 
 ---
 
@@ -463,7 +463,7 @@ Where:
 - 47M parameters, ModernBERT architecture with Flash Attention 2
 - 8,192 token context (captures full error traces, code blocks, decision rationale)
 - MTEB-v2 retrieval: 53.9 (matches bge-small), CoIR code retrieval: 53.8 (17% better than bge-small)
-- Loaded via candle-transformers native ModernBERT; model.safetensors auto-downloaded from HuggingFace and cached at `~/.cache/memcore/models/`
+- Loaded via candle-transformers native ModernBERT; model.safetensors auto-downloaded from HuggingFace and cached at `~/.cache/mindcore/models/`
 - WASM fallback: bge-small-en-v1.5 via candle BERT (same 384-dim, cross-compatible vectors)
 
 ### Vector Storage: Brute Force vs. ANN
@@ -540,7 +540,7 @@ For 10K vectors at 384 dimensions: 10,000 * 384 * 4 bytes = ~15MB in memory. Tri
 
 **WAL Mode (Write-Ahead Logging):**
 
-WAL is non-negotiable for MemCore. Without it, any concurrent read/write (e.g., searching while indexing) locks the database.
+WAL is non-negotiable for MindCore. Without it, any concurrent read/write (e.g., searching while indexing) locks the database.
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -627,7 +627,7 @@ Candle dominates compile time. Feature-gating it is essential for projects that 
 
 ### D1: Library, Not Framework
 
-**Decision:** MemCore is a library crate that projects call into, not a framework that structures the project.
+**Decision:** MindCore is a library crate that projects call into, not a framework that structures the project.
 
 **Alternatives Considered:**
 - Framework with plugin system (like MemOS)
@@ -659,7 +659,7 @@ A generic approach lets each project define its own struct, implement `MemoryRec
 **Alternatives Considered:**
 - Runtime feature detection (check if candle works, fall back)
 - Plugin system (dynamic loading)
-- Separate crates (memcore-fts, memcore-vector, memcore-graph)
+- Separate crates (mindcore-fts, mindcore-vector, mindcore-graph)
 
 **Rationale:** Feature flags have zero runtime cost when disabled. A project that only needs FTS5 compiles in 15 seconds and adds ~2MB. Separate crates would create dependency management overhead. Runtime detection adds complexity. The `FallbackBackend` provides runtime graceful degradation for the vector search case specifically.
 
@@ -696,7 +696,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 
 ### Feature Comparison Matrix
 
-| Feature | MemCore | OMEGA | Engram | Mem0 | MemOS |
+| Feature | MindCore | OMEGA | Engram | Mem0 | MemOS |
 |---------|---------|-------|--------|------|-------|
 | **Language** | Rust | TypeScript | Go | Python | Python |
 | **Storage** | SQLite | SQLite | SQLite | Cloud/Local | SQLite |
@@ -714,7 +714,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 | **Offline** | Yes | Yes | Yes | No | Yes |
 | **Binary Size** | 2-45MB | ~100MB | ~15MB | N/A | N/A |
 
-### MemCore's Unique Advantages
+### MindCore's Unique Advantages
 
 1. **Rust + feature flags** — only compile what you need, from 2MB to 45MB
 2. **Library crate** — embed in any Rust project, not a separate service
@@ -768,7 +768,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 
 ## 10. Specification Summary
 
-### What MemCore Is
+### What MindCore Is
 
 A standalone Rust crate providing pluggable, feature-gated persistent memory for AI agent applications. It stores, searches, scores, decays, consolidates, and assembles memories for LLM context injection.
 

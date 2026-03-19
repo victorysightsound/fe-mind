@@ -1,4 +1,4 @@
-# MemCore
+# MindCore
 
 A standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
 
@@ -6,7 +6,7 @@ Handles persistent storage, keyword search (FTS5), vector search (candle), hybri
 
 ## Design Principles
 
-- **Library, not framework** — projects call into MemCore, not the other way around
+- **Library, not framework** — projects call into MindCore, not the other way around
 - **Feature-gated everything** — heavy dependencies behind compile-time flags
 - **Local-first** — SQLite-backed, single-file databases, no cloud dependency
 - **Pure Rust where possible** — candle over ort, SQLite over Postgres
@@ -16,14 +16,14 @@ Handles persistent storage, keyword search (FTS5), vector search (candle), hybri
 
 Architecture and research phase. See:
 
-- `MEMCORE_ARCHITECTURE.md` — full crate structure and API design
-- `MEMCORE_RESEARCH.md` — research, landscape analysis, and specification
+- `MINDCORE_ARCHITECTURE.md` — full crate structure and API design
+- `MINDCORE_RESEARCH.md` — research, landscape analysis, and specification
 - `DECISIONS.md` — architectural decisions log
 - `research/` — competitive landscape analysis
 
 ## Origin
 
-MemCore extracts and unifies patterns from three projects:
+MindCore extracts and unifies patterns from three projects:
 
 | Source | Contribution |
 |--------|-------------|

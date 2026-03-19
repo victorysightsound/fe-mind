@@ -1,16 +1,16 @@
-# MemCore Gap Analysis — March 2026
+# MindCore Gap Analysis — March 2026
 
 **Date:** 2026-03-17
 **Status:** Research complete. Actionable findings for architecture updates.
-**Context:** Targeted research across 5 areas to validate and strengthen MemCore's architecture against the cutting edge of agent memory systems.
+**Context:** Targeted research across 5 areas to validate and strengthen MindCore's architecture against the cutting edge of agent memory systems.
 
 ---
 
 ## Executive Summary
 
-MemCore's core architecture is sound and competitive. The fundamental decisions (SQLite, FTS5, candle, RRF, ACT-R, feature gates) are validated by the 2025-2026 landscape. However, five areas need attention to reach parity with or exceed the current state of the art, and several architectural additions would push MemCore ahead of the field.
+MindCore's core architecture is sound and competitive. The fundamental decisions (SQLite, FTS5, candle, RRF, ACT-R, feature gates) are validated by the 2025-2026 landscape. However, five areas need attention to reach parity with or exceed the current state of the art, and several architectural additions would push MindCore ahead of the field.
 
-**Confidence level:** MemCore as-designed could score 88-93% on LongMemEval. With the additions identified here, 93-96% is realistic (competitive with OMEGA's #1 ranking of 95.4%).
+**Confidence level:** MindCore as-designed could score 88-93% on LongMemEval. With the additions identified here, 93-96% is realistic (competitive with OMEGA's #1 ranking of 95.4%).
 
 ---
 
@@ -20,7 +20,7 @@ MemCore's core architecture is sound and competitive. The fundamental decisions 
 
 **SQLCipher via rusqlite's `bundled-sqlcipher` feature is the clear winner.** It provides transparent AES-256-CBC encryption of the entire database file at the page level, preserving FTS5, WAL mode, and vector search with 5-15% I/O overhead.
 
-OMEGA's "encryption at rest" claim is narrower than it appears — they only encrypt exports and profile data via application-level Fernet encryption. The main `omega.db` is unencrypted. Application-level field encryption is a dead end for MemCore because it fundamentally breaks FTS5 (can't tokenize ciphertext).
+OMEGA's "encryption at rest" claim is narrower than it appears — they only encrypt exports and profile data via application-level Fernet encryption. The main `omega.db` is unencrypted. Application-level field encryption is a dead end for MindCore because it fundamentally breaks FTS5 (can't tokenize ciphertext).
 
 ### Recommendation
 
@@ -31,10 +31,10 @@ Add two feature flags:
 | `encryption` | Replaces bundled SQLite with bundled SQLCipher | ~500KB-1MB over plain SQLite |
 | `keychain` | OS keychain integration for key storage | `keyring` crate, ~200-500KB |
 
-**Key management:** Consumer provides the key. MemCore should offer:
+**Key management:** Consumer provides the key. MindCore should offer:
 - `EncryptionKey::Passphrase(String)` — SQLCipher derives via PBKDF2
 - `EncryptionKey::RawKey([u8; 32])` — pre-derived 256-bit key
-- Optional `keychain` helper: `memcore::keychain::get_or_create_key()` using the `keyring` crate (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- Optional `keychain` helper: `mindcore::keychain::get_or_create_key()` using the `keyring` crate (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 
 **Cargo.toml pattern:**
 ```toml
@@ -58,7 +58,7 @@ Decision 008: Encryption at Rest via SQLCipher
 
 Six additional benchmarks exist: LOCOMO (Snap Research), MemBench (ACL 2025), MemoryAgentBench (ICLR 2026), MemoryBench, AMA-Bench, and MemoryStress (OMEGA).
 
-### MemCore's Realistic Score Trajectory
+### MindCore's Realistic Score Trajectory
 
 | Configuration | Estimated Score | Key capabilities |
 |--------------|----------------|-----------------|
@@ -85,7 +85,7 @@ pub trait IngestStrategy: Send + Sync {
 Converting "last month", "before Christmas", "in 2024" to date-range filters. The paper reports +6.8-11.3% on temporal reasoning.
 
 **c) Exhaustive retrieval mode:**
-For multi-session aggregation queries ("how many times did X happen"), bypass top-k limits and return all matches above a threshold. OMEGA's weakest category (83.5%) is multi-session reasoning — this is where MemCore can differentiate.
+For multi-session aggregation queries ("how many times did X happen"), bypass top-k limits and return all matches above a threshold. OMEGA's weakest category (83.5%) is multi-session reasoning — this is where MindCore can differentiate.
 
 ```rust
 pub enum SearchMode {
@@ -97,7 +97,7 @@ pub enum SearchMode {
 
 ### Benchmark Harness
 
-Should be a separate workspace member (`memcore-bench/`), not shipped in the library crate. Benchmark data is large (115K-1.5M tokens) and evaluation requires an LLM judge (GPT-4o).
+Should be a separate workspace member (`mindcore-bench/`), not shipped in the library crate. Benchmark data is large (115K-1.5M tokens) and evaluation requires an LLM judge (GPT-4o).
 
 ### Decision Needed
 
@@ -191,7 +191,7 @@ Decision 010: Three-Tier Memory Hierarchy with `LlmCallback` trait.
 - Candle embedding: 3-10x slower (50-200ms per embed vs 10-30ms native)
 - Memory: 50MB database + MiniLM-L6-v2 model = ~300-500MB WASM memory (fits in 2-4GB browser limit, tight on mobile)
 
-**No known project combines all three (rusqlite + FTS5 + candle in WASM). MemCore would be novel.**
+**No known project combines all three (rusqlite + FTS5 + candle in WASM). MindCore would be novel.**
 
 ### Recommended Architecture: Hybrid
 
@@ -239,7 +239,7 @@ Decision 011: WASM Support via Hybrid Architecture
 
 **fastembed-rs v5.12.0** (March 2026) provides 25+ embedding models, 3 reranking models (BGE-reranker-base, jina-reranker-v1-turbo-en), and sparse embeddings (SPLADE) in one Rust crate. Dual ONNX/candle backends. Synchronous, no Tokio dependency.
 
-**Recommendation:** Evaluate fastembed-rs as an alternative to raw candle for the embedding backend. It would give MemCore:
+**Recommendation:** Evaluate fastembed-rs as an alternative to raw candle for the embedding backend. It would give MindCore:
 - 25+ models instead of just all-MiniLM-L6-v2
 - Built-in cross-encoder reranking (a gap identified in this analysis)
 - SPLADE sparse embeddings for better keyword-aware retrieval
@@ -255,7 +255,7 @@ New memories are stored statically. A-MEM and Cognee show that storing a new mem
 *Addition:* Post-write hook that retrieves top-k similar memories and optionally updates their metadata.
 
 **Gap 2: Cross-Encoder Reranking**
-MemCore has RRF fusion but no reranking stage. Hindsight's four-strategy parallel retrieval with cross-encoder reranking is now standard. fastembed-rs makes this trivial to add.
+MindCore has RRF fusion but no reranking stage. Hindsight's four-strategy parallel retrieval with cross-encoder reranking is now standard. fastembed-rs makes this trivial to add.
 
 *Addition:* Optional `RerankerBackend` trait, applied after RRF merge and before final scoring.
 
@@ -267,17 +267,17 @@ pub trait RerankerBackend: Send + Sync {
 ```
 
 **Gap 3: Reflection Operation**
-MemCore consolidates but doesn't synthesize higher-order insights. Research shows removing reflection causes agent behavior to degenerate within 48 hours. Hindsight's `reflect` operation clusters accumulated memories and generates summary insights.
+MindCore consolidates but doesn't synthesize higher-order insights. Research shows removing reflection causes agent behavior to degenerate within 48 hours. Hindsight's `reflect` operation clusters accumulated memories and generates summary insights.
 
 *Addition:* `engine.reflect()` method that uses `LlmCallback` to synthesize insights from memory clusters, stored as semantic Tier 2 memories.
 
 **Gap 4: Bi-Temporal Validity**
-MemCore has `valid_from`/`valid_until` in the architecture doc but this needs to be a first-class concept, not just optional columns. Zep's bi-temporal model tracks both when an event occurred and when it was ingested — enabling "what did we know at time X?" queries.
+MindCore has `valid_from`/`valid_until` in the architecture doc but this needs to be a first-class concept, not just optional columns. Zep's bi-temporal model tracks both when an event occurred and when it was ingested — enabling "what did we know at time X?" queries.
 
 *Status:* Already partially designed (temporal feature flag). Needs promotion to a core concept with query support: `engine.search("X").valid_at(timestamp)`.
 
 **Gap 5: Beliefs / Evolving Conclusions**
-MemCore has episodic/semantic/procedural types. Hindsight adds a fourth network: "beliefs" — agent-synthesized conclusions that can be revised. These differ from facts (which are ground truth) in that they have confidence scores and provenance chains.
+MindCore has episodic/semantic/procedural types. Hindsight adds a fourth network: "beliefs" — agent-synthesized conclusions that can be revised. These differ from facts (which are ground truth) in that they have confidence scores and provenance chains.
 
 *Addition:* Add `MemoryType::Belief` with confidence field and source memory references.
 
@@ -288,7 +288,7 @@ Every competitive memory system (OMEGA, Engram, Hindsight, Cognee) ships with an
 
 ### 5d. Embedding Model Consideration
 
-MemCore plans `all-MiniLM-L6-v2` (384-dim). OMEGA uses `bge-small-en-v1.5` (also 384-dim, slightly better on MTEB retrieval benchmarks). For maximum score, `bge-small-en-v1.5` or its successor `bge-m3` (1024-dim) would be worth evaluating. The `EmbeddingBackend` trait makes this a configuration choice, not an architectural change.
+MindCore plans `all-MiniLM-L6-v2` (384-dim). OMEGA uses `bge-small-en-v1.5` (also 384-dim, slightly better on MTEB retrieval benchmarks). For maximum score, `bge-small-en-v1.5` or its successor `bge-m3` (1024-dim) would be worth evaluating. The `EmbeddingBackend` trait makes this a configuration choice, not an architectural change.
 
 ---
 
@@ -320,12 +320,12 @@ MemCore plans `all-MiniLM-L6-v2` (384-dim). OMEGA uses `bge-small-en-v1.5` (also
 | Reflection operation | Synthesize higher-order insights | Medium — needs LlmCallback |
 | Beliefs memory type | Richer cognitive model | Low — enum variant |
 | WASM support | Browser deployment | Medium — conditional compilation |
-| Benchmark harness (memcore-bench) | Validation and marketing | Medium — separate crate |
+| Benchmark harness (mindcore-bench) | Validation and marketing | Medium — separate crate |
 | fastembed-rs backend | 25+ models, reranking, SPLADE | Medium — new backend impl |
 
 ---
 
-## What MemCore Already Does Better Than Anyone
+## What MindCore Already Does Better Than Anyone
 
 1. **Rust performance** — No other memory library is in Rust
 2. **ACT-R activation decay** — Research-backed model, not ad-hoc

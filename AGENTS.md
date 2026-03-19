@@ -1,4 +1,4 @@
-# Project: MemCore
+# Project: MindCore
 
 ## On Entry (MANDATORY)
 
@@ -11,11 +11,11 @@ session-context
 
 ## Project Overview
 
-**MemCore** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
+**MindCore** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
 
 **Status:** Architecture and research phase. Not yet in development.
 
-**Consumers:** PIRDLY, Dial, Memloft — all will depend on MemCore for persistent memory.
+**Consumers:** PIRDLY, Dial, Memloft — all will depend on MindCore for persistent memory.
 
 ---
 
@@ -23,8 +23,8 @@ session-context
 
 | File | Purpose |
 |------|---------|
-| `MEMCORE_ARCHITECTURE.md` | Full crate structure and API design |
-| `MEMCORE_RESEARCH.md` | Landscape analysis, source project analysis, specification |
+| `MINDCORE_ARCHITECTURE.md` | Full crate structure and API design |
+| `MINDCORE_RESEARCH.md` | Landscape analysis, source project analysis, specification |
 | `DECISIONS.md` | Architectural decisions log |
 | `research/` | Competitive landscape research |
 
@@ -44,7 +44,7 @@ session-context
 
 ## Design Principles
 
-1. **Library, not framework** — projects call into MemCore
+1. **Library, not framework** — projects call into MindCore
 2. **Feature-gated everything** — heavy deps behind compile-time flags
 3. **Local-first** — SQLite-backed, no cloud dependency
 4. **Pure Rust where possible** — candle over ort

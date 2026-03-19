@@ -1,16 +1,16 @@
-# MemCore Decisions
+# MindCore Decisions
 
-This document records key architectural and design decisions for MemCore.
+This document records key architectural and design decisions for MindCore.
 
-Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) and were migrated here when MemCore became its own project.
+Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) and were migrated here when MindCore became its own project.
 
 ---
 
-## Decision 001: MemCore Shared Memory Engine
+## Decision 001: MindCore Shared Memory Engine
 
 **Date:** 2026-03-16
 
-**Decision:** Extract memory system into a standalone crate (MemCore) reusable across PIRDLY, Dial, and Memloft.
+**Decision:** Extract memory system into a standalone crate (MindCore) reusable across PIRDLY, Dial, and Memloft.
 
 **Context:** Three projects (Dial, Memloft, PIRDLY) all need persistent memory with search, and each implements the same primitives differently. Research into Mem0, OMEGA, Zep/Graphiti, and MemOS confirms the patterns are converging industry-wide.
 
@@ -22,10 +22,10 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 - Every component is already proven in at least one existing project
 
 **Consequences:**
-- New standalone crate: `memcore`
-- PIRDLY depends on memcore instead of implementing its own memory
-- Dial and Memloft migrate to memcore over time
-- See `MEMCORE_ARCHITECTURE.md` for full specification
+- New standalone crate: `mindcore`
+- PIRDLY depends on mindcore instead of implementing its own memory
+- Dial and Memloft migrate to mindcore over time
+- See `MINDCORE_ARCHITECTURE.md` for full specification
 
 ---
 
@@ -181,7 +181,7 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 - 5-15% overhead on I/O operations, negligible for agent memory workloads
 - rusqlite has first-class support via `bundled-sqlcipher` and `bundled-sqlcipher-vendored-openssl`
 - BSD-3-Clause license, battle-tested (Signal, Mozilla, Adobe)
-- Consumer provides the key — MemCore doesn't manage key storage
+- Consumer provides the key — MindCore doesn't manage key storage
 
 **Consequences:**
 - Feature-gated behind `encryption` (replaces bundled SQLite with bundled SQLCipher)
@@ -198,17 +198,17 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Decision:** Target LongMemEval as primary benchmark, with MemoryAgentBench and AMA-Bench as secondary targets. Ship benchmark harness as a separate workspace member.
 
-**Context:** LongMemEval (ICLR 2025) is the de facto standard — 500 questions testing 5 core memory abilities. OMEGA scores 95.4% (#1). Hindsight scores 91.4%. MemCore's architecture as-designed could hit 88-93%; with targeted additions, 93-96% is realistic.
+**Context:** LongMemEval (ICLR 2025) is the de facto standard — 500 questions testing 5 core memory abilities. OMEGA scores 95.4% (#1). Hindsight scores 91.4%. MindCore's architecture as-designed could hit 88-93%; with targeted additions, 93-96% is realistic.
 
 **Rationale:**
 - LongMemEval is the standard leaderboard that competitors report against
 - MemoryAgentBench (ICLR 2026) tests selective forgetting — directly validates ACT-R decay
-- AMA-Bench tests agentic (non-dialogue) applications — MemCore's primary use case
+- AMA-Bench tests agentic (non-dialogue) applications — MindCore's primary use case
 - Benchmark harness must be separate from the library (large data, LLM judge dependency)
 - Three specific additions drive the score from 88-93% to 93-96%: fact extraction at ingest, time-aware query expansion, exhaustive retrieval mode
 
 **Consequences:**
-- `memcore-bench/` workspace member with per-benchmark runners
+- `mindcore-bench/` workspace member with per-benchmark runners
 - Evaluation uses GPT-4o judge (LongMemEval standard)
 - Score targets guide feature prioritization
 
@@ -245,13 +245,13 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Decision:** Support WASM compilation with a hybrid architecture — SQLite+FTS5 in browser WASM, embeddings server-side, with full-WASM candle as opt-in.
 
-**Context:** rusqlite has official WASM support since v0.38.0 (Dec 2025) via `sqlite-wasm-rs`. Candle has a working all-MiniLM-L6-v2 WASM demo. No known project combines rusqlite + FTS5 + candle in WASM — MemCore would be novel.
+**Context:** rusqlite has official WASM support since v0.38.0 (Dec 2025) via `sqlite-wasm-rs`. Candle has a working all-MiniLM-L6-v2 WASM demo. No known project combines rusqlite + FTS5 + candle in WASM — MindCore would be novel.
 
 **Rationale:**
 - All pieces work today: rusqlite WASM, FTS5 enabled in WASM build, OPFS/IndexedDB persistence
 - Hybrid recommended: SQLite+FTS5 in Web Worker (fast local queries, offline), embeddings via server API (native speed)
 - Full-WASM candle is opt-in for offline/privacy use cases (~300-500MB browser memory)
-- Same MemCore API surface via `cfg(target_family = "wasm")` conditional compilation
+- Same MindCore API surface via `cfg(target_family = "wasm")` conditional compilation
 - Aligns with user's Solid.js web stack
 
 **Consequences:**
@@ -337,13 +337,13 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Decision:** Define a single `LlmCallback` trait for all LLM-assisted operations. Consumer provides the implementation, controlling model choice, cost, and retry logic.
 
-**Context:** Multiple features need LLM assistance: consolidation (LLMConsolidation), fact extraction (LlmIngest), memory evolution, and reflection. MemCore should never call an LLM directly — the consumer controls cost.
+**Context:** Multiple features need LLM assistance: consolidation (LLMConsolidation), fact extraction (LlmIngest), memory evolution, and reflection. MindCore should never call an LLM directly — the consumer controls cost.
 
 **Rationale:**
 - Single trait avoids proliferation of callback types
 - Consumer decides model (Claude, GPT, local Llama), token budget, retry behavior
 - `Option<&dyn LlmCallback>` — when None, all features degrade gracefully to non-LLM paths
-- Library, not framework — MemCore provides operations, consumer provides intelligence
+- Library, not framework — MindCore provides operations, consumer provides intelligence
 
 **Consequences:**
 - `LlmCallback` trait with `complete(prompt: &str) -> Result<String>`
@@ -356,7 +356,7 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Date:** 2026-03-17 (updated: 2026-03-18 — replaced fastembed with custom candle)
 
-**Decision:** Build a custom embedding module (~100-130 lines) inside MemCore using candle-transformers' native ModernBERT implementation. Drop fastembed-rs entirely.
+**Decision:** Build a custom embedding module (~100-130 lines) inside MindCore using candle-transformers' native ModernBERT implementation. Drop fastembed-rs entirely.
 
 **Context:** fastembed-rs stability assessment (March 2026) revealed: single maintainer (Anush008/Qdrant, bus factor 1), pinned to pre-release `ort =2.0.0-rc.11`, ships 50-150MB C++ ONNX Runtime shared library, uses `anyhow` in library crate, yearly breaking major versions. candle-transformers already has native ModernBERT support (PR #2791, merged March 2025), and granite-small-r2 ships safetensors weights that candle loads directly.
 
@@ -376,8 +376,8 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 - WASM can't use granite because ModernBERT ops may not compile cleanly to WASM, model is 95MB (too large for browser), and WASM is single-threaded
 - Cross-model vector compatibility: both produce 384-dim vectors, but similarity scores degrade slightly when query and document use different models
 - Dependencies: `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`, `hf-hub`
-- Model cached at `~/.cache/memcore/models/`, auto-downloaded on first use
-- No `FastembedBackend` in MemCore — removed from codebase
+- Model cached at `~/.cache/mindcore/models/`, auto-downloaded on first use
+- No `FastembedBackend` in MindCore — removed from codebase
 
 ---
 
@@ -399,10 +399,101 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 - candle-transformers has native ModernBERT support — no ONNX conversion needed
 
 **Consequences:**
-- `CandleBackend::new()` auto-downloads granite-small-r2 safetensors from HuggingFace, caches at `~/.cache/memcore/models/`
+- `CandleBackend::new()` auto-downloads granite-small-r2 safetensors from HuggingFace, caches at `~/.cache/mindcore/models/`
 - WASM backend uses `bge-small-en-v1.5` (standard BERT, 384-dim, cross-compatible vectors)
 - Cross-model note: granite and bge-small produce compatible 384-dim vectors but similarity precision degrades slightly when query and document use different models
 - `all-MiniLM-L6-v2` not used
+
+---
+
+## Decision 018: Reflection Operation
+
+**Date:** 2026-03-19
+
+**Decision:** Implement periodic reflection via `engine.reflect()` that synthesizes higher-order insights from accumulated memories, stored as Semantic Tier 2 memories with provenance links.
+
+**Context:** Research shows removing reflection causes agent behavior to degenerate within 48 hours (Hindsight). The `reflect()` method clusters accumulated memories and generates summary insights using the `LlmCallback` trait.
+
+**Rationale:**
+- Prevents memory systems from becoming flat accumulations of facts without synthesis
+- Produces durable Tier 2 semantic memories that improve search relevance
+- Depends on existing `LlmCallback` trait — no new external dependencies
+- Consumer controls when and how often reflection runs (library, not framework)
+- Degraded path without LLM: vector clustering produces statistical summaries
+
+**Consequences:**
+- `engine.reflect(&dyn LlmCallback)` method on MemoryEngine
+- Results stored as Semantic Tier 2 memories with `source_ids` provenance
+- Consumer decides scheduling (daily, weekly, on-demand)
+- Part of the `maintain()` convenience method alongside consolidation and pruning
+
+---
+
+## Decision 019: Synchronous Core API
+
+**Date:** 2026-03-19
+
+**Decision:** Core MemoryEngine operations (CRUD, search, context assembly, scoring) are synchronous. Async is reserved for embedding inference, LLM callbacks, and network I/O.
+
+**Context:** The architecture initially used `async fn` throughout, requiring `tokio` as a mandatory dependency. This contradicts the "library, not framework" principle — forcing an async runtime on consumers who may use different runtimes or none at all. Core operations are SQLite queries that complete in microseconds to milliseconds.
+
+**Rationale:**
+- SQLite operations are inherently synchronous — wrapping them in async adds overhead without benefit
+- Removes tokio as a mandatory dependency (moved behind `vector-search` and `mcp-server` feature flags)
+- Consumers using synchronous code don't need to pull in an async runtime
+- CPU-bound embedding inference uses `std::thread::spawn` / `rayon`, not async (which is for I/O-bound work)
+- The `EmbeddingBackend` and `LlmCallback` traits remain async for legitimate I/O (model download, API calls)
+
+**Consequences:**
+- `store()`, `get()`, `update()`, `delete()`, `search().execute()`, `assemble_context()` are all `fn`, not `async fn`
+- `MemoryEngine::builder().build()` is synchronous
+- Background embedding indexer runs on a dedicated thread, not a tokio task
+- Minimum Rust version: 1.75+ (native async traits, no `async-trait` crate)
+- `tokio` moves to feature-gated dependency
+
+---
+
+## Decision 020: Cross-Model Vector Isolation
+
+**Date:** 2026-03-19
+
+**Decision:** Vectors from different embedding models are isolated — vector search is skipped for records whose stored `model_name` differs from the current backend's model. The engine falls back to FTS5-only for mismatched records.
+
+**Context:** The architecture previously claimed granite-small-r2 and bge-small-en-v1.5 produce "cross-compatible" 384-dim vectors with only 5-10% quality degradation. This is incorrect. Different model architectures produce fundamentally different embedding spaces — cross-model cosine similarity produces unreliable rankings, not slightly degraded ones.
+
+**Rationale:**
+- Vectors from different models are not comparable even at the same dimensionality
+- Returning random-seeming rankings is worse than returning no vector results
+- FTS5 graceful fallback ensures search still works when switching platforms (native ↔ WASM)
+- The `model_name` field on `memory_vectors` enables clean model migration via `reindex_all()`
+- Honest about limitations rather than presenting unreliable results
+
+**Consequences:**
+- Vector search query filters by `model_name = current_backend.model_name()`
+- When native user accesses a database created in WASM (or vice versa), vector search is skipped — FTS5 handles retrieval
+- `reindex_all()` re-embeds all memories with the current model, restoring vector search
+- Removes misleading "cross-compatible vectors" claim from documentation
+
+---
+
+## Decision 021: Structured Error Types
+
+**Date:** 2026-03-19
+
+**Decision:** Define a structured `MindCoreError` enum using `thiserror` with variants for each failure domain, enabling consumers to match on specific error conditions.
+
+**Context:** Library crates need structured errors so consumers can handle failures appropriately (retry on transient DB errors, surface model-not-found to users, etc.). A single `anyhow::Error` or `Box<dyn Error>` prevents pattern matching.
+
+**Rationale:**
+- Consumers need to distinguish database errors from embedding errors from serialization errors
+- `thiserror` provides zero-cost error types with `Display` and `From` implementations
+- Each feature-gated module contributes its own error variants
+- `MindCoreError::ModelMismatch` enables clear messaging when vector search falls back to FTS5
+
+**Consequences:**
+- `mindcore::Result<T>` type alias used throughout the public API
+- Error variants: `Database`, `Embedding`, `ModelNotAvailable`, `ModelMismatch`, `Serialization`, `Migration`, `Encryption`, `Consolidation`, `LlmCallback`
+- Feature-gated variants only exist when their feature is enabled
 
 ---
 
@@ -412,7 +503,7 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Status:** Open
 
-Evaluate crate name availability on crates.io. Candidates: `memcore`, `agentmem`, `cognimem`. Publish after v0.1.0 is stable with Dial and Memloft migrations validated.
+Evaluate crate name availability on crates.io. Candidates: `mindcore`, `agentmem`, `cognimem`. Publish after v0.1.0 is stable with Dial and Memloft migrations validated.
 
 ### Q2: FTS5 + Hybrid Search Phasing
 
@@ -426,12 +517,12 @@ No architecture changes needed between phases — just enable feature flags.
 
 ### Q3: Beliefs Memory Type
 
-**Status:** Under consideration
+**Status:** Deferred to post-v1
 
-Hindsight separates world facts from agent beliefs (synthesized conclusions that can be revised). Consider adding `MemoryType::Belief` with confidence score and provenance chain. This would be the fourth cognitive type alongside Episodic/Semantic/Procedural.
+The three existing types (Episodic/Semantic/Procedural) cover all common agent memory patterns. Beliefs would add complexity (confidence scores, provenance chains, challenge/revision semantics) for a pattern only demonstrated in Hindsight. The `metadata` field on `MemoryRecord` can carry confidence and provenance data ad-hoc until the pattern proves itself in real usage. Revisit after v1.0 ships and consumer feedback is available.
 
 ### Q4: Reflection Operation
 
-**Status:** Under consideration
+**Status:** Decided — YES (Decision 018)
 
-Hindsight's `reflect` operation periodically clusters accumulated memories and synthesizes higher-order insights. Research shows removing reflection causes agent behavior to degenerate within 48 hours. Would depend on `LlmCallback` trait (Decision 015). Store as Semantic Tier 2 memories with provenance links.
+Hindsight research demonstrates agent behavior degenerates within 48 hours without periodic reflection. The `reflect()` method is already in the public API design. Implementation depends on `LlmCallback` trait (Decision 015), so it's naturally late in the build order (Phase 14+). The `reflect()` method synthesizes higher-order insights from memory clusters, stored as Semantic Tier 2 memories with provenance links.
