@@ -1,4 +1,4 @@
-# Task: Implement temporal validity fields and .valid_at() search filter
+# Task: Implement two-tier memory manager (global + project databases)
 
 ## ⚠️ SIGNS (Critical Rules)
 
