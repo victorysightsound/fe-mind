@@ -1,4 +1,4 @@
-# Task: Implement CRUD operations (store, get, update, delete) with SHA-256 dedup
+# Task: Implement FTS5 keyword search with Porter stemming
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -15,3 +15,19 @@
 
 - **FAIL FAST: If blocked or confused, stop and ask rather than guessing.**
 
+
+
+## Related Specifications
+
+
+### MindCore — Product Requirements Document > 3. Phases > Phase 1: Foundation (Storage + FTS5 + CRUD)
+The core that everything else builds on. After this phase, MindCore is a functional keyword-search memory engine.
+
+**Deliverables:**
+- `Cargo.toml` with crate metadata, `default = ["fts5"]`
+- `MemoryRecord` trait and `MemoryMeta` struct
+- `MemoryType` enum (Episodic, Semantic, Procedural)
+- `MindCoreError` enum with `Database`, `Serialization`, `Migration` variants
+- SQLite storage engine with WAL, mmap, pragmas
+- Core schema: `memories` table, `memories_fts` virtual table, FTS5 triggers
+- `mind

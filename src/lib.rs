@@ -38,6 +38,7 @@
 
 pub mod error;
 pub mod memory;
+pub mod search;
 pub mod storage;
 pub mod traits;
 
