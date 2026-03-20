@@ -1,4 +1,4 @@
-# Task: Implement pooling.rs (mean pooling + L2 normalization)
+# Task: Implement CandleNativeBackend with granite-small-r2 via ModernBERT
 
 ## ⚠️ SIGNS (Critical Rules)
 
