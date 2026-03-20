@@ -1,4 +1,4 @@
-# Task: Implement EncryptionKey and SQLCipher integration
+# Task: Write rustdoc for all public types and methods
 
 ## ⚠️ SIGNS (Critical Rules)
 
