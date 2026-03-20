@@ -10,7 +10,7 @@ mod inner {
     use candle_transformers::models::modernbert::{Config, ModernBert};
     use hf_hub::api::sync::Api;
     use hf_hub::{Repo, RepoType};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
 
     use crate::embeddings::EmbeddingBackend;
@@ -104,6 +104,13 @@ mod inner {
                 VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)
                     .map_err(|e| MindCoreError::Embedding(format!("weights load: {e}")))?
             };
+
+            // granite-small-r2 uses sentence-transformers naming (no "model." prefix)
+            // but candle's ModernBert expects HuggingFace transformers naming.
+            // Remap: when candle asks for "model.X.weight", look for "X.weight" in the file.
+            let vb = vb.rename_f(|name| {
+                name.strip_prefix("model.").unwrap_or(name).to_string()
+            });
 
             let model = ModernBert::load(vb, &config)
                 .map_err(|e| MindCoreError::Embedding(format!("model load: {e}")))?;

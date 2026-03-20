@@ -1,4 +1,4 @@
-# Task: Write rustdoc for all public types and methods
+# Task: Wire CandleNativeBackend end-to-end test — download granite-small-r2, embed real text, verify vector dimensions and similarity scores
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -16,22 +16,6 @@
 - **FAIL FAST: If blocked or confused, stop and ask rather than guessing.**
 
 
-
-## Related Specifications
-
-
-### MindCore — Product Requirements Document > 3. Phases > Phase 9: Encryption + MCP + Polish
-Optional encryption, MCP server interface, and production hardening.
-
-**Deliverables:**
-- `EncryptionKey` enum (Passphrase, RawKey)
-- SQLCipher integration via `bundled-sqlcipher` feature
-- `PRAGMA key` first statement on encrypted connections
-- Optional `keychain` module via `keyring` crate
-- MCP server interface (feature-gated behind `mcp-server`)
-- MCP tools: search, store, get, delete, relate, context
-- `full` feature flag verified: all features compile together
-- Rustdoc for all public type
 
 ## Project Learnings (apply these patterns)
 
