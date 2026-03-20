@@ -64,6 +64,17 @@ CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
 CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(content_hash);
 CREATE INDEX IF NOT EXISTS idx_memories_tier ON memories(tier);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
+
+-- Access log for activation model (feature: activation-model)
+CREATE TABLE IF NOT EXISTS memory_access_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id   INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    query_text  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_access_log_memory ON memory_access_log(memory_id);
+CREATE INDEX IF NOT EXISTS idx_access_log_time ON memory_access_log(accessed_at);
 ";
 
 #[cfg(test)]

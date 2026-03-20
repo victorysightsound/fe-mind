@@ -1,3 +1,4 @@
+pub mod activation;
 pub mod hash_dedup;
 pub mod store;
 

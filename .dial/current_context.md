@@ -1,4 +1,4 @@
-# Task: Add tier and source_ids columns to schema (migration v1-v2)
+# Task: Add memory_access_log table and activation_cache columns (migration v2-v3)
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -23,3 +23,5 @@
 - [gotcha] Module visibility: when engine.rs references types from other modules, those modules must be pub mod not mod. Fixed store and builder visibility.
 
 - [pattern] Mutex<Vec<Connection>> makes Database auto-Sync without unsafe impl. Connection is Send, Mutex provides Sync. No need for unsafe.
+
+- [gotcha] Tier filtering: default SearchDepth must be Deep (include tier 0) until consolidation promotes memories to higher tiers. Standard (tiers 1+2 only) breaks all tests when memories default to tier 0.
