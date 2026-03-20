@@ -1,4 +1,4 @@
-# Task: Implement CandleNativeBackend with granite-small-r2 via ModernBERT
+# Task: Write integration tests for vector search, RRF, fallback, background indexing
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -27,3 +27,5 @@
 - [gotcha] Tier filtering: default SearchDepth must be Deep (include tier 0) until consolidation promotes memories to higher tiers. Standard (tiers 1+2 only) breaks all tests when memories default to tier 0.
 
 - [gotcha] ACT-R activation: t.max(1.0) gives ln(1.0)=0 for recent accesses. Use t.max(0.1) so sub-second accesses still contribute positively.
+
+- [gotcha] candle-transformers modernbert: struct is ModernBert not ModernBertModel. Check pub struct names with grep before coding.
