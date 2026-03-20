@@ -1,4 +1,4 @@
-# Task: Implement ScoringStrategy trait and ScoredResult<T> struct
+# Task: Implement RecencyScorer with configurable half-life
 
 ## ⚠️ SIGNS (Critical Rules)
 

@@ -39,6 +39,7 @@
 pub mod engine;
 pub mod error;
 pub mod memory;
+pub mod scoring;
 pub mod search;
 pub mod storage;
 pub mod traits;
