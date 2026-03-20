@@ -1,4 +1,4 @@
-# Task: Performance benchmark at 10K scale — FTS5 <5ms, vector scan <50ms, store >100/sec, context assembly <10ms
+# Task: Publish v0.2.0 to crates.io with all hardening changes
 
 ## ⚠️ SIGNS (Critical Rules)
 
