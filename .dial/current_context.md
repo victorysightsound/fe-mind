@@ -1,4 +1,4 @@
-# Task: Feature flag isolation test — verify each feature flag compiles independently: cargo build --features X for each feature
+# Task: Performance benchmark at 10K scale — FTS5 <5ms, vector scan <50ms, store >100/sec, context assembly <10ms
 
 ## ⚠️ SIGNS (Critical Rules)
 
