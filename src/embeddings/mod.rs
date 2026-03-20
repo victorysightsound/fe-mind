@@ -1,7 +1,8 @@
 mod backend;
-mod noop;
 mod fallback;
+mod noop;
+pub mod pooling;
 
 pub use backend::EmbeddingBackend;
-pub use noop::NoopBackend;
 pub use fallback::FallbackBackend;
+pub use noop::NoopBackend;

@@ -1,4 +1,4 @@
-# Task: Implement EmbeddingBackend trait
+# Task: Implement pooling.rs (mean pooling + L2 normalization)
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -16,20 +16,6 @@
 - **FAIL FAST: If blocked or confused, stop and ask rather than guessing.**
 
 
-
-## Related Specifications
-
-
-### MindCore — Product Requirements Document > 3. Phases > Phase 5: Vector Search + Hybrid RRF
-Candle embedding backend, brute-force vector search, and RRF hybrid merge. After this phase, MindCore has semantic search.
-
-**Deliverables:**
-- `EmbeddingBackend` trait (async fn embed, embed_batch, dimensions, model_name)
-- `CandleNativeBackend` — granite-small-r2 via ModernBERT (~100-130 lines)
-- Mean pooling and L2 normalization (shared `pooling.rs`)
-- `NoopBackend` for testing
-- `FallbackBackend` wrapping `Option<Box<dyn EmbeddingBackend>>`
-- Model auto-download via hf-hub, cached at `~/.c
 
 ## Project Learnings (apply these patterns)
 

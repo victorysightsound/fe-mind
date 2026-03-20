@@ -65,6 +65,16 @@ CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(content_hash);
 CREATE INDEX IF NOT EXISTS idx_memories_tier ON memories(tier);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
 
+-- Vector storage (feature: vector-search)
+CREATE TABLE IF NOT EXISTS memory_vectors (
+    memory_id   INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
+    embedding   BLOB NOT NULL,
+    model_name  TEXT NOT NULL,
+    dimensions  INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Access log for activation model (feature: activation-model)
 CREATE TABLE IF NOT EXISTS memory_access_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
