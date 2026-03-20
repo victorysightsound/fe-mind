@@ -1,4 +1,4 @@
-# Task: Wire hybrid search pipeline — FTS5 + vector results through RRF merge in SearchBuilder.execute() for SearchMode::Hybrid and Auto
+# Task: Wire two-tier memory into MemoryEngine — add global_database() to builder, merge results from both DBs with project boost
 
 ## ⚠️ SIGNS (Critical Rules)
 

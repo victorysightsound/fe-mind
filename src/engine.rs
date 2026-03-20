@@ -30,6 +30,7 @@ use crate::traits::{MemoryRecord, ScoringStrategy};
 /// ```
 pub struct MemoryEngine<T: MemoryRecord> {
     db: Database,
+    global_db: Option<Database>,
     store: MemoryStore<T>,
     scoring: Arc<dyn ScoringStrategy>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
@@ -144,9 +145,14 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         Ok(ContextAssembly::assemble(candidates, budget))
     }
 
-    /// Direct access to the database (for advanced consumers).
+    /// Direct access to the project database (for advanced consumers).
     pub fn database(&self) -> &Database {
         &self.db
+    }
+
+    /// Direct access to the global database (if configured).
+    pub fn global_database(&self) -> Option<&Database> {
+        self.global_db.as_ref()
     }
 }
 
@@ -161,6 +167,7 @@ impl<T: MemoryRecord> std::fmt::Debug for MemoryEngine<T> {
 /// Builder for constructing a `MemoryEngine`.
 pub struct MemoryEngineBuilder<T: MemoryRecord> {
     database_path: Option<String>,
+    global_database_path: Option<String>,
     scoring: Option<Arc<dyn ScoringStrategy>>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
     _phantom: PhantomData<T>,
@@ -170,6 +177,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
     fn new() -> Self {
         Self {
             database_path: None,
+            global_database_path: None,
             scoring: None,
             embedding: None,
             _phantom: PhantomData,
@@ -181,6 +189,15 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
     /// If not set, uses an in-memory database (useful for testing).
     pub fn database(mut self, path: impl Into<String>) -> Self {
         self.database_path = Some(path.into());
+        self
+    }
+
+    /// Set the global database path for two-tier memory.
+    ///
+    /// When set, the engine maintains both a project database (set via `.database()`)
+    /// and a global database for cross-project memories.
+    pub fn global_database(mut self, path: impl Into<String>) -> Self {
+        self.global_database_path = Some(path.into());
         self
     }
 
@@ -229,12 +246,36 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             Ok(())
         })?;
 
+        // Open global database if configured
+        let global_db = match &self.global_database_path {
+            Some(path) => {
+                if let Some(parent) = Path::new(path).parent() {
+                    if !parent.as_os_str().is_empty() {
+                        std::fs::create_dir_all(parent).map_err(|e| {
+                            MindCoreError::Migration(format!(
+                                "failed to create global database directory {}: {e}",
+                                parent.display()
+                            ))
+                        })?;
+                    }
+                }
+                let gdb = Database::open(path)?;
+                gdb.with_writer(|conn| {
+                    migrations::migrate(conn)?;
+                    Ok(())
+                })?;
+                Some(gdb)
+            }
+            None => None,
+        };
+
         let scoring = self
             .scoring
             .unwrap_or_else(|| Arc::new(CompositeScorer::empty()));
 
         Ok(MemoryEngine {
             db,
+            global_db,
             store: MemoryStore::new(),
             scoring,
             embedding: self.embedding,
