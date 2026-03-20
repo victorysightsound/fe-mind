@@ -1,4 +1,4 @@
-# Task: Implement thread safety (Mutex writer, connection pool readers)
+# Task: Write integration tests for all Phase 1 functionality
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -17,7 +17,24 @@
 
 
 
+## Related Specifications
+
+
+### MindCore — Product Requirements Document > 3. Phases > Phase 1: Foundation (Storage + FTS5 + CRUD)
+The core that everything else builds on. After this phase, MindCore is a functional keyword-search memory engine.
+
+**Deliverables:**
+- `Cargo.toml` with crate metadata, `default = ["fts5"]`
+- `MemoryRecord` trait and `MemoryMeta` struct
+- `MemoryType` enum (Episodic, Semantic, Procedural)
+- `MindCoreError` enum with `Database`, `Serialization`, `Migration` variants
+- SQLite storage engine with WAL, mmap, pragmas
+- Core schema: `memories` table, `memories_fts` virtual table, FTS5 triggers
+- `mind
+
 ## Project Learnings (apply these patterns)
 
 
 - [gotcha] Module visibility: when engine.rs references types from other modules, those modules must be pub mod not mod. Fixed store and builder visibility.
+
+- [pattern] Mutex<Vec<Connection>> makes Database auto-Sync without unsafe impl. Connection is Send, Mutex provides Sync. No need for unsafe.
