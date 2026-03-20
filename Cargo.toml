@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "mindcore-bench"]
+
 [package]
 name = "mindcore"
 version = "0.2.0"
