@@ -1,4 +1,4 @@
-# Task: Implement ContextBudget, ContextItem, ContextAssembly structs
+# Task: Implement engine.assemble_context() with priority-ranked selection
 
 ## ⚠️ SIGNS (Critical Rules)
 

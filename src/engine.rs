@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::path::Path;
 
+use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
 use crate::error::{MindCoreError, Result};
 use crate::memory::MemoryStore;
 use crate::memory::store::StoreResult;
@@ -66,6 +67,62 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// Count total memories in the database.
     pub fn count(&self) -> Result<u64> {
         self.store.count(&self.db)
+    }
+
+    /// Assemble context for an LLM prompt within a token budget.
+    ///
+    /// Searches for relevant memories, converts them to context items,
+    /// and assembles within the budget using priority-ranked selection.
+    pub fn assemble_context(
+        &self,
+        query: &str,
+        budget: &ContextBudget,
+    ) -> Result<ContextAssembly> {
+        // Search for relevant memories (3x budget to have plenty of candidates)
+        let results = self.search(query).limit(50).execute()?;
+
+        // Convert search results to context items
+        let candidates: Vec<ContextItem> = results
+            .iter()
+            .filter_map(|sr| {
+                // Load the memory to get its content
+                self.db
+                    .with_reader(|conn| {
+                        let row = conn.query_row(
+                            "SELECT searchable_text, memory_type, category FROM memories WHERE id = ?1",
+                            [sr.memory_id],
+                            |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, String>(1)?,
+                                    row.get::<_, Option<String>>(2)?,
+                                ))
+                            },
+                        );
+                        match row {
+                            Ok((text, type_str, category)) => {
+                                let memory_type = crate::traits::MemoryType::from_str(&type_str)
+                                    .unwrap_or(crate::traits::MemoryType::Episodic);
+                                Ok(Some(ContextItem {
+                                    memory_id: sr.memory_id,
+                                    content: text.clone(),
+                                    priority: PRIORITY_LEARNING,
+                                    estimated_tokens: budget.estimate_tokens(&text),
+                                    relevance_score: sr.score,
+                                    memory_type,
+                                    category,
+                                }))
+                            }
+                            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                            Err(e) => Err(e.into()),
+                        }
+                    })
+                    .ok()
+                    .flatten()
+            })
+            .collect();
+
+        Ok(ContextAssembly::assemble(candidates, budget))
     }
 
     /// Direct access to the database (for advanced consumers).
