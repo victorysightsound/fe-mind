@@ -5,7 +5,7 @@ use std::collections::HashMap;
 /// Cognitive memory type classification (CoALA framework).
 ///
 /// Determines decay rate, scoring behavior, and pruning eligibility.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 pub enum MemoryType {
     /// What happened — events, sessions, iteration logs.
     /// Decays fastest. Most useful when recent.
