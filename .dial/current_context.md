@@ -1,4 +1,4 @@
-# Task: Implement FTS5 keyword search with Porter stemming
+# Task: Implement SearchBuilder fluent API
 
 ## ⚠️ SIGNS (Critical Rules)
 
