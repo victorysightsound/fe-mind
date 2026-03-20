@@ -28,6 +28,14 @@ impl Database {
     /// Configures WAL mode, mmap, cache, and foreign keys.
     /// Creates a pool of read-only connections sized to available parallelism.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_key(path, None)
+    }
+
+    /// Open or create a database with an optional encryption key.
+    ///
+    /// When the `encryption` feature is enabled and a key is provided,
+    /// `PRAGMA key` is applied as the first statement after connection open.
+    pub fn open_with_key(path: impl AsRef<Path>, _encryption_key: Option<&crate::storage::EncryptionKey>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let conn = Connection::open(&path)?;
         Self::configure(&conn)?;

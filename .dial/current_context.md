@@ -1,4 +1,4 @@
-# Task: Wire two-tier memory into MemoryEngine — add global_database() to builder, merge results from both DBs with project boost
+# Task: Wire EncryptionKey into Database::open — apply PRAGMA key on encrypted connections
 
 ## ⚠️ SIGNS (Critical Rules)
 
