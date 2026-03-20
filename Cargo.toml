@@ -1,0 +1,108 @@
+[package]
+name = "mindcore"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Pluggable, feature-gated memory engine for AI agent applications"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/victorysightsound/mindcore"
+keywords = ["memory", "ai", "agent", "search", "embedding"]
+categories = ["database", "text-processing"]
+readme = "README.md"
+
+[features]
+default = ["fts5"]
+
+# Core search (always available)
+fts5 = []
+
+# Vector search — custom candle embedding module (pure Rust, no ONNX Runtime)
+# Native: granite-small-r2 via ModernBERT | WASM: bge-small-en-v1.5 via BERT
+local-embeddings = [
+    "dep:candle-core",
+    "dep:candle-nn",
+    "dep:candle-transformers",
+    "dep:tokenizers",
+    "dep:hf-hub",
+]
+vector-search = ["local-embeddings", "dep:tokio"]
+
+# ANN indexing for >100K scale
+# vector-indexed = ["vector-search", "dep:sqlite-vec"]  # TBD: Rust bindings maturity
+
+# Cross-encoder reranking (post-RRF refinement, uses candle BERT)
+reranking = ["local-embeddings"]
+
+# Graph memory (SQLite relationship tables)
+graph-memory = []
+
+# Temporal validity fields
+temporal = []
+
+# Consolidation pipeline (extract → consolidate → store)
+consolidation = []
+
+# ACT-R activation-based decay model
+activation-model = []
+
+# MCP server interface
+mcp-server = ["dep:axum", "dep:tower"]
+
+# Two-tier memory (global + project databases)
+two-tier = []
+
+# Encryption at rest via SQLCipher
+encryption = ["rusqlite/bundled-sqlcipher"]
+encryption-vendored = ["encryption", "rusqlite/bundled-sqlcipher-vendored-openssl"]
+
+# OS keychain integration for encryption key storage
+keychain = ["dep:keyring"]
+
+# Everything (native, excluding encryption and mcp-server)
+full = [
+    "vector-search",
+    "reranking",
+    "graph-memory",
+    "temporal",
+    "consolidation",
+    "activation-model",
+    "two-tier",
+]
+
+[dependencies]
+# Always required
+rusqlite = { version = "0.32", features = ["bundled", "functions"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+sha2 = "0.10"
+tracing = "0.1"
+
+# Async runtime (only for vector-search background indexer and embedding inference)
+tokio = { version = "1", features = ["rt", "sync"], optional = true }
+
+# Local embeddings (candle)
+candle-core = { version = "0.9", optional = true }
+candle-nn = { version = "0.9", optional = true }
+candle-transformers = { version = "0.9", optional = true }
+tokenizers = { version = "0.22", optional = true, default-features = false, features = ["onig"] }
+hf-hub = { version = "0.4", optional = true }
+
+# MCP server
+axum = { version = "0.7", optional = true }
+tower = { version = "0.5", optional = true }
+
+# Keychain (encryption key storage)
+keyring = { version = "3", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

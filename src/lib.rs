@@ -1,0 +1,42 @@
+//! # MindCore
+//!
+//! A pluggable, feature-gated memory engine for AI agent applications.
+//!
+//! MindCore provides persistent storage, keyword search (FTS5), vector search,
+//! hybrid retrieval (RRF), graph relationships, memory consolidation, cognitive
+//! decay modeling, and token-budget-aware context assembly.
+//!
+//! ## Quick Start
+//!
+//! ```rust,no_run
+//! use mindcore::prelude::*;
+//!
+//! // Define your memory type
+//! // (implement MemoryRecord for your struct)
+//!
+//! // Build the engine
+//! // let engine = MemoryEngine::<MyMemory>::builder()
+//! //     .database("memory.db")
+//! //     .build()?;
+//! ```
+//!
+//! ## Feature Flags
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | `fts5` (default) | FTS5 keyword search with Porter stemming |
+//! | `vector-search` | Candle embeddings + hybrid RRF search |
+//! | `reranking` | Cross-encoder reranking (post-RRF) |
+//! | `graph-memory` | SQLite relationship tables + CTE traversal |
+//! | `temporal` | Bi-temporal validity tracking |
+//! | `consolidation` | Hash/similarity/LLM-assisted dedup pipeline |
+//! | `activation-model` | ACT-R cognitive decay model |
+//! | `two-tier` | Global + project memory with promotion |
+//! | `encryption` | SQLCipher encryption at rest |
+//! | `mcp-server` | MCP server interface |
+//! | `full` | All features except encryption and mcp-server |
+
+/// Prelude module — common imports for consumers.
+pub mod prelude {
+    // Will be populated as types are implemented
+}
