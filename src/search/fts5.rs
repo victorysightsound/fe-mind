@@ -113,7 +113,7 @@ fn sanitize_fts5_query(query: &str) -> String {
     let mut result = String::with_capacity(query.len());
     for ch in query.chars() {
         match ch {
-            '*' | '"' | '(' | ')' | ':' | '^' | '{' | '}' | '+' | '~' | '?' => {
+            '*' | '"' | '(' | ')' | ':' | '^' | '{' | '}' | '+' | '~' | '?' | ',' | '.' | '!' | ';' | '\'' | '/' | '\\' | '[' | ']' | '<' | '>' | '&' | '#' | '@' | '=' => {
                 result.push(' ');
             }
             '-' => {

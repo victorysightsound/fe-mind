@@ -43,6 +43,9 @@ enum Commands {
         /// Context budget in tokens
         #[arg(short, long, default_value = "4096")]
         budget: usize,
+        /// Claude model to use (default: subscription default)
+        #[arg(short, long)]
+        model: Option<String>,
     },
     /// Show metrics from a results file
     Report {
@@ -111,12 +114,16 @@ async fn main() -> Result<()> {
             limit,
             output,
             budget,
+            model,
         } => {
             let v = parse_variant(&variant);
             let path = download::download_dataset(v).await?;
             let ds = dataset::Dataset::load(&path)?;
 
-            let client = llm::ClaudeClient::from_env()?;
+            let client = match model {
+                Some(m) => llm::ClaudeCliClient::with_model(m),
+                None => llm::ClaudeCliClient::new(),
+            };
 
             let questions = if limit > 0 {
                 &ds.questions[..limit.min(ds.questions.len())]
@@ -128,6 +135,7 @@ async fn main() -> Result<()> {
                 "Running LongMemEval benchmark: {} questions, budget={budget} tokens",
                 questions.len()
             );
+            println!("Using Claude Code CLI (subscription, no API tokens)\n");
 
             let pb = ProgressBar::new(questions.len() as u64);
             pb.set_style(
@@ -146,32 +154,37 @@ async fn main() -> Result<()> {
                 }
             }
 
-            for question in questions {
+            let mut correct_count = 0_usize;
+
+            for (i, question) in questions.iter().enumerate() {
                 pb.set_message(format!("{}", question.question_id));
 
                 // Step 1: Retrieve context from MindCore
                 let ctx = retrieval::process_question(question, budget)?;
 
-                // Step 2: Generate answer via LLM
+                // Step 2: Generate answer via Claude CLI
                 let prompt = retrieval::build_generation_prompt(
                     &ctx.context_text,
                     &question.question,
                     &question.question_date,
                 );
 
-                let (hypothesis, gen_tokens) = client.complete(&prompt, 512).await?;
+                let hypothesis = client.complete(&prompt, 512)?;
 
                 // Step 3: Judge the answer
                 let ground_truth = question.answer.as_text();
-                let (is_correct, judge_tokens) = judge::judge_answer(
+                let is_correct = judge::judge_answer(
                     &client,
                     &question.question,
                     &ground_truth,
                     &hypothesis,
                     question.question_type,
                     question.is_abstention(),
-                )
-                .await?;
+                )?;
+
+                if is_correct {
+                    correct_count += 1;
+                }
 
                 let result = EvalResult {
                     question_id: question.question_id.clone(),
@@ -180,7 +193,7 @@ async fn main() -> Result<()> {
                     hypothesis,
                     ground_truth,
                     is_correct,
-                    tokens_used: gen_tokens + judge_tokens,
+                    tokens_used: 0, // CLI doesn't report token counts
                 };
 
                 // Append to results file (JSONL)
@@ -194,6 +207,12 @@ async fn main() -> Result<()> {
 
                 results.push(result);
                 pb.inc(1);
+
+                // Print running accuracy every 10 questions
+                if (i + 1) % 10 == 0 {
+                    let running = correct_count as f64 / (i + 1) as f64 * 100.0;
+                    pb.println(format!("  [{}/{}] Running accuracy: {running:.1}%", i + 1, questions.len()));
+                }
             }
 
             pb.finish_with_message("done");

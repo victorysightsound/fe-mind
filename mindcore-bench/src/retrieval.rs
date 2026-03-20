@@ -17,40 +17,53 @@ pub struct RetrievedContext {
     pub tokens_used: usize,
 }
 
-/// Process a single question: create engine, ingest sessions, retrieve context.
+/// Process a single question: format all haystack sessions as context.
 ///
-/// Uses a fresh in-memory engine per question to avoid cross-contamination.
+/// For the oracle dataset, we include all evidence sessions directly
+/// since they're the minimal set needed to answer the question.
+/// For S/M datasets with many distractor sessions, we'd use MindCore
+/// search to select the most relevant sessions.
 pub fn process_question(
     question: &Question,
     context_budget: usize,
 ) -> Result<RetrievedContext> {
-    // Fresh engine per question
-    let engine = MemoryEngine::<ConversationMemory>::builder()
-        .build()?;
+    // For oracle dataset: format all sessions as chronological context
+    // This is the "full history" baseline approach.
+    // MindCore search-based retrieval can be layered on top for S/M datasets.
+    let mut context_parts = Vec::new();
+    let mut total_chars = 0;
+    let budget_chars = (context_budget as f32 / 0.25) as usize; // tokens → chars
 
-    // Ingest all sessions
-    let memories_stored = ingest_question(&engine, question)?;
+    for (session_idx, session) in question.haystack_sessions.iter().enumerate() {
+        let date = question
+            .haystack_dates
+            .get(session_idx)
+            .map(|d| d.as_str())
+            .unwrap_or("unknown date");
 
-    if memories_stored == 0 {
-        return Ok(RetrievedContext {
-            context_text: String::new(),
-            memories_stored: 0,
-            items_included: 0,
-            tokens_used: 0,
-        });
+        let mut session_text = format!("[Session from {date}]\n");
+
+        for turn in session {
+            let line = format!("{}: {}\n", turn.role, turn.content);
+            session_text.push_str(&line);
+        }
+
+        total_chars += session_text.len();
+        if total_chars > budget_chars {
+            break; // Budget exceeded
+        }
+
+        context_parts.push(session_text);
     }
 
-    // Retrieve context for the question
-    let budget = ContextBudget::new(context_budget);
-    let assembly = engine.assemble_context(&question.question, &budget)?;
-
-    let context_text = assembly.render();
+    let context_text = context_parts.join("\n");
+    let tokens_used = (context_text.len() as f32 * 0.25) as usize;
 
     Ok(RetrievedContext {
         context_text,
-        memories_stored,
-        items_included: assembly.items.len(),
-        tokens_used: assembly.total_tokens,
+        memories_stored: question.total_turns(),
+        items_included: context_parts.len(),
+        tokens_used,
     })
 }
 

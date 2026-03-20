@@ -1,19 +1,19 @@
 use anyhow::Result;
 
 use crate::dataset::QuestionType;
-use crate::llm::ClaudeClient;
+use crate::llm::ClaudeCliClient;
 
 /// Judge a hypothesis against the ground truth using type-specific prompts.
 ///
-/// Returns (is_correct, tokens_used).
-pub async fn judge_answer(
-    client: &ClaudeClient,
+/// Returns is_correct (true/false).
+pub fn judge_answer(
+    client: &ClaudeCliClient,
     question: &str,
     ground_truth: &str,
     hypothesis: &str,
     question_type: QuestionType,
     is_abstention: bool,
-) -> Result<(bool, u32)> {
+) -> Result<bool> {
     let judge_instruction = if is_abstention {
         "You are evaluating a conversational AI assistant's response. \
          The question is designed to be unanswerable based on the chat history. \
@@ -56,11 +56,11 @@ pub async fn judge_answer(
          Question: {question}\n\
          Required Answer: {ground_truth}\n\
          Model's Response: {hypothesis}\n\n\
-         Is the model's response correct? Answer only \"yes\" or \"no\"."
+         Is the model's response correct? Answer ONLY \"yes\" or \"no\", nothing else."
     );
 
-    let (response, tokens) = client.complete(&prompt, 10).await?;
+    let response = client.complete(&prompt, 10)?;
     let is_correct = response.to_lowercase().contains("yes");
 
-    Ok((is_correct, tokens))
+    Ok(is_correct)
 }
