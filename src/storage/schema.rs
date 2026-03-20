@@ -75,6 +75,23 @@ CREATE TABLE IF NOT EXISTS memory_vectors (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Graph relationships (feature: graph-memory)
+CREATE TABLE IF NOT EXISTS memory_relations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id   INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    target_id   INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    relation    TEXT NOT NULL,
+    confidence  REAL NOT NULL DEFAULT 1.0,
+    valid_from  TEXT,
+    valid_until TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(source_id, target_id, relation)
+);
+
+CREATE INDEX IF NOT EXISTS idx_relations_source ON memory_relations(source_id);
+CREATE INDEX IF NOT EXISTS idx_relations_target ON memory_relations(target_id);
+CREATE INDEX IF NOT EXISTS idx_relations_type ON memory_relations(relation);
+
 -- Access log for activation model (feature: activation-model)
 CREATE TABLE IF NOT EXISTS memory_access_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

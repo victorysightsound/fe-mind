@@ -1,4 +1,4 @@
-# Task: Write integration tests for vector search, RRF, fallback, background indexing
+# Task: Add memory_relations table with indexes (migration v4-v5)
 
 ## ⚠️ SIGNS (Critical Rules)
 
