@@ -1,4 +1,4 @@
-# Task: Implement LlmCallback trait
+# Task: Implement EncryptionKey and SQLCipher integration
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -20,16 +20,18 @@
 ## Related Specifications
 
 
-### MindCore — Product Requirements Document > 3. Phases > Phase 8: LLM-Assisted Features
-LlmCallback trait and all features that depend on it. After this phase, consumers can plug in LLMs for intelligent consolidation, fact extraction, evolution, and reflection.
+### MindCore — Product Requirements Document > 3. Phases > Phase 9: Encryption + MCP + Polish
+Optional encryption, MCP server interface, and production hardening.
 
 **Deliverables:**
-- `LlmCallback` trait (async complete)
-- `IngestStrategy` trait with `PassthroughIngest` and `LlmIngest`
-- `LLMConsolidation` strategy
-- `EvolutionStrategy` trait and `EvolutionAction` enum
-- Post-write evolution pipeline (store → retrieve similar → evaluate → update)
-- `engine.consolidate()` — epi
+- `EncryptionKey` enum (Passphrase, RawKey)
+- SQLCipher integration via `bundled-sqlcipher` feature
+- `PRAGMA key` first statement on encrypted connections
+- Optional `keychain` module via `keyring` crate
+- MCP server interface (feature-gated behind `mcp-server`)
+- MCP tools: search, store, get, delete, relate, context
+- `full` feature flag verified: all features compile together
+- Rustdoc for all public type
 
 ## Project Learnings (apply these patterns)
 
