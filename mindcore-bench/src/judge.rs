@@ -17,36 +17,70 @@ pub fn judge_answer(
     let judge_instruction = if is_abstention {
         "You are evaluating a conversational AI assistant's response. \
          The question is designed to be unanswerable based on the chat history. \
-         Answer \"yes\" if the model correctly identifies the question as unanswerable \
-         or says it doesn't have enough information. Answer \"no\" if the model attempts \
-         to provide a specific answer."
+         Answer \"yes\" if the model indicates it cannot answer from the chat history, \
+         uses language like \"I don't know\", \"not available\", \"cannot determine\", \
+         \"no information\", or clearly states the information is not in the conversations. \
+         Answer \"no\" if the model provides a specific substantive answer to the question, \
+         even if it also expresses some uncertainty. A hedge like \"I'm not sure but...\" \
+         followed by an answer counts as \"no\" (model should have fully abstained)."
+            .to_string()
     } else {
         match question_type {
             QuestionType::TemporalReasoning => {
                 "You are evaluating a conversational AI assistant's response. \
+                 The model's response may contain detailed step-by-step date calculations. \
+                 Look for the final computed answer anywhere in the response. \
+                 Accept equivalent representations (e.g., '3 weeks' vs '21 days', \
+                 'two' vs '2'). Do not penalize off-by-one errors for days, weeks, or months. \
+                 If the required answer is a list or sequence, check that ALL items appear \
+                 somewhere in the response. \
                  Answer \"yes\" if the response contains the correct answer or is equivalent \
-                 to the correct answer or contains all intermediate steps needed to reach the answer. \
-                 Do not penalize off-by-one errors for the number of days, weeks, or months. \
-                 Answer \"no\" otherwise."
+                 to the correct answer. Answer \"no\" otherwise."
+                    .to_string()
             }
             QuestionType::KnowledgeUpdate => {
                 "You are evaluating a conversational AI assistant's response. \
-                 The response should be considered correct as long as the updated answer \
-                 (the required answer) is present. It is acceptable if the response also \
-                 mentions the old information, as long as the new/updated information is \
-                 the primary answer. Answer \"yes\" if correct, \"no\" otherwise."
+                 The response may discuss both old and new values at length. \
+                 As long as the updated/most-recent value appears as the primary or final \
+                 answer, mark it correct. It is acceptable if the response also mentions \
+                 old information. \
+                 Answer \"yes\" if the most recent/updated value is present as the answer. \
+                 Answer \"no\" otherwise."
+                    .to_string()
             }
             QuestionType::SingleSessionPreference => {
                 "You are evaluating a conversational AI assistant's response. \
-                 Answer \"yes\" if the response correctly recalls and utilizes the user's \
-                 personal information and satisfies the desired response. \
-                 Answer \"no\" otherwise."
+                 The response should describe the user's preferences. \
+                 Answer \"yes\" if the response captures the essential preference described \
+                 in the required answer, even if phrased differently or with different \
+                 specific examples. The key is whether the CORE PREFERENCE (e.g., the topic, \
+                 the style, the type of content) matches. Word-for-word match is NOT required. \
+                 Answer \"no\" if the core preference is missed, contradicted, or the response \
+                 is a direct answer to the question rather than a preference description."
+                    .to_string()
+            }
+            QuestionType::MultiSession => {
+                "You are evaluating a conversational AI assistant's response. \
+                 The model's response may be long and contain step-by-step reasoning. \
+                 Search the ENTIRE response for the required answer. \
+                 If the required answer is a number, accept it if the correct number appears \
+                 in the response's final answer or conclusion. \
+                 If the required answer is a list of items, verify ALL items are mentioned \
+                 somewhere in the response. \
+                 Accept equivalent phrasings and minor variations. \
+                 Answer \"yes\" if all required information is present. Answer \"no\" otherwise."
+                    .to_string()
             }
             _ => {
+                // SingleSessionUser, SingleSessionAssistant
                 "You are evaluating a conversational AI assistant's response. \
+                 The model's response may contain step-by-step reasoning. \
+                 Search the ENTIRE response for the required answer — it may appear \
+                 in the middle of the reasoning, not just at the end. \
+                 Accept equivalent phrasings and representations. \
                  Answer \"yes\" if the response contains the correct answer or is equivalent \
-                 to the correct answer or contains all intermediate steps needed to reach the answer. \
-                 Answer \"no\" otherwise."
+                 to the correct answer. Answer \"no\" otherwise."
+                    .to_string()
             }
         }
     };

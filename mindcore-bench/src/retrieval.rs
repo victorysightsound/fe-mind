@@ -1,9 +1,6 @@
 use anyhow::Result;
-use mindcore::context::ContextBudget;
-use mindcore::engine::MemoryEngine;
 
-use crate::dataset::Question;
-use crate::ingest::{ingest_question, ConversationMemory};
+use crate::dataset::{Question, QuestionType};
 
 /// Context retrieved for answering a question.
 pub struct RetrievedContext {
@@ -21,18 +18,18 @@ pub struct RetrievedContext {
 ///
 /// For the oracle dataset, we include all evidence sessions directly
 /// since they're the minimal set needed to answer the question.
-/// For S/M datasets with many distractor sessions, we'd use MindCore
-/// search to select the most relevant sessions.
+/// Pass `context_budget = 0` for unlimited (recommended for oracle).
 pub fn process_question(
     question: &Question,
     context_budget: usize,
 ) -> Result<RetrievedContext> {
-    // For oracle dataset: format all sessions as chronological context
-    // This is the "full history" baseline approach.
-    // MindCore search-based retrieval can be layered on top for S/M datasets.
     let mut context_parts = Vec::new();
     let mut total_chars = 0;
-    let budget_chars = (context_budget as f32 / 0.25) as usize; // tokens → chars
+    let budget_chars = if context_budget == 0 {
+        usize::MAX // unlimited
+    } else {
+        (context_budget as f32 / 0.25) as usize
+    };
 
     for (session_idx, session) in question.haystack_sessions.iter().enumerate() {
         let date = question
@@ -50,7 +47,7 @@ pub fn process_question(
 
         total_chars += session_text.len();
         if total_chars > budget_chars {
-            break; // Budget exceeded
+            break;
         }
 
         context_parts.push(session_text);
@@ -67,31 +64,84 @@ pub fn process_question(
     })
 }
 
-/// Build the generation prompt using the LongMemEval template.
+/// Build the generation prompt with type-specific instructions.
 pub fn build_generation_prompt(
     context: &str,
     question: &str,
     question_date: &str,
+    question_type: QuestionType,
+    is_abstention: bool,
 ) -> String {
-    format!(
+    let preamble = format!(
         "I will give you several history chats between a user and an AI assistant. \
-         Based on the chat history, answer the question at the end. \
-         Answer the question step by step: first extract all the relevant information, \
-         and then reason over the information to get the answer. \
-         If the information needed to answer the question is not available in the chat history, \
-         say \"I don't know\" or \"The information is not available in the chat history.\"\n\n\
+         Based on the chat history, answer the question at the end.\n\n\
          History Chats:\n\n\
          {context}\n\n\
          Current Date: {question_date}\n\
-         Question: {question}\n\
-         Answer (step by step):"
-    )
+         Question: {question}\n\n"
+    );
+
+    let type_instruction = if is_abstention {
+        "Instructions: If the chat history does not contain information that DIRECTLY answers \
+         this question, you MUST respond with \"I don't know\" or \"The information is not \
+         available in the chat history.\" Do NOT attempt to infer, extrapolate, or guess. \
+         Only answer if the information is explicitly stated in the conversations. \
+         If you can answer, provide the answer concisely."
+            .to_string()
+    } else {
+        match question_type {
+            QuestionType::SingleSessionPreference => {
+                "Instructions: Based on the chat history, describe what the user's preferences \
+                 would be when responding to this question. Your answer MUST be in the format: \
+                 \"The user would prefer responses that...\" Describe the user's preferences, \
+                 interests, and what kind of response they would want, based on context clues \
+                 from the conversations. Do NOT answer the question directly — instead describe \
+                 what the user would prefer."
+                    .to_string()
+            }
+            QuestionType::TemporalReasoning => {
+                format!(
+                    "Instructions: Answer this question step by step. Pay close attention to \
+                     dates and timestamps on each session. \
+                     IMPORTANT: Before computing any count or duration, list EVERY relevant \
+                     event with its exact date. Then count them explicitly (1, 2, 3...) or \
+                     compute the date arithmetic step by step. Do not estimate or shortcut. \
+                     When counting days between dates, enumerate each step. \
+                     Current Date: {question_date}"
+                )
+            }
+            QuestionType::KnowledgeUpdate => {
+                "Instructions: Answer this question step by step. When information has been \
+                 updated across sessions, use the MOST RECENT value as the primary answer. \
+                 IMPORTANT: List ALL versions of the relevant information chronologically with \
+                 their session dates. Then clearly state the latest/most recent value as your \
+                 final answer."
+                    .to_string()
+            }
+            QuestionType::MultiSession => {
+                "Instructions: This question requires synthesizing information across multiple \
+                 sessions. Answer step by step. \
+                 IMPORTANT: Before giving your final answer, enumerate ALL relevant items/facts \
+                 from EVERY session. Number each one explicitly. Do not skip any session. \
+                 Then compile your final answer from the complete list."
+                    .to_string()
+            }
+            _ => {
+                // SingleSessionUser, SingleSessionAssistant
+                "Instructions: Answer the question based on the chat history. \
+                 First extract the relevant information, then provide a concise answer."
+                    .to_string()
+            }
+        }
+    };
+
+    format!("{preamble}{type_instruction}\n\nAnswer:")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataset::{Answer, QuestionType, Turn};
+    use crate::dataset::{Answer, Turn};
 
     fn test_question() -> Question {
         Question {
@@ -103,8 +153,16 @@ mod tests {
             haystack_session_ids: vec!["s1".into()],
             haystack_dates: vec!["2024/01/15 (Mon) 10:00".into()],
             haystack_sessions: vec![vec![
-                Turn { role: "user".into(), content: "My favorite color is blue".into(), has_answer: true },
-                Turn { role: "assistant".into(), content: "That's a nice color!".into(), has_answer: false },
+                Turn {
+                    role: "user".into(),
+                    content: "My favorite color is blue".into(),
+                    has_answer: true,
+                },
+                Turn {
+                    role: "assistant".into(),
+                    content: "That's a nice color!".into(),
+                    has_answer: false,
+                },
             ]],
             answer_session_ids: vec!["s1".into()],
         }
@@ -121,12 +179,64 @@ mod tests {
     }
 
     #[test]
-    fn generation_prompt_format() {
-        let prompt = build_generation_prompt("some history", "What color?", "2024/01/15");
+    fn process_question_unlimited_budget() {
+        let q = test_question();
+        let result = process_question(&q, 0).expect("process");
+        assert!(result.items_included > 0);
+        assert!(result.context_text.contains("blue"));
+    }
+
+    #[test]
+    fn generation_prompt_default() {
+        let prompt = build_generation_prompt(
+            "some history",
+            "What color?",
+            "2024/01/15",
+            QuestionType::SingleSessionUser,
+            false,
+        );
         assert!(prompt.contains("History Chats:"));
         assert!(prompt.contains("some history"));
         assert!(prompt.contains("What color?"));
-        assert!(prompt.contains("2024/01/15"));
-        assert!(prompt.contains("step by step"));
+        assert!(prompt.contains("extract the relevant information"));
+    }
+
+    #[test]
+    fn preference_prompt_format() {
+        let prompt = build_generation_prompt(
+            "some history",
+            "Recommend resources?",
+            "2024/01/15",
+            QuestionType::SingleSessionPreference,
+            false,
+        );
+        assert!(prompt.contains("The user would prefer responses that"));
+        assert!(prompt.contains("Do NOT answer the question directly"));
+    }
+
+    #[test]
+    fn temporal_prompt_format() {
+        let prompt = build_generation_prompt(
+            "some history",
+            "How many days?",
+            "2024/01/15",
+            QuestionType::TemporalReasoning,
+            false,
+        );
+        assert!(prompt.contains("EVERY relevant event"));
+        assert!(prompt.contains("count them explicitly"));
+    }
+
+    #[test]
+    fn abstention_prompt_format() {
+        let prompt = build_generation_prompt(
+            "some history",
+            "What did I say?",
+            "2024/01/15",
+            QuestionType::SingleSessionUser,
+            true,
+        );
+        assert!(prompt.contains("MUST respond with"));
+        assert!(prompt.contains("Do NOT attempt to infer"));
     }
 }

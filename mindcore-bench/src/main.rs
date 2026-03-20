@@ -41,14 +41,14 @@ enum Commands {
         /// Output file for results (appends; skips already-evaluated questions)
         #[arg(short, long, default_value = "results.jsonl")]
         output: String,
-        /// Context budget in tokens
-        #[arg(short, long, default_value = "16384")]
+        /// Context budget in tokens (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
         budget: usize,
         /// Model for answer generation (default: sonnet)
         #[arg(short, long, default_value = "sonnet")]
         model: String,
-        /// Model for judging (default: haiku)
-        #[arg(long, default_value = "haiku")]
+        /// Model for judging (default: sonnet)
+        #[arg(long, default_value = "sonnet")]
         judge_model: String,
     },
     /// Show metrics from a results file
@@ -224,6 +224,8 @@ async fn main() -> Result<()> {
                     &ctx.context_text,
                     &question.question,
                     &question.question_date,
+                    question.question_type,
+                    question.is_abstention(),
                 );
 
                 let hypothesis = match gen_client.complete(&prompt, 512) {
