@@ -1,4 +1,4 @@
-# Task: Create Cargo.toml with crate metadata, features, and dependency skeleton
+# Task: Implement MemoryRecord trait, MemoryType enum, MemoryMeta struct
 
 ## ⚠️ SIGNS (Critical Rules)
 

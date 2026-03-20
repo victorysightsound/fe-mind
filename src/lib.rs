@@ -36,7 +36,9 @@
 //! | `mcp-server` | MCP server interface |
 //! | `full` | All features except encryption and mcp-server |
 
+pub mod traits;
+
 /// Prelude module — common imports for consumers.
 pub mod prelude {
-    // Will be populated as types are implemented
+    pub use crate::traits::{MemoryMeta, MemoryRecord, MemoryType};
 }
