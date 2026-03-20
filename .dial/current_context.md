@@ -1,4 +1,4 @@
-# Task: Wire EncryptionKey into Database::open — apply PRAGMA key on encrypted connections
+# Task: End-to-end integration test: store 100 memories with NoopBackend, search hybrid with RRF, verify scoring and context assembly
 
 ## ⚠️ SIGNS (Critical Rules)
 
