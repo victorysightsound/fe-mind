@@ -1,14 +1,16 @@
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
 use crate::error::{MindCoreError, Result};
 use crate::memory::MemoryStore;
 use crate::memory::store::StoreResult;
+use crate::scoring::CompositeScorer;
 use crate::search::builder::{SearchBuilder, SearchResult};
 use crate::storage::Database;
 use crate::storage::migrations;
-use crate::traits::MemoryRecord;
+use crate::traits::{MemoryRecord, ScoringStrategy};
 
 /// The primary interface to MindCore.
 ///
@@ -28,6 +30,7 @@ use crate::traits::MemoryRecord;
 pub struct MemoryEngine<T: MemoryRecord> {
     db: Database,
     store: MemoryStore<T>,
+    scoring: Arc<dyn ScoringStrategy>,
 }
 
 impl<T: MemoryRecord> MemoryEngine<T> {
@@ -60,8 +63,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     }
 
     /// Begin a search with the fluent builder API.
+    ///
+    /// Post-search scoring is automatically applied using the engine's
+    /// configured scoring strategy.
     pub fn search(&self, query: &str) -> SearchBuilder<'_, T> {
-        SearchBuilder::new(&self.db, query)
+        SearchBuilder::new(&self.db, query).with_scoring(Arc::clone(&self.scoring))
     }
 
     /// Count total memories in the database.
@@ -142,6 +148,7 @@ impl<T: MemoryRecord> std::fmt::Debug for MemoryEngine<T> {
 /// Builder for constructing a `MemoryEngine`.
 pub struct MemoryEngineBuilder<T: MemoryRecord> {
     database_path: Option<String>,
+    scoring: Option<Arc<dyn ScoringStrategy>>,
     _phantom: PhantomData<T>,
 }
 
@@ -149,6 +156,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
     fn new() -> Self {
         Self {
             database_path: None,
+            scoring: None,
             _phantom: PhantomData,
         }
     }
@@ -158,6 +166,14 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
     /// If not set, uses an in-memory database (useful for testing).
     pub fn database(mut self, path: impl Into<String>) -> Self {
         self.database_path = Some(path.into());
+        self
+    }
+
+    /// Set the scoring strategy for post-search ranking.
+    ///
+    /// If not set, uses a no-op scorer (raw retrieval scores only).
+    pub fn scoring(mut self, strategy: impl ScoringStrategy + 'static) -> Self {
+        self.scoring = Some(Arc::new(strategy));
         self
     }
 
@@ -189,9 +205,14 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             Ok(())
         })?;
 
+        let scoring = self
+            .scoring
+            .unwrap_or_else(|| Arc::new(CompositeScorer::empty()));
+
         Ok(MemoryEngine {
             db,
             store: MemoryStore::new(),
+            scoring,
         })
     }
 }

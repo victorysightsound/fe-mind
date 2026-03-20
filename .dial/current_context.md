@@ -1,4 +1,4 @@
-# Task: Implement engine.assemble_context() with priority-ranked selection
+# Task: Integrate scoring into SearchBuilder.execute() pipeline
 
 ## ⚠️ SIGNS (Critical Rules)
 

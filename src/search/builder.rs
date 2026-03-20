@@ -1,9 +1,10 @@
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use crate::error::Result;
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::storage::Database;
-use crate::traits::{MemoryRecord, MemoryType};
+use crate::traits::{MemoryMeta, MemoryRecord, MemoryType, ScoringStrategy};
 
 /// Search mode determines which retrieval strategies are used.
 #[derive(Debug, Clone)]
@@ -71,6 +72,7 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     memory_type: Option<MemoryType>,
     tier: Option<u8>,
     min_score: Option<f32>,
+    scoring: Option<Arc<dyn ScoringStrategy>>,
     _phantom: PhantomData<T>,
 }
 
@@ -87,8 +89,15 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             memory_type: None,
             tier: None,
             min_score: None,
+            scoring: None,
             _phantom: PhantomData,
         }
+    }
+
+    /// Attach a scoring strategy (called by MemoryEngine).
+    pub fn with_scoring(mut self, scoring: Arc<dyn ScoringStrategy>) -> Self {
+        self.scoring = Some(scoring);
+        self
     }
 
     /// Set the search mode.
@@ -192,17 +201,66 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         Ok(results)
     }
 
-    /// Apply tier and other filters to FTS results.
+    /// Apply scoring and filters to FTS results.
     fn apply_filters(&self, fts_results: Vec<FtsResult>) -> Vec<SearchResult> {
-        // For now, convert FTS results to SearchResults directly.
-        // Tier filtering will be added when tier-aware queries are implemented.
-        fts_results
+        let mut results: Vec<SearchResult> = fts_results
             .into_iter()
             .map(|r| SearchResult {
                 memory_id: r.memory_id,
                 score: r.score,
             })
-            .collect()
+            .collect();
+
+        // Apply post-search scoring if a strategy is configured
+        if let Some(ref scoring) = self.scoring {
+            self.apply_scoring(&mut results, scoring);
+        }
+
+        // Re-sort by final score (descending)
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+        results
+    }
+
+    /// Apply scoring strategy to results by loading memory metadata.
+    fn apply_scoring(&self, results: &mut [SearchResult], scoring: &Arc<dyn ScoringStrategy>) {
+        for result in results.iter_mut() {
+            // Load metadata for scoring
+            let meta = self.db.with_reader(|conn| {
+                let row = conn.query_row(
+                    "SELECT searchable_text, memory_type, importance, category, created_at
+                     FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| {
+                        Ok(MemoryMeta {
+                            id: Some(result.memory_id),
+                            searchable_text: row.get(0)?,
+                            memory_type: crate::traits::MemoryType::from_str(
+                                &row.get::<_, String>(1)?
+                            ).unwrap_or(crate::traits::MemoryType::Episodic),
+                            importance: row.get::<_, i32>(2)? as u8,
+                            category: row.get(3)?,
+                            created_at: chrono::DateTime::parse_from_rfc3339(
+                                &row.get::<_, String>(4)?
+                            )
+                            .map(|dt| dt.with_timezone(&chrono::Utc))
+                            .unwrap_or_else(|_| chrono::Utc::now()),
+                            metadata: std::collections::HashMap::new(),
+                        })
+                    },
+                );
+                match row {
+                    Ok(meta) => Ok(Some(meta)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e.into()),
+                }
+            });
+
+            if let Ok(Some(meta)) = meta {
+                let multiplier = scoring.score_multiplier(&meta, &self.query, result.score);
+                result.score *= multiplier;
+            }
+        }
     }
 }
 
