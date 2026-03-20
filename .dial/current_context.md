@@ -1,4 +1,4 @@
-# Task: Implement MindCoreError enum and Result<T> type alias
+# Task: Implement SQLite storage engine (connection, WAL, pragmas, mmap)
 
 ## ⚠️ SIGNS (Critical Rules)
 
