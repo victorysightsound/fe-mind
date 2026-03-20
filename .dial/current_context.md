@@ -1,4 +1,4 @@
-# Task: End-to-end integration test: store 100 memories with NoopBackend, search hybrid with RRF, verify scoring and context assembly
+# Task: Feature flag isolation test — verify each feature flag compiles independently: cargo build --features X for each feature
 
 ## ⚠️ SIGNS (Critical Rules)
 
