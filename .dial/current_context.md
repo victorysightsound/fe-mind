@@ -1,4 +1,4 @@
-# Task: Implement RecencyScorer with configurable half-life
+# Task: Implement ContextBudget, ContextItem, ContextAssembly structs
 
 ## ⚠️ SIGNS (Critical Rules)
 
