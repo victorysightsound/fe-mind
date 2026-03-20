@@ -1,4 +1,4 @@
-# Task: Implement two-tier memory manager (global + project databases)
+# Task: Implement LlmCallback trait
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -16,6 +16,20 @@
 - **FAIL FAST: If blocked or confused, stop and ask rather than guessing.**
 
 
+
+## Related Specifications
+
+
+### MindCore — Product Requirements Document > 3. Phases > Phase 8: LLM-Assisted Features
+LlmCallback trait and all features that depend on it. After this phase, consumers can plug in LLMs for intelligent consolidation, fact extraction, evolution, and reflection.
+
+**Deliverables:**
+- `LlmCallback` trait (async complete)
+- `IngestStrategy` trait with `PassthroughIngest` and `LlmIngest`
+- `LLMConsolidation` strategy
+- `EvolutionStrategy` trait and `EvolutionAction` enum
+- Post-write evolution pipeline (store → retrieve similar → evaluate → update)
+- `engine.consolidate()` — epi
 
 ## Project Learnings (apply these patterns)
 
