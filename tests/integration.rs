@@ -6,10 +6,9 @@
 use chrono::{DateTime, Utc};
 use mindcore::engine::MemoryEngine;
 use mindcore::memory::store::StoreResult;
-use mindcore::search::{SearchMode, SearchResult};
+use mindcore::search::SearchMode;
 use mindcore::traits::{MemoryRecord, MemoryType};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 // --- Test Memory Type ---

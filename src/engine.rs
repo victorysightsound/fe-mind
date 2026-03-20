@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
+use crate::embeddings::EmbeddingBackend;
 use crate::error::{MindCoreError, Result};
 use crate::memory::MemoryStore;
 use crate::memory::store::StoreResult;
@@ -31,6 +32,7 @@ pub struct MemoryEngine<T: MemoryRecord> {
     db: Database,
     store: MemoryStore<T>,
     scoring: Arc<dyn ScoringStrategy>,
+    embedding: Option<Arc<dyn EmbeddingBackend>>,
 }
 
 impl<T: MemoryRecord> MemoryEngine<T> {
@@ -65,9 +67,20 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// Begin a search with the fluent builder API.
     ///
     /// Post-search scoring is automatically applied using the engine's
-    /// configured scoring strategy.
+    /// configured scoring strategy. If an embedding backend is configured,
+    /// `SearchMode::Auto` will use hybrid FTS5 + vector search.
     pub fn search(&self, query: &str) -> SearchBuilder<'_, T> {
-        SearchBuilder::new(&self.db, query).with_scoring(Arc::clone(&self.scoring))
+        let mut builder = SearchBuilder::new(&self.db, query)
+            .with_scoring(Arc::clone(&self.scoring));
+        if let Some(ref embedding) = self.embedding {
+            builder = builder.with_embedding(Arc::clone(embedding));
+        }
+        builder
+    }
+
+    /// Access the embedding backend (if configured).
+    pub fn embedding_backend(&self) -> Option<&dyn EmbeddingBackend> {
+        self.embedding.as_deref()
     }
 
     /// Count total memories in the database.
@@ -149,6 +162,7 @@ impl<T: MemoryRecord> std::fmt::Debug for MemoryEngine<T> {
 pub struct MemoryEngineBuilder<T: MemoryRecord> {
     database_path: Option<String>,
     scoring: Option<Arc<dyn ScoringStrategy>>,
+    embedding: Option<Arc<dyn EmbeddingBackend>>,
     _phantom: PhantomData<T>,
 }
 
@@ -157,6 +171,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
         Self {
             database_path: None,
             scoring: None,
+            embedding: None,
             _phantom: PhantomData,
         }
     }
@@ -174,6 +189,15 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
     /// If not set, uses a no-op scorer (raw retrieval scores only).
     pub fn scoring(mut self, strategy: impl ScoringStrategy + 'static) -> Self {
         self.scoring = Some(Arc::new(strategy));
+        self
+    }
+
+    /// Set the embedding backend for vector search.
+    ///
+    /// When set, `SearchMode::Auto` uses hybrid FTS5 + vector search.
+    /// Without this, all search modes fall back to FTS5 keyword search.
+    pub fn embedding_backend(mut self, backend: impl EmbeddingBackend + 'static) -> Self {
+        self.embedding = Some(Arc::new(backend));
         self
     }
 
@@ -213,6 +237,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             db,
             store: MemoryStore::new(),
             scoring,
+            embedding: self.embedding,
         })
     }
 }

@@ -3,8 +3,11 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
+use crate::embeddings::EmbeddingBackend;
 use crate::error::Result;
 use crate::search::fts5::{FtsResult, FtsSearch};
+use crate::search::hybrid::rrf_merge;
+use crate::search::vector::VectorSearch;
 use crate::storage::Database;
 use crate::traits::{MemoryMeta, MemoryRecord, MemoryType, ScoringStrategy};
 
@@ -72,6 +75,7 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     min_score: Option<f32>,
     valid_at: Option<DateTime<Utc>>,
     scoring: Option<Arc<dyn ScoringStrategy>>,
+    embedding: Option<Arc<dyn EmbeddingBackend>>,
     _phantom: PhantomData<T>,
 }
 
@@ -90,6 +94,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             min_score: None,
             valid_at: None,
             scoring: None,
+            embedding: None,
             _phantom: PhantomData,
         }
     }
@@ -97,6 +102,12 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Attach a scoring strategy (called by MemoryEngine).
     pub fn with_scoring(mut self, scoring: Arc<dyn ScoringStrategy>) -> Self {
         self.scoring = Some(scoring);
+        self
+    }
+
+    /// Attach an embedding backend for vector search (called by MemoryEngine).
+    pub fn with_embedding(mut self, embedding: Arc<dyn EmbeddingBackend>) -> Self {
+        self.embedding = Some(embedding);
         self
     }
 
@@ -158,13 +169,20 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// for vector search, not inline inference.
     pub fn execute(self) -> Result<Vec<SearchResult>> {
         match &self.mode {
-            SearchMode::Keyword | SearchMode::Auto => self.execute_keyword(),
+            SearchMode::Keyword => self.execute_keyword(),
+            SearchMode::Vector => self.execute_vector(),
+            SearchMode::Hybrid => self.execute_hybrid(),
+            SearchMode::Auto => {
+                if self.embedding.is_some() {
+                    self.execute_hybrid()
+                } else {
+                    self.execute_keyword()
+                }
+            }
             SearchMode::Exhaustive { min_score } => {
                 let threshold = *min_score;
                 self.execute_exhaustive(threshold)
             }
-            // Vector and Hybrid will be implemented in Phase 5
-            SearchMode::Vector | SearchMode::Hybrid => self.execute_keyword(),
         }
     }
 
@@ -211,6 +229,80 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let mut results = self.apply_filters(fts_results);
         results.retain(|r| r.score >= min_score);
+        Ok(results)
+    }
+
+    /// Execute vector-only search.
+    fn execute_vector(&self) -> Result<Vec<SearchResult>> {
+        let Some(ref embedding) = self.embedding else {
+            // No embedding backend — fall back to keyword
+            return self.execute_keyword();
+        };
+
+        if !embedding.is_available() {
+            return self.execute_keyword();
+        }
+
+        let query_vec = embedding.embed(&self.query)?;
+        let model = embedding.model_name();
+
+        let vector_results = VectorSearch::search(
+            self.db,
+            &query_vec,
+            model,
+            self.limit * 3,
+        )?;
+
+        let mut results = self.apply_filters(vector_results);
+        if let Some(threshold) = self.min_score {
+            results.retain(|r| r.score >= threshold);
+        }
+        results.truncate(self.limit);
+        Ok(results)
+    }
+
+    /// Execute hybrid search: FTS5 + vector merged via RRF.
+    fn execute_hybrid(&self) -> Result<Vec<SearchResult>> {
+        let Some(ref embedding) = self.embedding else {
+            return self.execute_keyword();
+        };
+
+        if !embedding.is_available() {
+            return self.execute_keyword();
+        }
+
+        let category_filter = self.category.as_deref();
+        let type_filter = self.memory_type.map(|t| t.as_str());
+        let min_tier = self.depth_to_min_tier();
+
+        // FTS5 keyword search (over-fetch 3x for RRF)
+        let fts_results = FtsSearch::search_with_tiers(
+            self.db,
+            &self.query,
+            self.limit * 3,
+            category_filter,
+            type_filter,
+            min_tier,
+        )?;
+
+        // Vector similarity search
+        let query_vec = embedding.embed(&self.query)?;
+        let model = embedding.model_name();
+        let vector_results = VectorSearch::search(
+            self.db,
+            &query_vec,
+            model,
+            self.limit * 3,
+        )?;
+
+        // Merge via RRF
+        let merged = rrf_merge(&fts_results, &vector_results, &self.query, self.limit * 2);
+
+        let mut results = self.apply_filters(merged);
+        if let Some(threshold) = self.min_score {
+            results.retain(|r| r.score >= threshold);
+        }
+        results.truncate(self.limit);
         Ok(results)
     }
 

@@ -7,7 +7,6 @@ use mindcore::embeddings::{EmbeddingBackend, FallbackBackend, NoopBackend};
 use mindcore::embeddings::pooling::{bytes_to_vec, cosine_similarity, normalize_l2, vec_to_bytes};
 use mindcore::search::{VectorSearch, rrf_merge};
 use mindcore::search::FtsResult;
-use mindcore::engine::MemoryEngine;
 use mindcore::storage::Database;
 use mindcore::storage::migrations;
 use mindcore::traits::{MemoryRecord, MemoryType};
