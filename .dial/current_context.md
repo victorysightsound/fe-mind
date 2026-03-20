@@ -1,4 +1,4 @@
-# Task: Implement MemoryRecord trait, MemoryType enum, MemoryMeta struct
+# Task: Implement MindCoreError enum and Result<T> type alias
 
 ## ⚠️ SIGNS (Critical Rules)
 
