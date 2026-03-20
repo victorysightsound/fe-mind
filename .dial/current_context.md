@@ -1,4 +1,4 @@
-# Task: Add memory_relations table with indexes (migration v4-v5)
+# Task: Implement temporal validity fields and .valid_at() search filter
 
 ## ⚠️ SIGNS (Critical Rules)
 

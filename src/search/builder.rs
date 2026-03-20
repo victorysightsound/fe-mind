@@ -1,6 +1,8 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use crate::error::Result;
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::storage::Database;
@@ -74,6 +76,7 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     memory_type: Option<MemoryType>,
     tier: Option<u8>,
     min_score: Option<f32>,
+    valid_at: Option<DateTime<Utc>>,
     scoring: Option<Arc<dyn ScoringStrategy>>,
     _phantom: PhantomData<T>,
 }
@@ -91,6 +94,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             memory_type: None,
             tier: None,
             min_score: None,
+            valid_at: None,
             scoring: None,
             _phantom: PhantomData,
         }
@@ -141,6 +145,16 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Set minimum score threshold.
     pub fn min_score(mut self, score: f32) -> Self {
         self.min_score = Some(score);
+        self
+    }
+
+    /// Filter to memories valid at the specified time.
+    ///
+    /// Only returns memories where:
+    /// - `valid_from` is NULL or <= the specified time, AND
+    /// - `valid_until` is NULL or > the specified time
+    pub fn valid_at(mut self, time: DateTime<Utc>) -> Self {
+        self.valid_at = Some(time);
         self
     }
 
