@@ -37,6 +37,7 @@
 //! | `full` | All features except encryption and mcp-server |
 
 pub mod error;
+pub mod memory;
 pub mod storage;
 pub mod traits;
 
