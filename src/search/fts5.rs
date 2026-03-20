@@ -54,6 +54,12 @@ impl FtsSearch {
             return Ok(Vec::new());
         }
 
+        // Sanitize query for FTS5 — remove special characters that FTS5 interprets
+        let query = sanitize_fts5_query(query);
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+
         db.with_reader(|conn| {
             let mut results = Vec::new();
 
@@ -97,6 +103,36 @@ impl FtsSearch {
     ) -> Result<Vec<FtsResult>> {
         Self::search(db, query, limit * multiplier, None, None)
     }
+}
+
+/// Sanitize a query string for FTS5 — remove characters that FTS5 interprets as syntax.
+///
+/// FTS5 special characters: `*`, `"`, `(`, `)`, `:`, `^`, `{`, `}`, `+`, `-`, `~`, `?`
+/// We strip them to prevent syntax errors when the query comes from user input.
+fn sanitize_fts5_query(query: &str) -> String {
+    let mut result = String::with_capacity(query.len());
+    for ch in query.chars() {
+        match ch {
+            '*' | '"' | '(' | ')' | ':' | '^' | '{' | '}' | '+' | '~' | '?' => {
+                result.push(' ');
+            }
+            '-' => {
+                // Only strip leading minus (NOT operator), keep hyphens in words
+                if result.is_empty() || result.ends_with(' ') {
+                    result.push(' ');
+                } else {
+                    result.push(ch);
+                }
+            }
+            _ => result.push(ch),
+        }
+    }
+    // Collapse multiple spaces and trim
+    let collapsed: String = result.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return String::new();
+    }
+    collapsed
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-# Task: Implement dataset downloader — download longmemeval_oracle.json from HuggingFace with progress bar
+# Task: Implement session ingestion — convert haystack_sessions into MindCore memories with metadata (date, session_id, role)
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -31,3 +31,5 @@
 - [gotcha] candle-transformers modernbert: struct is ModernBert not ModernBertModel. Check pub struct names with grep before coding.
 
 - [gotcha] granite-small-r2 uses sentence-transformers naming (no 'model.' prefix) but candle ModernBert expects HF transformers naming. Fix: vb.rename_f(|name| name.strip_prefix("model.").unwrap_or(name).to_string())
+
+- [gotcha] LongMemEval answer field can be string, number (int like 3), or array. Use serde_json::Number for numeric answers.
