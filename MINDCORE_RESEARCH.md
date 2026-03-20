@@ -1,7 +1,7 @@
 # MindCore: Research & Specification
 
 **Date:** 2026-03-16
-**Status:** Research Complete
+**Status:** Research Complete (v0.1.0 shipped)
 **Related:** `MINDCORE_ARCHITECTURE.md` (implementation spec), `DECISIONS.md` (decisions 001-016), `research/gap_analysis_2026_03.md` (March 2026 gap analysis)
 
 ---
@@ -10,49 +10,46 @@
 
 1. [Problem Statement](#1-problem-statement)
 2. [Landscape Analysis](#2-landscape-analysis)
-3. [Source Project Analysis](#3-source-project-analysis)
-4. [Academic & Theoretical Foundations](#4-academic--theoretical-foundations)
-5. [Component Research](#5-component-research)
-6. [Technology Evaluation](#6-technology-evaluation)
-7. [Design Decisions & Rationale](#7-design-decisions--rationale)
-8. [Competitive Positioning](#8-competitive-positioning)
-9. [Risk Analysis](#9-risk-analysis)
-10. [Specification Summary](#10-specification-summary)
+3. [Academic & Theoretical Foundations](#3-academic--theoretical-foundations)
+4. [Component Research](#4-component-research)
+5. [Technology Evaluation](#5-technology-evaluation)
+6. [Design Decisions & Rationale](#6-design-decisions--rationale)
+7. [Competitive Positioning](#7-competitive-positioning)
+8. [Risk Analysis](#8-risk-analysis)
+9. [Specification Summary](#9-specification-summary)
 
 ---
 
 ## 1. Problem Statement
 
-### The Repeating Code Problem
+### The Missing Rust Crate
 
-Three separate Rust projects — Dial, Memloft, and PIRDLY — each need persistent memory for AI agents. Each independently arrived at the same architecture: SQLite + FTS5 + optional vector search + scoring/ranking. The implementations differ in detail but solve the same core problems:
+AI agent applications need persistent memory with search, scoring, decay, and context assembly. Every project that builds this ends up implementing the same primitives:
 
-| Problem | Dial's Solution | Memloft's Solution | PIRDLY's Plan |
-|---------|----------------|-------------------|---------------|
-| Where to store memories | SQLite (single DB) | SQLite (single DB) | SQLite (two-tier) |
-| How to search | FTS5 + Porter stemming | FTS5 + vector + RRF | FTS5, add vector later |
-| How to embed | Not implemented | Candle (all-MiniLM-L6-v2) | Deferred |
-| How to rank results | Trust scoring + recency | Tier multipliers + recency + importance | Not designed yet |
-| How to prevent duplicates | Not implemented | Content-hash dedup | Not designed yet |
-| How to decay old memories | Manual confidence decay | Tier demotion | Not designed yet |
-| How to budget context | Token-budget priority assembly | Not implemented | Planned |
+| Problem | Common Approaches |
+|---------|-------------------|
+| Where to store memories | SQLite (single or multi-database) |
+| How to search | FTS5 + Porter stemming, vector similarity, or hybrid |
+| How to embed | Candle, ONNX Runtime, or external API |
+| How to rank results | Recency, importance, trust scoring, tier multipliers |
+| How to prevent duplicates | Content-hash dedup, similarity thresholding |
+| How to decay old memories | Manual confidence decay, tier demotion, forgetting curves |
+| How to budget context | Token-budget priority assembly |
 
-Every project re-invents the same wheel with slightly different spokes.
+These patterns are well-established across the agent memory landscape, yet the Rust ecosystem lacks a standalone crate that provides them.
 
-### What a Shared Engine Would Solve
+### What a Shared Engine Solves
 
-1. **No duplicate code** — one tested, optimized implementation
-2. **Cross-pollination** — Dial's context assembly + Memloft's vector search + PIRDLY's two-tier design, all in one crate
-3. **Faster iteration** — improvements benefit all projects simultaneously
-4. **Better testing** — one crate gets the combined test effort
-5. **Community value** — Rust ecosystem lacks a standalone agent memory crate
+1. **No reinventing** — one tested, optimized implementation of proven patterns
+2. **Comprehensive** — FTS5 + vector search + RRF + two-tier memory + context assembly, all in one crate
+3. **Community value** — fills a clear gap in the Rust ecosystem for standalone agent memory
+4. **Composable** — feature-gated design means zero cost for unused capabilities
 
 ### Why Now
 
-- Dial v4.1.0 shipped with FTS5 memory (proven in production)
-- Memloft shipped with hybrid RRF search (proven in production)
-- PIRDLY is pre-build, so its memory system can be designed around MindCore from day one
-- The agent memory space is exploding (Mem0 at 37K stars, OMEGA at #1 LongMemEval) — patterns are well-documented
+- The agent memory space has matured (Mem0 at 37K stars, OMEGA at #1 LongMemEval) — patterns are well-documented
+- Research from CoALA, ACT-R, Mem0, and Zep/Graphiti provides solid theoretical foundations
+- No Rust crate exists that combines FTS5, vector search, hybrid retrieval, and cognitive memory types
 
 ---
 
@@ -105,147 +102,7 @@ MindCore fills this gap.
 
 ---
 
-## 3. Source Project Analysis
-
-### Dial (FTS5 + Context Assembly)
-
-**What Dial Built:**
-
-Dial v4.1.0 implements a learning-based memory system for an autonomous AI coding orchestrator:
-
-- **Storage:** SQLite with `learnings`, `failure_patterns`, and `solutions` tables
-- **Search:** FTS5 with Porter stemming, custom stop-word stripping
-- **Trust Model:** Confidence score (0.0-1.0) adjusted by outcomes — successful solutions increase confidence, repeated failures decrease it
-- **Context Assembly:** Token-budget-aware priority system that fills an LLM prompt with the most relevant context items, ranked by priority tier:
-  - Priority 0: Behavioral rules (always included)
-  - Priority 10: Retry context (previous failures for this task)
-  - Priority 15: Spec sections (relevant PRD content)
-  - Priority 25: Similar completed tasks
-  - Priority 40: General learnings
-  - Priority 60: Historical context
-- **Failure Detection:** Pattern matching on CLI output to detect and classify errors (transient → retry, quota → wait, permanent → fail)
-
-**What Works Well:**
-- FTS5 handles 80%+ of lookups (error messages, code snippets are keyword-heavy)
-- Porter stemming catches inflections ("authenticate" finds "authentication")
-- Priority-based context assembly prevents budget waste on low-value memories
-- Trust scoring naturally surfaces reliable solutions over unreliable ones
-
-**What's Missing:**
-- No vector search — "authentication error" won't find "login failed" or "auth token expired"
-- No deduplication — same learning can be stored multiple times
-- No memory decay — old, irrelevant learnings never fade
-- No relationships — can't express "this solution fixed this error"
-- Trust scoring is manual and fragile (arbitrary 0.05 decay per 30 days)
-
-**What MindCore Extracts:**
-- FTS5 + Porter stemming configuration
-- Stop-word list
-- Token-budget context assembly algorithm
-- Priority tier concept
-- Error classification pattern (Transient/QuotaExceeded/Permanent)
-
----
-
-### Memloft (Hybrid Search + Embeddings)
-
-**What Memloft Built:**
-
-Memloft implements a personal memory system with hybrid search:
-
-- **Storage:** SQLite with `memory` and `memory_vectors` tables
-- **Search:** Hybrid FTS5 + vector with Reciprocal Rank Fusion (RRF) merge
-- **Embeddings:** Candle backend running all-MiniLM-L6-v2 locally (384 dimensions)
-- **Fallback:** `FallbackBackend` wraps `Option<Box<dyn EmbeddingBackend>>` — gracefully degrades to FTS5-only if candle fails
-- **Background Indexing:** `EmbeddingIndexer` processes new memories in batches, uses content-hash to skip unchanged records
-- **Tier System:** Three tiers (working/long_term/archive) with different scoring multipliers:
-  - Working: 1.0x (recent, actively used)
-  - Long-term: 0.7x (validated, stable)
-  - Archive: 0.3x (old, rarely accessed)
-- **Scoring:** Composite scoring with recency, importance, category, and tier multipliers
-- **Deduplication:** SHA-256 content hash prevents exact duplicates
-
-**What Works Well:**
-- RRF hybrid search catches both keyword matches and semantic matches
-- Dynamic k-value adjustment (quoted text → favor keywords, questions → favor semantic)
-- Candle embedding is pure Rust, ~8ms per embed, no native dependency pain
-- FallbackBackend means the system works even if model download fails
-- Background indexing doesn't block the main thread
-- Content-hash skip avoids re-embedding unchanged memories
-
-**What's Missing:**
-- No token-budget context assembly — caller must manage prompt size
-- No memory relationships — flat structure only
-- Tier system is ad-hoc — manual rules for promotion/demotion
-- No cognitive type distinction (all memories treated the same)
-- No consolidation beyond exact-hash dedup
-
-**What MindCore Extracts:**
-- RRF merge algorithm with dynamic k-values
-- CandleBackend implementation
-- FallbackBackend wrapper pattern
-- EmbeddingIndexer with batch processing and content-hash skip
-- Composite scoring with multiple strategy types
-- SHA-256 dedup
-
----
-
-### PIRDLY (Two-Tier + Error Classification)
-
-**What PIRDLY Designed (Not Yet Built):**
-
-PIRDLY's architecture document specifies:
-
-- **Two-Tier Memory:**
-  - Global (`~/.pirdly/global.db`): Error patterns, language learnings, cross-project knowledge
-  - Project (`.pirdly/memory.db`): Architecture decisions, project conventions, task history
-  - Automatic promotion when project-specific patterns appear in N different projects
-- **Error Classification:**
-  - Transient: Network errors, timeouts → retry with exponential backoff + jitter
-  - QuotaExceeded: Rate limits, subscription caps → wait for reset
-  - Permanent: Invalid config, missing tools → surface to user, don't retry
-- **MCP Server:** Expose memory as MCP tools for direct LLM access
-
-**What PIRDLY Contributes to MindCore:**
-- Two-tier database management (global + project)
-- Promotion logic for cross-project patterns
-- Error classification model
-- MCP server interface design
-
----
-
-### Unified Pattern Map
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                         MindCore                                  │
-│                                                                  │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
-│  │    Dial      │  │   Memloft    │  │      PIRDLY          │   │
-│  │             │  │              │  │                      │   │
-│  │ FTS5+Porter │  │ Vector+RRF   │  │ Two-tier DB          │   │
-│  │ Stop-words  │  │ CandleBackend│  │ Error classification │   │
-│  │ Trust score │  │ FallbackBknd │  │ MCP interface        │   │
-│  │ Context asm │  │ BG indexer   │  │ Promotion logic      │   │
-│  │ Priority    │  │ Content hash │  │                      │   │
-│  │ Error class │  │ Tier scoring │  │                      │   │
-│  └─────────────┘  └──────────────┘  └──────────────────────┘   │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    New (from Research)                     │   │
-│  │                                                          │   │
-│  │ ACT-R activation model    (replaces trust + tiers)       │   │
-│  │ Consolidation pipeline    (from Mem0 research)           │   │
-│  │ Cognitive memory types    (from CoALA framework)         │   │
-│  │ Graph relationships       (from OMEGA, LightRAG, Zep)   │   │
-│  │ Temporal validity         (from Zep/Graphiti)            │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 4. Academic & Theoretical Foundations
+## 3. Academic & Theoretical Foundations
 
 ### CoALA: Cognitive Architectures for Language Agents
 
@@ -261,7 +118,7 @@ PIRDLY's architecture document specifies:
 
 **Why This Matters for MindCore:**
 
-Current systems (Dial, Memloft) treat all memories equally. A learning from yesterday gets the same base score as a learning from six months ago. CoALA's type classification enables:
+Most agent memory systems treat all memories equally. A learning from yesterday gets the same base score as a learning from six months ago. CoALA's type classification enables:
 
 1. **Type-appropriate decay rates** — episodic memories fade fast, semantic memories persist
 2. **Type-appropriate scoring** — procedural memories that have been validated are boosted
@@ -299,10 +156,10 @@ Where:
 
 | Ad-Hoc System | What It Does | ACT-R Equivalent |
 |---------------|-------------|------------------|
-| Dial's trust scoring | Manual confidence 0.0-1.0, decayed by time | Activation computed from access history |
-| Dial's times_referenced | Counter of how many times used | Access log (richer — includes timestamps) |
-| Memloft's tier system | working/long_term/archive with multipliers | Activation naturally creates tiers (high/medium/low) |
-| Memloft's recency boost | Exponential decay with 30-day half-life | Power-law decay (more gradual, more accurate) |
+| Manual trust scoring | Confidence 0.0-1.0, decayed by time | Activation computed from access history |
+| Reference counters | Counter of how many times used | Access log (richer — includes timestamps) |
+| Tier-based multipliers | working/long_term/archive with multipliers | Activation naturally creates tiers (high/medium/low) |
+| Exponential recency boost | Decay with fixed half-life | Power-law decay (more gradual, more accurate) |
 | Manual confidence decay | 0.05 per 30 days without validation | Forgetting curve handles this automatically |
 
 One formula replaces five mechanisms.
@@ -422,16 +279,16 @@ Where:
 - Works with any number of rankers
 - Outperforms individual systems and most learned fusion methods
 
-**Memloft's Enhancement:** Dynamic k-values based on query analysis:
+**MindCore's Enhancement:** Dynamic k-values based on query analysis:
 - Quoted text → lower keyword k (favor exact matches)
 - Question words → lower vector k (favor semantic matches)
 - Default → equal k values
 
-**MindCore Implementation:** Direct port from Memloft with the dynamic k-value logic.
+**MindCore Implementation:** RRF merge with the dynamic k-value logic.
 
 ---
 
-## 5. Component Research
+## 4. Component Research
 
 ### Search: FTS5 vs. Vector vs. Hybrid
 
@@ -517,8 +374,8 @@ For 10K vectors at 384 dimensions: 10,000 * 384 * 4 bytes = ~15MB in memory. Tri
 
 | System | Formula | Parameters | Data Needed |
 |--------|---------|------------|-------------|
-| Dial's trust | `confidence -= 0.05 per 30 days` | Hard-coded constants | Last access date |
-| Memloft's tiers | `score *= tier_multiplier` | 3 fixed multipliers | Tier assignment |
+| Manual trust scoring | `confidence -= 0.05 per 30 days` | Hard-coded constants | Last access date |
+| Tier-based multipliers | `score *= tier_multiplier` | 3 fixed multipliers | Tier assignment |
 | Exponential decay | `score *= e^(-λt)` | λ (half-life) | Creation date |
 | **ACT-R activation** | `base + Σ ln(t_j^-d)` | d (decay rate), base level | Full access history |
 
@@ -534,7 +391,7 @@ For 10K vectors at 384 dimensions: 10,000 * 384 * 4 bytes = ~15MB in memory. Tri
 
 ---
 
-## 6. Technology Evaluation
+## 5. Technology Evaluation
 
 ### SQLite Configuration Research
 
@@ -591,11 +448,9 @@ Memory-mapping the database file eliminates read() system calls for hot data. Fo
 | chrono | 0.4 | ~300KB | Timestamps |
 | thiserror | 2.x | ~0 (proc macro) | Error types |
 | sha2 | 0.10 | ~100KB | Content hashing |
-| async-trait | 0.1 | ~0 (proc macro) | Async traits |
-| tokio | 1.x | ~1MB (rt + sync only) | Async runtime |
 | tracing | 0.1 | ~200KB | Logging |
 
-Total: ~4MB
+Total: ~3MB
 
 **Feature-gated (heavy):**
 
@@ -623,7 +478,7 @@ Candle dominates compile time. Feature-gating it is essential for projects that 
 
 ---
 
-## 7. Design Decisions & Rationale
+## 6. Design Decisions & Rationale
 
 ### D1: Library, Not Framework
 
@@ -634,7 +489,7 @@ Candle dominates compile time. Feature-gating it is essential for projects that 
 - Service with API (like Mem0 cloud)
 - CLI tool (like Engram)
 
-**Rationale:** Dial, Memloft, and PIRDLY have fundamentally different architectures. A framework would force them to restructure. A service adds deployment complexity. A CLI tool can't be embedded. A library crate that provides `MemoryEngine<T>` fits all three projects without requiring architectural changes.
+**Rationale:** Different AI agent projects have fundamentally different architectures. A framework would force them to restructure. A service adds deployment complexity. A CLI tool can't be embedded. A library crate that provides `MemoryEngine<T>` fits any project without requiring architectural changes.
 
 ### D2: Generic over MemoryRecord
 
@@ -645,10 +500,10 @@ Candle dominates compile time. Feature-gating it is essential for projects that 
 - Dynamic schema with JSON columns
 - Trait objects (`Box<dyn MemoryRecord>`)
 
-**Rationale:** Each project has different memory types with different fields:
-- Dial: `Learning { description, category, times_referenced }`
-- Memloft: `Memory { topic, content, context, importance }`
-- PIRDLY: `ErrorPattern { pattern, regex, occurrence_count }`
+**Rationale:** Different projects have different memory types with different fields:
+- Coding agent: `Learning { description, category, times_referenced }`
+- Personal assistant: `Memory { topic, content, context, importance }`
+- Error tracker: `ErrorPattern { pattern, regex, occurrence_count }`
 
 A generic approach lets each project define its own struct, implement `MemoryRecord`, and get the full engine. The `record_json` column stores the serialized struct for reconstruction.
 
@@ -673,9 +528,9 @@ A generic approach lets each project define its own struct, implement `MemoryRec
 - No post-search scoring (raw FTS5/vector scores only)
 
 **Rationale:** Different projects value different signals:
-- Dial cares about trust (was this solution validated?)
-- Memloft cares about recency and importance
-- PIRDLY cares about memory type and project relevance
+- A coding agent cares about trust (was this solution validated?)
+- A personal assistant cares about recency and importance
+- An error tracker cares about memory type and project relevance
 
 Composable strategies let each project mix and match. A single formula can't serve all cases. ML-learned ranking requires training data we don't have yet.
 
@@ -692,7 +547,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 
 ---
 
-## 8. Competitive Positioning
+## 7. Competitive Positioning
 
 ### Feature Comparison Matrix
 
@@ -733,7 +588,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 
 ---
 
-## 9. Risk Analysis
+## 8. Risk Analysis
 
 ### Technical Risks
 
@@ -751,7 +606,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
 | Too complex API surface | Medium | High | Builder pattern with sensible defaults, `default` feature is minimal |
-| Migration effort too high for Dial/Memloft | Medium | Medium | Provide concrete migration guides, `MemoryRecord` is simple to implement |
+| Migration effort too high for existing projects | Medium | Medium | Provide concrete migration guides, `MemoryRecord` is simple to implement |
 | Feature flag combinatorial explosion | Low | Medium | Clear feature dependency chain, `full` flag for everything |
 | Crate name collision on crates.io | Medium | Low | Check availability before publishing, have alternatives ready |
 
@@ -766,7 +621,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 
 ---
 
-## 10. Specification Summary
+## 9. Specification Summary
 
 ### What MindCore Is
 
@@ -873,9 +728,6 @@ Phases 1-6 deliver a fully functional memory engine with FTS5 search, scoring, c
 9. MemOS — https://github.com/MemTensor/MemOS (graph memory, hybrid search)
 10. Engram — https://github.com/Gentleman-Programming/engram (SQLite+FTS5, Go reference)
 11. LightRAG — https://github.com/HKUDS/LightRAG (knowledge graph RAG)
-12. Memloft — (internal, hybrid RRF search, candle embeddings)
-13. Dial — (internal, FTS5 memory, context assembly)
-
 ### Ecosystem
 
 14. rusqlite — https://github.com/rusqlite/rusqlite (Rust SQLite bindings)

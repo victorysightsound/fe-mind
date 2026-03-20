@@ -1,6 +1,8 @@
 # Similar Projects & Landscape Research (March 2026)
 
-This document catalogs projects with philosophies, patterns, and architectures relevant to PIRDLY's design as an autonomous AI coding orchestrator. Projects are grouped by the design insight they offer.
+> **Note:** This research was originally compiled for the PIRDLY project and predates MindCore's creation as a standalone crate. References to PIRDLY throughout reflect the original research context.
+
+This document catalogs projects with philosophies, patterns, and architectures relevant to autonomous AI coding orchestrator design. Projects are grouped by the design insight they offer.
 
 ---
 

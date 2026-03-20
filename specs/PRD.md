@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2026-03-19
-**Status:** Ready for Implementation
+**Status:** v0.1.0 shipped
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### 1.1 Problem
 
-Three Rust projects (Dial, Memloft, PIRDLY) each independently implement persistent memory for AI agents — SQLite + FTS5 + scoring + optional vector search. Each solves the same problems differently, duplicating code and missing each other's innovations. The Rust ecosystem has no standalone, feature-gated agent memory crate.
+AI agent applications in Rust need persistent memory — SQLite + FTS5 + scoring + optional vector search. Each project that builds this reimplements the same primitives. The Rust ecosystem has no standalone, feature-gated agent memory crate.
 
 ### 1.2 Solution
 
@@ -19,7 +19,7 @@ MindCore is a standalone Rust library crate providing a pluggable, feature-gated
 ### 1.3 Success Criteria
 
 - All tests pass with `cargo test` and `cargo test --features full`
-- Dial, Memloft, and PIRDLY can implement `MemoryRecord` for their types and use the engine
+- Any Rust project can implement `MemoryRecord` for their types and use the engine
 - FTS5 search returns results in <5ms for 10K memories
 - Vector search returns results in <50ms for 10K memories
 - Binary size: ~2MB default, ~35-40MB full
@@ -390,7 +390,7 @@ Each phase must pass before the next begins:
 - **No `anyhow`** — structured errors only (`thiserror`)
 - **No `println!`** — all logging via `tracing`
 - **No panics** — library must never panic on valid input
-- **Minimum Rust 1.75+** — native async traits, no `async-trait` crate
+- **Minimum Rust 1.85** — edition 2024, native async traits
 - **Feature isolation** — each feature flag must compile independently
 - **Zero cost when unused** — disabled features add zero binary size and zero runtime overhead
 

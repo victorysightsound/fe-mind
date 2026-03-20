@@ -2,7 +2,7 @@
 
 This document records key architectural and design decisions for MindCore.
 
-Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) and were migrated here when MindCore became its own project.
+Decisions 001-007 originated during initial research (2026-03-16) and were carried forward when MindCore became its own project.
 
 ---
 
@@ -10,21 +10,19 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Date:** 2026-03-16
 
-**Decision:** Extract memory system into a standalone crate (MindCore) reusable across PIRDLY, Dial, and Memloft.
+**Decision:** Create a standalone Rust crate (MindCore) providing pluggable, feature-gated persistent memory for AI agent applications.
 
-**Context:** Three projects (Dial, Memloft, PIRDLY) all need persistent memory with search, and each implements the same primitives differently. Research into Mem0, OMEGA, Zep/Graphiti, and MemOS confirms the patterns are converging industry-wide.
+**Context:** Multiple AI agent projects need persistent memory with search, scoring, and decay, yet the Rust ecosystem has no standalone crate for this. Research into Mem0, OMEGA, Zep/Graphiti, and MemOS confirms the patterns are converging industry-wide.
 
 **Rationale:**
-- Eliminates duplicate memory code across three projects
-- Improvements (vector search, graph, decay) benefit all projects automatically
-- Rust ecosystem lacks a standalone agent memory crate (Engram is Go, Mem0 is Python)
+- Fills a clear gap in the Rust ecosystem for standalone agent memory (Engram is Go, Mem0 is Python)
+- Improvements (vector search, graph, decay) benefit all consumers automatically
 - Feature-gated design means zero cost for unused capabilities
-- Every component is already proven in at least one existing project
+- Every component is backed by published research or established open-source practice
 
 **Consequences:**
 - New standalone crate: `mindcore`
-- PIRDLY depends on mindcore instead of implementing its own memory
-- Dial and Memloft migrate to mindcore over time
+- Any Rust project can depend on mindcore for persistent agent memory
 - See `MINDCORE_ARCHITECTURE.md` for full specification
 
 ---
@@ -56,14 +54,14 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Decision:** Use HuggingFace Candle for local embedding inference, not ONNX Runtime (ort).
 
-**Context:** Evaluated ort, candle, and fastembed-rs. Studied Memloft's production use of candle.
+**Context:** Evaluated ort, candle, and fastembed-rs for local embedding inference.
 
 **Rationale:**
 - Pure Rust (ort requires C++ runtime, adds 80+ deps and ~350MB to binary)
 - Native safetensors loading from HF Hub (no ONNX conversion step)
 - WASM support (relevant for future GUI via WebView)
 - Performance difference is negligible for MiniLM-sized models (~8ms per embed)
-- Memloft proves candle works in production for this exact use case
+- Candle is well-proven in production for this exact use case
 - `EmbeddingBackend` trait allows swapping to ort later if scale demands it
 
 **Consequences:**
@@ -84,7 +82,7 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Rationale:**
 - RRF is simple, effective, and parameter-light (just k-value)
-- Memloft proves RRF works in production for agent memory
+- RRF is proven in production for agent memory workloads
 - Dynamic k-values adjust weighting based on query type (quoted → keyword, questions → semantic)
 - No learned fusion model needed
 - Outperforms either approach alone
@@ -102,7 +100,7 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Decision:** Use ACT-R cognitive architecture's activation formula for memory decay, replacing ad-hoc tier/trust/decay systems.
 
-**Context:** Dial uses trust scoring with manual decay. Memloft uses tier-based multipliers. OMEGA uses forgetting intelligence. All solve the same problem differently.
+**Context:** Common approaches include manual trust scoring with decay, tier-based multipliers, and OMEGA's forgetting intelligence. All solve the same problem differently.
 
 **Rationale:**
 - Research-backed model from cognitive science (spaced repetition, forgetting curves)
@@ -115,7 +113,7 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 - `memory_access_log` table tracks every retrieval with timestamp
 - Activation computed at query time from access history
 - Feature-gated behind `activation-model` (simpler projects can skip)
-- Replaces Dial's `confidence` field and Memloft's tier system
+- Replaces ad-hoc confidence fields and tier systems
 
 ---
 
@@ -156,7 +154,7 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 - Similarity-based dedup (optional) catches near-duplicates with vector search
 - LLM-assisted consolidation (optional) provides highest accuracy but costs tokens
 - `ConsolidationStrategy` trait allows projects to choose their level
-- Mem0 demonstrates this is essential for production-quality memory
+- Production experience demonstrates this is essential for memory quality
 
 **Consequences:**
 - Feature-gated behind `consolidation`
@@ -448,7 +446,7 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 - `store()`, `get()`, `update()`, `delete()`, `search().execute()`, `assemble_context()` are all `fn`, not `async fn`
 - `MemoryEngine::builder().build()` is synchronous
 - Background embedding indexer runs on a dedicated thread, not a tokio task
-- Minimum Rust version: 1.75+ (native async traits, no `async-trait` crate)
+- Minimum Rust version: 1.85 (edition 2024, native async traits)
 - `tokio` moves to feature-gated dependency
 
 ---
@@ -532,7 +530,7 @@ Name `mindcore` selected and reserved on crates.io (v0.0.1 placeholder published
 
 **Status:** Planned
 
-- **Phase 1:** FTS5 + WAL + Porter stemming (proven in Dial)
+- **Phase 1:** FTS5 + WAL + Porter stemming (proven in production)
 - **Phase 2:** Add hybrid vector search via `vector-search` feature
 - **Phase 3:** Add graph memory via `graph-memory` feature
 

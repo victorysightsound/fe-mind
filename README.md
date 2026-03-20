@@ -10,23 +10,13 @@ Handles persistent storage, keyword search (FTS5), vector search (candle), hybri
 - **Feature-gated everything** — heavy dependencies behind compile-time flags
 - **Local-first** — SQLite-backed, single-file databases, no cloud dependency
 - **Pure Rust where possible** — candle over ort, SQLite over Postgres
-- **Proven patterns only** — every component is battle-tested in production
+- **Proven patterns only** — every component backed by research or established practice
 
 ## Status
 
-Architecture and research phase. See:
+v0.1.0 published on crates.io. See:
 
 - `MINDCORE_ARCHITECTURE.md` — full crate structure and API design
 - `MINDCORE_RESEARCH.md` — research, landscape analysis, and specification
 - `DECISIONS.md` — architectural decisions log
 - `research/` — competitive landscape analysis
-
-## Origin
-
-MindCore extracts and unifies patterns from three projects:
-
-| Source | Contribution |
-|--------|-------------|
-| **Memloft** | Hybrid search (RRF), candle embeddings, FallbackBackend, background indexing |
-| **Dial** | FTS5 + Porter stemming, trust scoring, token-budget context assembly |
-| **PIRDLY** | Two-tier memory (global + project), error classification, MCP server interface |

@@ -1,8 +1,8 @@
 # MindCore: Universal Memory Engine Architecture
 
-**Version:** 0.1.0 (Design)
+**Version:** 0.1.0 (Released)
 **Date:** 2026-03-16
-**Status:** Architecture Complete, Ready for Review
+**Status:** v0.1.0 published on crates.io
 
 ---
 
@@ -17,19 +17,10 @@
 3. **Opinionated about mechanics, unopinionated about schema** — MindCore handles how to store/search/decay; the consumer defines what a "memory" is
 4. **Local-first** — SQLite-backed, single-file databases, no cloud dependency
 5. **Pure Rust where possible** — candle over ort, SQLite over Postgres
-6. **Proven patterns only** — every component is battle-tested in Memloft, Dial, or published research
+6. **Proven patterns only** — every component is backed by published research or established open-source practice
 
-### Origin
+### Informed By
 
-MindCore extracts and unifies patterns from three projects:
-
-| Source | Contribution |
-|--------|-------------|
-| **Memloft** | Hybrid search (RRF), candle embeddings, FallbackBackend, background indexing, tier-based scoring |
-| **Dial** | FTS5 + Porter stemming, trust scoring, token-budget context assembly, failure pattern detection |
-| **PIRDLY** | Two-tier memory (global + project), error classification, MCP server interface |
-
-Additionally informed by research into:
 - [Mem0](https://github.com/mem0ai/mem0) — consolidation pipeline (extract → consolidate → store)
 - [Zep/Graphiti](https://github.com/getzep/graphiti) — temporal validity modeling
 - [OMEGA Memory](https://github.com/omega-memory/core) — forgetting intelligence, performance benchmarks
@@ -44,73 +35,73 @@ Additionally informed by research into:
 mindcore/
 ├── Cargo.toml
 ├── src/
-│   ├── lib.rs                 # Public API: MemoryEngine<T>
+│   ├── lib.rs                 # Public API re-exports
+│   ├── engine.rs              # MemoryEngine<T> — primary interface
+│   ├── error.rs               # MindCoreError enum, Result type
 │   │
 │   ├── traits/
 │   │   ├── mod.rs
 │   │   ├── record.rs          # MemoryRecord trait (consumer implements)
-│   │   ├── embedding.rs       # EmbeddingBackend trait
 │   │   ├── scoring.rs         # ScoringStrategy trait
-│   │   └── consolidation.rs   # ConsolidationStrategy trait
+│   │   ├── consolidation.rs   # ConsolidationStrategy trait
+│   │   ├── evolution.rs       # EvolutionStrategy trait
+│   │   └── reranker.rs        # RerankerBackend trait
 │   │
 │   ├── storage/
 │   │   ├── mod.rs
 │   │   ├── engine.rs          # SQLite connection, WAL, pragmas
 │   │   ├── schema.rs          # Schema creation, table definitions, index management
 │   │   ├── migrations.rs      # Versioned schema migrations
-│   │   └── two_tier.rs        # Global + project database management
+│   │   ├── two_tier.rs        # Global + project database management
+│   │   └── encryption.rs      # SQLCipher encryption support
 │   │
 │   ├── search/
 │   │   ├── mod.rs
+│   │   ├── builder.rs         # Fluent SearchBuilder API
 │   │   ├── fts5.rs            # FTS5 keyword search, Porter stemming, stop-words
 │   │   ├── vector.rs          # Brute-force dot product (+ optional sqlite-vec ANN)
 │   │   ├── hybrid.rs          # Reciprocal Rank Fusion merge
-│   │   ├── graph.rs           # Relationship traversal via recursive CTEs
-│   │   ├── reranker.rs        # Cross-encoder reranking (post-RRF, feature-gated)
-│   │   ├── query_expand.rs    # Time-aware query expansion (temporal expressions → date ranges)
-│   │   └── scoring.rs         # Post-search scoring (activation, recency, type boosts)
+│   │   └── query_expand.rs    # Time-aware query expansion (temporal expressions → date ranges)
+│   │
+│   ├── scoring/
+│   │   ├── mod.rs
+│   │   ├── activation.rs      # ACT-R activation-based scoring
+│   │   ├── category.rs        # Category match boost
+│   │   ├── composite.rs       # CompositeScorer (combines strategies)
+│   │   ├── importance.rs      # Importance-based scoring
+│   │   ├── memory_type.rs     # Cognitive type weighting
+│   │   └── recency.rs         # Recency decay scoring
 │   │
 │   ├── embeddings/
 │   │   ├── mod.rs
-│   │   ├── candle_native.rs   # CandleNativeBackend: granite-small-r2 via ModernBERT (native targets)
-│   │   ├── candle_wasm.rs     # CandleWasmBackend: bge-small-en-v1.5 via BERT (WASM targets)
-│   │   ├── models.rs          # Model auto-download, caching via hf-hub
-│   │   ├── pooling.rs         # Mean pooling + L2 normalization (shared between backends)
+│   │   ├── backend.rs         # EmbeddingBackend trait
+│   │   ├── candle_native.rs   # CandleNativeBackend: granite-small-r2 via ModernBERT
+│   │   ├── pooling.rs         # Mean pooling + L2 normalization
 │   │   ├── noop.rs            # NoopBackend: zero vectors (testing)
-│   │   ├── fallback.rs        # FallbackBackend: graceful degradation
-│   │   └── indexer.rs         # Background batch indexer, content-hash skip
+│   │   └── fallback.rs        # FallbackBackend: graceful degradation
 │   │
 │   ├── memory/
 │   │   ├── mod.rs
 │   │   ├── store.rs           # CRUD operations, deduplication
-│   │   ├── consolidation.rs   # Extract → Consolidate → Store pipeline
+│   │   ├── hash_dedup.rs      # SHA-256 content hash deduplication
+│   │   ├── similarity_dedup.rs # Vector similarity-based near-duplicate detection
 │   │   ├── activation.rs      # ACT-R forgetting curve + access tracking
 │   │   ├── relations.rs       # Graph relationships (memory_relations table)
-│   │   ├── temporal.rs        # valid_from / valid_until support
-│   │   ├── hierarchy.rs       # Three-tier memory (episode → summary → fact)
-│   │   ├── evolution.rs       # Post-write hooks, memory-writes-back-to-memory
 │   │   └── pruning.rs         # Activation-based pruning with policy controls
 │   │
 │   ├── context/
 │   │   ├── mod.rs
-│   │   ├── budget.rs          # Token-budget-aware context assembly
-│   │   └── priority.rs        # Priority-ranked selection by memory type
+│   │   └── budget.rs          # Token-budget-aware context assembly
 │   │
 │   ├── ingest/
 │   │   ├── mod.rs
-│   │   ├── passthrough.rs     # Default: store text as-is
-│   │   └── fact_extract.rs    # LLM-assisted atomic fact extraction
+│   │   └── passthrough.rs     # Default: store text as-is
 │   │
-│   ├── callbacks/
-│   │   ├── mod.rs
-│   │   └── llm.rs             # LlmCallback trait (consumer-provided LLM access)
-│   │
-│   └── interface/
+│   └── callbacks/
 │       ├── mod.rs
-│       └── mcp.rs             # MCP server (feature-gated)
+│       └── llm.rs             # LlmCallback trait (consumer-provided LLM access)
 │
-└── models/                    # Bundled or downloaded embedding models
-    └── README.md              # Instructions for model acquisition
+└── tests/                     # Integration tests
 ```
 
 ---
@@ -135,8 +126,8 @@ local-embeddings = [
 ]
 vector-search = ["local-embeddings", "dep:tokio"]
 
-# ANN indexing for >100K scale
-vector-indexed = ["vector-search", "dep:sqlite-vec"]
+# ANN indexing for >100K scale (planned, not yet enabled)
+# vector-indexed = ["vector-search", "dep:sqlite-vec"]
 
 # Cross-encoder reranking (post-RRF refinement, uses candle BERT)
 reranking = ["local-embeddings"]
@@ -157,7 +148,7 @@ consolidation = []
 activation-model = []
 
 # MCP server interface
-mcp-server = ["dep:axum", "dep:tower", "dep:serde_json"]
+mcp-server = ["dep:axum", "dep:tower"]
 
 # Two-tier memory (global + project databases)
 two-tier = []
@@ -202,7 +193,7 @@ encryption (swaps bundled SQLite for bundled SQLCipher)
 
 ### Binary Size Impact
 
-**Minimum Rust version: 1.75+** (required for native async fn in traits).
+**Minimum Rust version: 1.85** (Rust edition 2024).
 
 | Features Enabled | Approximate Binary Impact |
 |-----------------|--------------------------|
@@ -284,7 +275,7 @@ pub trait MemoryRecord: Send + Sync + Serialize + DeserializeOwned + 'static {
 **Example implementations:**
 
 ```rust
-// Dial's learning type
+// A learning record for a coding agent
 struct Learning {
     id: Option<i64>,
     description: String,
@@ -302,7 +293,7 @@ impl MemoryRecord for Learning {
     fn category(&self) -> Option<&str> { Some(&self.category) }
 }
 
-// Dial's failure pattern
+// A failure pattern record
 struct FailurePattern {
     id: Option<i64>,
     pattern: String,
@@ -320,7 +311,7 @@ impl MemoryRecord for FailurePattern {
     fn category(&self) -> Option<&str> { Some("error") }
 }
 
-// Memloft's memory
+// A personal memory record
 struct Memory {
     id: Option<i64>,
     topic: String,
@@ -371,7 +362,7 @@ pub struct MemoryMeta {
 ### EmbeddingBackend
 
 ```rust
-/// Requires Rust 1.75+ (native async fn in traits, no async-trait macro).
+/// Requires Rust 1.85+ (edition 2024, native async fn in traits).
 pub trait EmbeddingBackend: Send + Sync {
     /// Generate embedding for a single text
     async fn embed(&self, text: &str) -> Result<Vec<f32>>;
@@ -755,15 +746,15 @@ pub trait ScoringStrategy: Send + Sync {
 
 **Shipped strategies (composable):**
 
-| Strategy | Description | Source |
-|----------|-------------|--------|
-| `RecencyScorer` | Exponential decay with configurable half-life | Memloft |
-| `ImportanceScorer` | Linear scale from importance 1-10 | Memloft |
-| `CategoryScorer` | Boost when query implies a matching category | Memloft |
-| `MemoryTypeScorer` | Different base weights per cognitive type | CoALA |
-| `ActivationScorer` | ACT-R forgetting curve based on access history | ACT-R research |
-| `TrustScorer` | Confidence adjusted by success/failure outcomes | Dial |
-| `CompositeScorer` | Combines multiple strategies multiplicatively | New |
+| Strategy | Description |
+|----------|-------------|
+| `RecencyScorer` | Exponential decay with configurable half-life |
+| `ImportanceScorer` | Linear scale from importance 1-10 |
+| `CategoryScorer` | Boost when query implies a matching category |
+| `MemoryTypeScorer` | Different base weights per cognitive type (CoALA-derived) |
+| `ActivationScorer` | ACT-R forgetting curve based on access history |
+| `TrustScorer` | Confidence adjusted by success/failure outcomes |
+| `CompositeScorer` | Combines multiple strategies multiplicatively |
 
 ### ConsolidationStrategy
 
@@ -1239,7 +1230,7 @@ pub enum SearchDepth {
 
 ### Reciprocal Rank Fusion (RRF)
 
-From Memloft, with dynamic k-value adjustment:
+RRF merge with dynamic k-value adjustment:
 
 ```rust
 fn rrf_merge(
@@ -1437,13 +1428,15 @@ fn compute_activation(&self, memory_id: i64) -> Result<f32> {
 
 ### What This Replaces
 
-| Previous System | In Dial | In Memloft | MindCore Equivalent |
-|----------------|---------|------------|-------------------|
-| Trust scoring | `confidence` 0.0-1.0, adjusted by success/failure | N/A | Activation + `ValidatedBy` relations |
-| Tier system | N/A | working/long_term/archive with multipliers | Activation naturally creates tiers |
-| Confidence decay | 0.05 per 30 days without validation | N/A | Forgetting curve handles this |
-| Times referenced | Counter on learnings | N/A | Access log (richer data) |
-| Recency boost | N/A | Exponential decay, 30-day half-life | Part of activation formula |
+The ACT-R activation model replaces several ad-hoc mechanisms commonly found in agent memory systems:
+
+| Previous Approach | MindCore Equivalent |
+|-------------------|-------------------|
+| Manual trust/confidence scores | Activation + `ValidatedBy` relations |
+| Tier-based multipliers (working/long-term/archive) | Activation naturally creates tiers |
+| Fixed confidence decay rates | Forgetting curve handles this automatically |
+| Reference counters | Access log (richer data with timestamps) |
+| Exponential recency boost | Part of activation formula |
 
 One model replaces five separate mechanisms.
 
@@ -1529,7 +1522,7 @@ New Memory
 
 ---
 
-## Context Assembly (from Dial)
+## Context Assembly
 
 Token-budget-aware context selection for injecting memories into LLM prompts.
 
@@ -1569,7 +1562,7 @@ Assembly algorithm:
 
 ## Embedding Indexer (Background)
 
-From Memloft's pattern — embeddings are generated asynchronously, not at query time.
+Embeddings are generated asynchronously in the background, not at query time.
 
 ```rust
 pub struct EmbeddingIndexer {
@@ -1780,7 +1773,7 @@ let engine = MemoryEngine::<Learning>::builder()
 
 ## Performance Targets
 
-Based on OMEGA Memory benchmarks and Memloft's production performance:
+Based on OMEGA Memory benchmarks and production experience:
 
 | Operation | Target | Measurement |
 |-----------|--------|-------------|
@@ -1805,51 +1798,6 @@ Based on OMEGA Memory benchmarks and Memloft's production performance:
 | >1M | External vector DB or ANN | <5ms |
 
 For personal/project use, you will likely never exceed 10K memories per database.
-
----
-
-## Migration Path for Existing Projects
-
-### Dial → MindCore
-
-| Dial Component | MindCore Equivalent | Migration |
-|---------------|-------------------|-----------|
-| `learnings` table + FTS5 | `MemoryEngine<Learning>` | Implement `MemoryRecord` for `Learning` |
-| `failure_patterns` table | `MemoryEngine<FailurePattern>` | Implement `MemoryRecord` for `FailurePattern` |
-| `solutions` table + trust | `MemoryEngine<Solution>` with `TrustScorer` | Implement `MemoryRecord`, use `ValidatedBy` relations |
-| `find_similar_completed_tasks()` | `engine.search().mode(Auto)` | Direct replacement, gains vector search |
-| `assemble_context()` | `engine.assemble_context()` | Direct replacement |
-| Stop-word stripping | Built into MindCore FTS5 | Automatic |
-| Porter stemming | Built into MindCore FTS5 | Automatic |
-
-**What Dial gains:** Vector search for task similarity, graph relationships between errors/solutions/learnings, activation-based decay replacing manual trust scoring, consolidation preventing duplicate learnings.
-
-### Memloft → MindCore
-
-| Memloft Component | MindCore Equivalent | Migration |
-|-------------------|-------------------|-----------|
-| `memory` table + FTS5 | `MemoryEngine<Memory>` | Implement `MemoryRecord` for `Memory` |
-| `memory_vectors` table | Built into MindCore | Automatic |
-| `HybridSearcher` with RRF | Built into MindCore | Automatic |
-| `LocalBackend` (candle) | `CandleBackend` | Direct port |
-| `FallbackBackend` | `FallbackBackend` | Direct port |
-| `EmbeddingIndexer` | Built into MindCore | Automatic |
-| Tier system (working/long_term/archive) | `ActivationScorer` + `MemoryTypeScorer` | Activation model replaces tiers |
-| Content-hash dedup | `HashDedup` consolidation | Direct port |
-
-**What Memloft gains:** Cognitive memory types, activation-based decay, graph relationships, token-budget context assembly, two-tier global/project memory, consolidation pipeline.
-
-### PIRDLY → MindCore
-
-PIRDLY uses MindCore as its memory system from the start:
-
-```toml
-# PIRDLY's Cargo.toml
-[dependencies]
-mindcore = { version = "0.1", features = ["full"] }
-```
-
-PIRDLY implements `MemoryRecord` for its types (learnings, error patterns, project context) and gets the full memory engine with no custom memory code needed.
 
 ---
 
@@ -1906,7 +1854,7 @@ sha2 = "0.10"         # Content hashing
 tracing = "0.1"       # Structured logging
 ```
 
-**Note:** MindCore requires **Rust 1.75+** for native async trait support (no `async-trait` proc macro needed).
+**Note:** MindCore requires **Rust 1.85+** (edition 2024).
 
 ### Feature-Gated
 
@@ -1927,17 +1875,17 @@ hf-hub = { version = "0.4", optional = true }
 
 # mcp-server
 axum = { version = "0.7", optional = true }
-tower = { version = "0.4", optional = true }
+tower = { version = "0.5", optional = true }
 
 # keychain (encryption key storage)
-keyring = { version = "3.6", optional = true }
+keyring = { version = "3", optional = true }
 ```
 
 ---
 
 ## Summary
 
-MindCore is a **composable, feature-gated memory engine** that unifies proven patterns from Memloft, Dial, published research, and the 2025-2026 agent memory landscape into a single Rust crate. It provides:
+MindCore is a **composable, feature-gated memory engine** that unifies proven patterns from published research and the 2025-2026 agent memory landscape into a single Rust crate. It provides:
 
 **Core (always on):**
 - **FTS5 keyword search** with Porter stemming and BM25 ranking
