@@ -43,12 +43,13 @@ impl QuestionType {
     }
 }
 
-/// Ground truth answer — can be a string or array of strings.
+/// Ground truth answer — can be a string, number, or array of strings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Answer {
     Single(String),
-    Multiple(Vec<String>),
+    Number(serde_json::Number),
+    Multiple(Vec<serde_json::Value>),
 }
 
 impl Answer {
@@ -56,7 +57,15 @@ impl Answer {
     pub fn as_text(&self) -> String {
         match self {
             Self::Single(s) => s.clone(),
-            Self::Multiple(v) => v.join("; "),
+            Self::Number(n) => n.to_string(),
+            Self::Multiple(v) => v
+                .iter()
+                .map(|val| match val {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
         }
     }
 }

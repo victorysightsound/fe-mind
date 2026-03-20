@@ -1,4 +1,4 @@
-# Task: Define Rust data structures for LongMemEval dataset (Question, Session, Turn, QuestionType)
+# Task: Implement dataset downloader — download longmemeval_oracle.json from HuggingFace with progress bar
 
 ## ⚠️ SIGNS (Critical Rules)
 
