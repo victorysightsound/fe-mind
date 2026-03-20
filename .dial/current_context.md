@@ -1,4 +1,4 @@
-# Task: Write tests for scoring strategies and context assembly
+# Task: Implement ConsolidationStrategy trait, ConsolidationAction, StoreResult
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -16,20 +16,6 @@
 - **FAIL FAST: If blocked or confused, stop and ask rather than guessing.**
 
 
-
-## Related Specifications
-
-
-### MindCore — Product Requirements Document > 3. Phases > Phase 2: Scoring + Context Assembly
-Post-search scoring and token-budget context assembly. After this phase, MindCore can rank results intelligently and produce LLM-ready context.
-
-**Deliverables:**
-- `ScoringStrategy` trait (takes `&MemoryMeta`)
-- Shipped scorers: `RecencyScorer`, `ImportanceScorer`, `CategoryScorer`, `MemoryTypeScorer`
-- `CompositeScorer` for combining strategies multiplicatively
-- `ScoredResult<T>` struct with score breakdown
-- `ContextBudget` struct and priority constants
-- `ContextItem` and `ContextAssembly` 
 
 ## Project Learnings (apply these patterns)
 
