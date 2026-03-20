@@ -1,4 +1,4 @@
-# Task: Implement ConsolidationStrategy trait, ConsolidationAction, StoreResult
+# Task: Add tier and source_ids columns to schema (migration v1-v2)
 
 ## ⚠️ SIGNS (Critical Rules)
 

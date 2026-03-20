@@ -38,7 +38,9 @@ pub enum SearchDepth {
 
 impl Default for SearchDepth {
     fn default() -> Self {
-        Self::Standard
+        // Default to Deep (all tiers) until tier-based consolidation is active.
+        // Standard (tiers 1+2 only) is useful once memories are promoted from tier 0.
+        Self::Deep
     }
 }
 
@@ -162,13 +164,15 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     fn execute_keyword(&self) -> Result<Vec<SearchResult>> {
         let category_filter = self.category.as_deref();
         let type_filter = self.memory_type.map(|t| t.as_str());
+        let min_tier = self.depth_to_min_tier();
 
-        let fts_results = FtsSearch::search(
+        let fts_results = FtsSearch::search_with_tiers(
             self.db,
             &self.query,
             self.limit,
             category_filter,
             type_filter,
+            min_tier,
         )?;
 
         let mut results = self.apply_filters(fts_results);
@@ -186,19 +190,29 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     fn execute_exhaustive(&self, min_score: f32) -> Result<Vec<SearchResult>> {
         let category_filter = self.category.as_deref();
         let type_filter = self.memory_type.map(|t| t.as_str());
+        let min_tier = self.depth_to_min_tier();
 
-        // Use a large limit for exhaustive mode
-        let fts_results = FtsSearch::search(
+        let fts_results = FtsSearch::search_with_tiers(
             self.db,
             &self.query,
             10_000,
             category_filter,
             type_filter,
+            min_tier,
         )?;
 
         let mut results = self.apply_filters(fts_results);
         results.retain(|r| r.score >= min_score);
         Ok(results)
+    }
+
+    /// Convert search depth to minimum tier filter.
+    fn depth_to_min_tier(&self) -> Option<i32> {
+        match self.depth {
+            SearchDepth::Standard => Some(1), // Tiers 1+2 (summaries and facts)
+            SearchDepth::Deep => Some(0),     // All tiers including raw episodes
+            SearchDepth::Forensic => None,    // No filter (same as Deep, but conceptually includes archived)
+        }
     }
 
     /// Apply scoring and filters to FTS results.

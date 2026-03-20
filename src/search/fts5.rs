@@ -35,6 +35,21 @@ impl FtsSearch {
         category_filter: Option<&str>,
         memory_type_filter: Option<&str>,
     ) -> Result<Vec<FtsResult>> {
+        Self::search_with_tiers(db, query, limit, category_filter, memory_type_filter, None)
+    }
+
+    /// Search with optional tier filtering.
+    ///
+    /// `min_tier`: if set, only search memories with tier >= this value.
+    /// Used by SearchDepth: Standard searches tiers 1+2, Deep includes 0, Forensic includes all.
+    pub fn search_with_tiers(
+        db: &Database,
+        query: &str,
+        limit: usize,
+        category_filter: Option<&str>,
+        memory_type_filter: Option<&str>,
+        min_tier: Option<i32>,
+    ) -> Result<Vec<FtsResult>> {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
@@ -42,32 +57,19 @@ impl FtsSearch {
         db.with_reader(|conn| {
             let mut results = Vec::new();
 
-            // Build query with optional filters
-            // BM25 returns negative scores (more negative = more relevant)
-            // We negate to make higher = better
-            let sql = if category_filter.is_some() || memory_type_filter.is_some() {
-                "SELECT m.id, -rank AS score
+            let sql = "SELECT m.id, -rank AS score
                  FROM memories_fts fts
                  JOIN memories m ON m.id = fts.rowid
                  WHERE memories_fts MATCH ?1
                    AND (?2 IS NULL OR m.category = ?2)
                    AND (?3 IS NULL OR m.memory_type = ?3)
+                   AND (?4 IS NULL OR m.tier >= ?4)
                  ORDER BY rank
-                 LIMIT ?4"
-            } else {
-                "SELECT m.id, -rank AS score
-                 FROM memories_fts fts
-                 JOIN memories m ON m.id = fts.rowid
-                 WHERE memories_fts MATCH ?1
-                   AND (?2 IS NULL OR m.category = ?2)
-                   AND (?3 IS NULL OR m.memory_type = ?3)
-                 ORDER BY rank
-                 LIMIT ?4"
-            };
+                 LIMIT ?5";
 
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt.query_map(
-                params![query, category_filter, memory_type_filter, limit as i64],
+                params![query, category_filter, memory_type_filter, min_tier, limit as i64],
                 |row| {
                     Ok(FtsResult {
                         memory_id: row.get(0)?,
