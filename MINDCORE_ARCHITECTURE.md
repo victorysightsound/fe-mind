@@ -56,7 +56,7 @@ mindcore/
 │   ├── storage/
 │   │   ├── mod.rs
 │   │   ├── engine.rs          # SQLite connection, WAL, pragmas
-│   │   ├── schema.rs          # Dynamic schema generation from MemoryRecord
+│   │   ├── schema.rs          # Schema creation, table definitions, index management
 │   │   ├── migrations.rs      # Versioned schema migrations
 │   │   └── two_tier.rs        # Global + project database management
 │   │
@@ -243,7 +243,7 @@ pub enum MemoryType {
     Procedural,
     /// What I conclude — agent-synthesized conclusions that can be revised.
     /// Has confidence score and provenance chain. Challengeable.
-    /// (Under consideration — see Decision Q3)
+    /// (Deferred to post-v1 — see Decision Q3)
     // Belief,
 }
 
@@ -346,6 +346,25 @@ impl MemoryRecord for Memory {
     fn importance(&self) -> u8 { self.importance }
     fn created_at(&self) -> DateTime<Utc> { self.created_at }
     fn category(&self) -> Option<&str> { Some(&self.category) }
+}
+```
+
+### MemoryMeta
+
+```rust
+/// Extracted metadata from a MemoryRecord for use in scoring, consolidation,
+/// and evolution traits. These traits cannot use `dyn MemoryRecord` because
+/// `MemoryRecord` requires `Serialize + DeserializeOwned` (not object-safe).
+/// The engine extracts `MemoryMeta` from `T: MemoryRecord` before passing
+/// to scoring/consolidation/evolution strategies.
+pub struct MemoryMeta {
+    pub id: Option<i64>,
+    pub searchable_text: String,
+    pub memory_type: MemoryType,
+    pub importance: u8,
+    pub category: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub metadata: HashMap<String, String>,
 }
 ```
 
@@ -727,7 +746,7 @@ pub trait ScoringStrategy: Send + Sync {
     /// Returns a multiplier (1.0 = no change).
     fn score_multiplier(
         &self,
-        record: &dyn MemoryRecord,
+        record: &MemoryMeta,
         query: &SearchQuery,
         base_score: f32,
     ) -> f32;
@@ -756,7 +775,7 @@ pub trait ConsolidationStrategy: Send + Sync {
     /// decide what operations to perform.
     fn consolidate(
         &self,
-        new: &dyn MemoryRecord,
+        new: &MemoryMeta,
         existing: &[ScoredResult],
     ) -> Vec<ConsolidationAction>;
 }
@@ -852,7 +871,7 @@ pub trait EvolutionStrategy: Send + Sync {
     /// return updates to apply to existing memories.
     async fn evolve(
         &self,
-        new_memory: &dyn MemoryRecord,
+        new_memory: &MemoryMeta,
         similar: &[ScoredResult],
     ) -> Result<Vec<EvolutionAction>>;
 }
@@ -925,7 +944,7 @@ pub type Result<T> = std::result::Result<T, MindCoreError>;
 `MemoryEngine` is `Send + Sync` and safe to share across threads:
 
 - **Writer:** A single `Mutex<Connection>` serializes all write operations (store, update, delete, schema migrations). SQLite only supports one writer at a time; the mutex ensures this without runtime errors.
-- **Readers:** A connection pool (sized to `num_cpus`, minimum 2) provides concurrent read access. WAL mode allows readers to proceed without blocking on the writer.
+- **Readers:** A connection pool (sized to `std::thread::available_parallelism()`, minimum 2) provides concurrent read access. WAL mode allows readers to proceed without blocking on the writer.
 - **Shared ownership:** For use across threads or async tasks, wrap in `Arc<MemoryEngine<T>>`. The engine itself holds no thread-local state.
 - **Background indexer:** The embedding indexer runs on a dedicated OS thread via `std::thread::spawn`, not on a tokio runtime. It pulls pending items from the database, calls `EmbeddingBackend::embed_batch` (using a thread-local tokio `Runtime::block_on` for the async trait methods), and writes vectors back. This keeps the async runtime optional for consumers who only use synchronous operations.
 
@@ -984,6 +1003,10 @@ CREATE TABLE IF NOT EXISTS memories (
     embedding_status TEXT DEFAULT 'pending' CHECK(embedding_status IN ('pending','success','failed')),
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+
+    -- Cached activation score (feature: activation-model)
+    activation_cache REAL,                -- Last-computed activation score
+    activation_updated TEXT,              -- When the cache was last refreshed
 
     -- Memory hierarchy (Decision 010)
     tier            INTEGER NOT NULL DEFAULT 0 CHECK(tier BETWEEN 0 AND 2),
@@ -1077,6 +1100,34 @@ Both databases share the same schema. The engine queries both and merges results
 
 **Promotion logic:** When a project-specific memory is accessed across N different projects (configurable, default 3), it is promoted to global memory automatically.
 
+### Schema Migrations
+
+MindCore uses a simple version-based migration system. The database stores its schema version in a `mindcore_meta` table:
+
+```sql
+CREATE TABLE IF NOT EXISTS mindcore_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+-- Initial: INSERT INTO mindcore_meta VALUES ('schema_version', '1');
+```
+
+On connection open, the engine checks the stored version against the compiled version and runs any pending migrations sequentially:
+
+```rust
+const CURRENT_SCHEMA_VERSION: u32 = 1;
+
+/// Each migration is a function that takes a connection and upgrades from version N to N+1.
+type Migration = fn(&Connection) -> Result<()>;
+
+const MIGRATIONS: &[Migration] = &[
+    // v1 → v2: example future migration
+    // |conn| { conn.execute_batch("ALTER TABLE ..."); Ok(()) },
+];
+```
+
+Migrations run inside a transaction — if any step fails, the database rolls back to its previous state. The engine refuses to open a database with a schema version newer than `CURRENT_SCHEMA_VERSION` (prevents downgrade corruption).
+
 ---
 
 ## Search Pipeline
@@ -1143,6 +1194,16 @@ pub enum SearchDepth {
                               │ • question → vector │
                               │ • default → equal   │
                               └──────────┬──────────┘
+                                         │
+                              ┌──────────────────────┐
+                              │ Cross-Encoder         │
+                              │ Reranking             │
+                              │ (if reranking)        │
+                              │                       │
+                              │ Score (query,doc)     │
+                              │ pairs jointly         │
+                              │ Re-sort by score      │
+                              └──────────┬────────────┘
                                          │
                               ┌──────────▼──────────┐
                               │ Graph Traversal     │
@@ -1266,6 +1327,48 @@ pub enum RelationType {
     Custom(String), // User-defined relationship type
 }
 ```
+
+### Time-Aware Query Expansion (search/query_expand.rs)
+
+Converts natural language temporal expressions in queries to date-range filters before search. This pre-processing step improves temporal reasoning accuracy by +6-11% (LongMemEval findings).
+
+**Supported patterns:**
+
+| Expression | Expansion |
+|-----------|-----------|
+| "last week" | `created_at > datetime('now', '-7 days')` |
+| "last month" | `created_at > datetime('now', '-30 days')` |
+| "yesterday" | `created_at BETWEEN datetime('now', '-1 day') AND datetime('now')` |
+| "in January" / "in 2025" | `created_at BETWEEN '2025-01-01' AND '2025-01-31'` |
+| "before Christmas" | `created_at < '2025-12-25'` |
+| "3 days ago" | `created_at BETWEEN datetime('now', '-4 days') AND datetime('now', '-2 days')` |
+
+**Implementation:**
+
+```rust
+pub struct ExpandedQuery {
+    /// The query text with temporal expressions removed
+    pub cleaned_text: String,
+    /// SQL date-range filters extracted from temporal expressions
+    pub date_filters: Vec<DateFilter>,
+}
+
+pub struct DateFilter {
+    pub column: String,        // "created_at" or "valid_from"/"valid_until"
+    pub operator: FilterOp,    // Before, After, Between
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
+}
+
+pub fn expand_query(query: &str, now: DateTime<Utc>) -> ExpandedQuery {
+    // Regex-based extraction of temporal patterns
+    // Strips matched expressions from query text
+    // Converts relative dates to absolute using `now`
+    todo!()
+}
+```
+
+The expanded date filters are applied as SQL WHERE clauses during both FTS5 and vector search, narrowing the candidate set before RRF merge.
 
 ---
 
@@ -1682,7 +1785,7 @@ Based on OMEGA Memory benchmarks and Memloft's production performance:
 | Operation | Target | Measurement |
 |-----------|--------|-------------|
 | FTS5 keyword search | <5ms | 10K memories |
-| Vector embedding (single) | <10ms | all-MiniLM-L6-v2 on CPU |
+| Vector embedding (single) | <10ms | granite-small-r2 on CPU |
 | Brute-force vector scan | <50ms | 100K vectors, 384 dims |
 | RRF hybrid merge | <1ms | Pure computation |
 | Graph traversal (3 hops) | <10ms | 10K relationships |

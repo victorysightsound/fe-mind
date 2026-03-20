@@ -68,7 +68,7 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 **Consequences:**
 - Feature-gated behind `local-embeddings` flag
-- Model: `all-MiniLM-L6-v2` (384 dims, 22M params, ~80MB download)
+- Default model: `granite-embedding-small-english-r2` (384 dims, 47M params, ~95MB download) — updated by Decision 017
 - Model downloaded from HF Hub on first use, cached locally
 - Graceful degradation to FTS5-only if candle fails to load
 
@@ -372,9 +372,9 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 **Consequences:**
 - `CandleBackend` is the primary backend on all native targets (feature: `local-embeddings`)
 - Native default model: `granite-embedding-small-english-r2` (ModernBERT, 384-dim, 8K context)
-- WASM fallback: `bge-small-en-v1.5` (standard BERT, 384-dim, cross-compatible vectors)
+- WASM fallback: `bge-small-en-v1.5` (standard BERT, 384-dim) — vectors are NOT cross-compatible with granite; see Decision 020
 - WASM can't use granite because ModernBERT ops may not compile cleanly to WASM, model is 95MB (too large for browser), and WASM is single-threaded
-- Cross-model vector compatibility: both produce 384-dim vectors, but similarity scores degrade slightly when query and document use different models
+- Cross-model vectors are isolated: different models produce incomparable embedding spaces despite same dimensionality — see Decision 020
 - Dependencies: `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`, `hf-hub`
 - Model cached at `~/.cache/mindcore/models/`, auto-downloaded on first use
 - No `FastembedBackend` in MindCore — removed from codebase
@@ -393,15 +393,15 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 - Code retrieval (CoIR): granite 53.8 vs bge-small 45.8 — 17% better on the workload that matters most for dev tool memory
 - 8K token context captures full error traces, decision rationale, and code blocks without truncation
 - Standard retrieval matches bge-small exactly (MTEB-v2: 53.9 vs 53.9)
-- Same 384 dimensions — vectors cross-compatible with bge-small (WASM fallback)
+- Same 384 dimensions as bge-small — but cross-model similarity is unreliable (see Decision 020); FTS5 fallback handles platform transitions
 - ModernBERT architecture with Flash Attention 2 keeps inference fast despite 47M params
 - Apache 2.0 license, safetensors weights are 95MB
 - candle-transformers has native ModernBERT support — no ONNX conversion needed
 
 **Consequences:**
 - `CandleBackend::new()` auto-downloads granite-small-r2 safetensors from HuggingFace, caches at `~/.cache/mindcore/models/`
-- WASM backend uses `bge-small-en-v1.5` (standard BERT, 384-dim, cross-compatible vectors)
-- Cross-model note: granite and bge-small produce compatible 384-dim vectors but similarity precision degrades slightly when query and document use different models
+- WASM backend uses `bge-small-en-v1.5` (standard BERT, 384-dim)
+- Cross-model note: vectors from different models are NOT comparable — engine falls back to FTS5 when model_name mismatches (Decision 020)
 - `all-MiniLM-L6-v2` not used
 
 ---
@@ -497,13 +497,36 @@ Decisions 001-007 originated during research in the PIRDLY project (2026-03-16) 
 
 ---
 
+## Decision 022: Crate Name — mindcore
+
+**Date:** 2026-03-19
+
+**Decision:** Name the crate `mindcore`. Reserved on crates.io and GitHub.
+
+**Context:** Evaluated 25+ candidate names across crates.io, npm, PyPI, and GitHub. Key criteria: available on crates.io, short and memorable, low GitHub namespace collision, evocative of the library's purpose.
+
+**Rationale:**
+- Available on all three package registries (crates.io, npm, PyPI) at time of evaluation
+- Short (8 chars), easy to type, clearly communicates "cognitive/mind + core engine"
+- Minimal GitHub presence (58 repos, top has 3 stars — all abandoned/tiny)
+- Strong alternatives (`cognimem`, `cogmem`, `mnemic`) were also clean but `mindcore` best communicates the crate's purpose
+
+**Consequences:**
+- crates.io: v0.0.1 placeholder published under `mindcore`
+- GitHub: `victorysightsound/mindcore` repository created
+- npm: blocked by `mind-core` similarity — use scoped package if needed
+- PyPI: deferred until Python bindings are built
+- All documentation renamed from `memcore` → `mindcore`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing
 
-**Status:** Open
+**Status:** Decided — `mindcore` (Decision 022)
 
-Evaluate crate name availability on crates.io. Candidates: `mindcore`, `agentmem`, `cognimem`. Publish after v0.1.0 is stable with Dial and Memloft migrations validated.
+Name `mindcore` selected and reserved on crates.io (v0.0.1 placeholder published 2026-03-19) and GitHub (victorysightsound/mindcore). npm blocked by name similarity to existing `mind-core` package — will use scoped `@victorysightsound/mindcore` if JS/WASM bindings are published. PyPI deferred — only relevant for Python bindings via PyO3.
 
 ### Q2: FTS5 + Hybrid Search Phasing
 
