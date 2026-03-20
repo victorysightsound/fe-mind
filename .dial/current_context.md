@@ -1,4 +1,4 @@
-# Task: Publish v0.2.0 to crates.io with all hardening changes
+# Task: Define Rust data structures for LongMemEval dataset (Question, Session, Turn, QuestionType)
 
 ## ⚠️ SIGNS (Critical Rules)
 
