@@ -1,4 +1,4 @@
-mod builder;
+pub mod builder;
 mod fts5;
 
 pub use builder::{SearchBuilder, SearchDepth, SearchMode, SearchResult};

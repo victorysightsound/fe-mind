@@ -36,6 +36,7 @@
 //! | `mcp-server` | MCP server interface |
 //! | `full` | All features except encryption and mcp-server |
 
+pub mod engine;
 pub mod error;
 pub mod memory;
 pub mod search;
@@ -44,6 +45,9 @@ pub mod traits;
 
 /// Prelude module — common imports for consumers.
 pub mod prelude {
+    pub use crate::engine::MemoryEngine;
     pub use crate::error::{MindCoreError, Result};
+    pub use crate::memory::store::StoreResult;
+    pub use crate::search::{SearchBuilder, SearchDepth, SearchMode, SearchResult};
     pub use crate::traits::{MemoryMeta, MemoryRecord, MemoryType};
 }
