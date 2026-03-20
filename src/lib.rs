@@ -37,6 +37,7 @@
 //! | `full` | All features except encryption and mcp-server |
 
 pub mod context;
+pub mod embeddings;
 pub mod engine;
 pub mod error;
 pub mod memory;
