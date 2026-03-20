@@ -7,7 +7,7 @@ use crate::error::{MindCoreError, Result};
 use crate::memory::MemoryStore;
 use crate::memory::store::StoreResult;
 use crate::scoring::CompositeScorer;
-use crate::search::builder::{SearchBuilder, SearchResult};
+use crate::search::builder::SearchBuilder;
 use crate::storage::Database;
 use crate::storage::migrations;
 use crate::traits::{MemoryRecord, ScoringStrategy};

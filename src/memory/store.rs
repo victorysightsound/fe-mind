@@ -23,6 +23,12 @@ pub struct MemoryStore<T: MemoryRecord> {
     _phantom: PhantomData<T>,
 }
 
+impl<T: MemoryRecord> Default for MemoryStore<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: MemoryRecord> MemoryStore<T> {
     pub fn new() -> Self {
         Self {

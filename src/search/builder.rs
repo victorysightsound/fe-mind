@@ -28,22 +28,16 @@ pub enum SearchMode {
 }
 
 /// Controls which memory tiers are searched.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SearchDepth {
-    /// Search summaries and facts only — tiers 1+2 (default, fastest).
+    /// Search summaries and facts only — tiers 1+2 (fastest).
     Standard,
     /// Also search raw episodes if summary results are sparse.
+    /// Default until tier-based consolidation is active.
+    #[default]
     Deep,
     /// Search all tiers (slowest, most complete, for forensic/audit).
     Forensic,
-}
-
-impl Default for SearchDepth {
-    fn default() -> Self {
-        // Default to Deep (all tiers) until tier-based consolidation is active.
-        // Standard (tiers 1+2 only) is useful once memories are promoted from tier 0.
-        Self::Deep
-    }
 }
 
 /// A scored search result containing the memory ID and relevance score.

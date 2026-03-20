@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use crate::error::{MindCoreError, Result};
+use crate::error::Result;
 use crate::storage::Database;
 
 /// Standard relationship types between memories.

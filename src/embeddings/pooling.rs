@@ -1,8 +1,8 @@
-/// Pure-Rust vector math utilities for embedding operations.
-///
-/// These are used by the vector search module for brute-force similarity.
-/// When the `local-embeddings` feature is enabled, candle-based pooling
-/// operates on Tensors directly (see CandleNativeBackend).
+//! Pure-Rust vector math utilities for embedding operations.
+//!
+//! These are used by the vector search module for brute-force similarity.
+//! When the `local-embeddings` feature is enabled, candle-based pooling
+//! operates on Tensors directly (see CandleNativeBackend).
 
 /// Compute dot product of two vectors.
 pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
