@@ -1,4 +1,4 @@
-# Task: Implement SQLite storage engine (connection, WAL, pragmas, mmap)
+# Task: Implement core schema creation (memories table, FTS5, triggers)
 
 ## ⚠️ SIGNS (Critical Rules)
 
