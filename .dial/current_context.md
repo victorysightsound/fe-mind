@@ -1,4 +1,4 @@
-# Task: Implement MemoryEngine<T> and MemoryEngineBuilder
+# Task: Implement thread safety (Mutex writer, connection pool readers)
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -15,3 +15,9 @@
 
 - **FAIL FAST: If blocked or confused, stop and ask rather than guessing.**
 
+
+
+## Project Learnings (apply these patterns)
+
+
+- [gotcha] Module visibility: when engine.rs references types from other modules, those modules must be pub mod not mod. Fixed store and builder visibility.
