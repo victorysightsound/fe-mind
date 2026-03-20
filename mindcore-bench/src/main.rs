@@ -6,6 +6,7 @@ mod llm;
 mod metrics;
 mod retrieval;
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::Result;
@@ -37,15 +38,18 @@ enum Commands {
         /// Number of questions to evaluate (0 = all)
         #[arg(short, long, default_value = "0")]
         limit: usize,
-        /// Output file for results
+        /// Output file for results (appends; skips already-evaluated questions)
         #[arg(short, long, default_value = "results.jsonl")]
         output: String,
         /// Context budget in tokens
-        #[arg(short, long, default_value = "4096")]
+        #[arg(short, long, default_value = "16384")]
         budget: usize,
-        /// Claude model to use (default: subscription default)
-        #[arg(short, long)]
-        model: Option<String>,
+        /// Model for answer generation (default: sonnet)
+        #[arg(short, long, default_value = "sonnet")]
+        model: String,
+        /// Model for judging (default: haiku)
+        #[arg(long, default_value = "haiku")]
+        judge_model: String,
     },
     /// Show metrics from a results file
     Report {
@@ -71,6 +75,19 @@ fn parse_variant(s: &str) -> DatasetVariant {
             DatasetVariant::Oracle
         }
     }
+}
+
+/// Load already-completed question IDs from a JSONL results file.
+fn load_completed_ids(path: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    if let Ok(data) = std::fs::read_to_string(path) {
+        for line in data.lines() {
+            if let Ok(result) = serde_json::from_str::<EvalResult>(line) {
+                ids.insert(result.question_id);
+            }
+        }
+    }
+    ids
 }
 
 #[tokio::main]
@@ -115,15 +132,14 @@ async fn main() -> Result<()> {
             output,
             budget,
             model,
+            judge_model,
         } => {
             let v = parse_variant(&variant);
             let path = download::download_dataset(v).await?;
             let ds = dataset::Dataset::load(&path)?;
 
-            let client = match model {
-                Some(m) => llm::ClaudeCliClient::with_model(m),
-                None => llm::ClaudeCliClient::new(),
-            };
+            let gen_client = llm::ClaudeCliClient::with_model(&model);
+            let judge_client = llm::ClaudeCliClient::with_model(&judge_model);
 
             let questions = if limit > 0 {
                 &ds.questions[..limit.min(ds.questions.len())]
@@ -131,21 +147,49 @@ async fn main() -> Result<()> {
                 &ds.questions
             };
 
+            // Resume support: skip already-evaluated questions
+            let completed = load_completed_ids(&output);
+            let remaining: Vec<_> = questions
+                .iter()
+                .filter(|q| !completed.contains(&q.question_id))
+                .collect();
+
+            if !completed.is_empty() {
+                println!(
+                    "Resuming: {}/{} already completed, {} remaining",
+                    completed.len(),
+                    questions.len(),
+                    remaining.len()
+                );
+            }
+
             println!(
                 "Running LongMemEval benchmark: {} questions, budget={budget} tokens",
-                questions.len()
+                remaining.len()
             );
+            println!("Generation: {model} | Judge: {judge_model}");
             println!("Using Claude Code CLI (subscription, no API tokens)\n");
 
-            let pb = ProgressBar::new(questions.len() as u64);
+            if remaining.is_empty() {
+                println!("All questions already evaluated. Loading results for report.\n");
+                let data = std::fs::read_to_string(&output)?;
+                let results: Vec<EvalResult> = data
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .map(|l| serde_json::from_str(l))
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let m = metrics::compute_metrics(&results);
+                metrics::print_report(&m);
+                return Ok(());
+            }
+
+            let pb = ProgressBar::new(remaining.len() as u64);
             pb.set_style(
                 ProgressStyle::default_bar()
                     .template("[{bar:40}] {pos}/{len} ({eta}) {msg}")
                     .expect("style")
                     .progress_chars("=> "),
             );
-
-            let mut results: Vec<EvalResult> = Vec::new();
 
             // Ensure output directory exists
             if let Some(parent) = Path::new(&output).parent() {
@@ -155,32 +199,67 @@ async fn main() -> Result<()> {
             }
 
             let mut correct_count = 0_usize;
+            let mut error_count = 0_usize;
+            let total_done = completed.len();
 
-            for (i, question) in questions.iter().enumerate() {
+            for (i, question) in remaining.iter().enumerate() {
                 pb.set_message(format!("{}", question.question_id));
 
-                // Step 1: Retrieve context from MindCore
-                let ctx = retrieval::process_question(question, budget)?;
+                // Step 1: Retrieve context
+                let ctx = match retrieval::process_question(question, budget) {
+                    Ok(ctx) => ctx,
+                    Err(e) => {
+                        pb.println(format!(
+                            "  WARN: retrieval failed for {}: {e}",
+                            question.question_id
+                        ));
+                        error_count += 1;
+                        pb.inc(1);
+                        continue;
+                    }
+                };
 
-                // Step 2: Generate answer via Claude CLI
+                // Step 2: Generate answer via Claude CLI (sonnet)
                 let prompt = retrieval::build_generation_prompt(
                     &ctx.context_text,
                     &question.question,
                     &question.question_date,
                 );
 
-                let hypothesis = client.complete(&prompt, 512)?;
+                let hypothesis = match gen_client.complete(&prompt, 512) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        pb.println(format!(
+                            "  WARN: generation failed for {}: {e}",
+                            question.question_id
+                        ));
+                        error_count += 1;
+                        pb.inc(1);
+                        continue;
+                    }
+                };
 
-                // Step 3: Judge the answer
+                // Step 3: Judge the answer (haiku for speed)
                 let ground_truth = question.answer.as_text();
-                let is_correct = judge::judge_answer(
-                    &client,
+                let is_correct = match judge::judge_answer(
+                    &judge_client,
                     &question.question,
                     &ground_truth,
                     &hypothesis,
                     question.question_type,
                     question.is_abstention(),
-                )?;
+                ) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        pb.println(format!(
+                            "  WARN: judging failed for {}: {e}",
+                            question.question_id
+                        ));
+                        error_count += 1;
+                        pb.inc(1);
+                        continue;
+                    }
+                };
 
                 if is_correct {
                     correct_count += 1;
@@ -193,10 +272,10 @@ async fn main() -> Result<()> {
                     hypothesis,
                     ground_truth,
                     is_correct,
-                    tokens_used: 0, // CLI doesn't report token counts
+                    tokens_used: 0,
                 };
 
-                // Append to results file (JSONL)
+                // Append to results file (JSONL) — incremental save
                 let line = serde_json::to_string(&result)?;
                 use std::io::Write;
                 let mut file = std::fs::OpenOptions::new()
@@ -205,22 +284,35 @@ async fn main() -> Result<()> {
                     .open(&output)?;
                 writeln!(file, "{line}")?;
 
-                results.push(result);
                 pb.inc(1);
 
-                // Print running accuracy every 10 questions
-                if (i + 1) % 10 == 0 {
+                // Print running accuracy every 25 questions
+                let done = total_done + i + 1;
+                if done % 25 == 0 {
                     let running = correct_count as f64 / (i + 1) as f64 * 100.0;
-                    pb.println(format!("  [{}/{}] Running accuracy: {running:.1}%", i + 1, questions.len()));
+                    pb.println(format!(
+                        "  [{done}/{}] Running accuracy: {running:.1}% ({error_count} errors)",
+                        questions.len()
+                    ));
                 }
             }
 
             pb.finish_with_message("done");
 
-            // Compute and print metrics
-            let m = metrics::compute_metrics(&results);
-            metrics::print_report(&m);
+            if error_count > 0 {
+                println!("\n{error_count} questions had errors and were skipped.");
+            }
 
+            // Load ALL results (including previously completed) for final report
+            let data = std::fs::read_to_string(&output)?;
+            let all_results: Vec<EvalResult> = data
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| serde_json::from_str(l))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            let m = metrics::compute_metrics(&all_results);
+            metrics::print_report(&m);
             println!("\nResults saved to: {output}");
         }
         Commands::Report { results_file } => {
