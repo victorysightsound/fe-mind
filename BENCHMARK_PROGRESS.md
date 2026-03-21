@@ -32,7 +32,7 @@ No official LongMemEval leaderboard exists — all scores are self-reported by e
 
 ## Score Summary
 
-| Metric | v1 | v2 | v3b |
+| Metric | v1 | v2 | v3 |
 |--------|----|----|-----|
 | Overall Accuracy | 87.0% (435/500) | 94.8% (474/500) | 95.6% (478/500) |
 | Task-Averaged Accuracy | 81.9% | 93.8% | 95.5% |
@@ -203,13 +203,13 @@ Targets: 3 abstention failures (f685340e_abs, gpt4_93159ced_abs, 09ba9854_abs).
 
 ## v3 Run (2026-03-20) — Two Attempts
 
-### v3 (with temporal verification) — FAILED
+### v3-draft (with temporal verification) — FAILED
 
 **Configuration:**
 - Generation: Claude Sonnet | Judge: Claude Sonnet
 - Context budget: Unlimited
 - Verification: multi-session, temporal, knowledge-update
-- Results file: `results/longmemeval_v3.jsonl`
+- Results file: `results/longmemeval_v3-draft.jsonl`
 
 **Result: 92.4% (462/500)** — regression from v2's 94.8%.
 
@@ -219,7 +219,7 @@ After fixing to include context, temporal verification still caused 20 regressio
 
 **Lesson: Self-verification hurts categories where the initial answer is already strong. Only apply verification where it demonstrably helps.**
 
-### v3b (without temporal verification) — CURRENT BEST
+### v3 (without temporal verification) — CURRENT BEST
 
 **Configuration:**
 - Generation: Claude Sonnet | Judge: Claude Sonnet
@@ -227,17 +227,17 @@ After fixing to include context, temporal verification still caused 20 regressio
 - Verification: multi-session and knowledge-update only (temporal excluded)
 - Preference: few-shot examples for content vs format preferences
 - Abstention: lenient judging that accepts explanatory context
-- Results file: `results/longmemeval_v3b.jsonl`
+- Results file: `results/longmemeval_v3.jsonl`
 
 **Result: 95.6% (478/500), Task-Averaged: 95.5%**
 
-**v2 → v3b diff:**
+**v2 → v3 diff:**
 - Fixed (were wrong, now correct): improvements in KU (+2), preference (+3), abstention (+2)
 - Regressed: single-session user (-1), single-session assistant (-1) — nondeterministic model variation
 - Multi-session: held at 91.0% (verification didn't help or hurt net)
 - Net improvement: +4 questions correct
 
-### v3b Remaining Failures (22 questions)
+### v3 Remaining Failures (22 questions)
 
 **Multi-Session (12 wrong):**
 Mostly counting/enumeration errors where the model has the right items but computes the wrong total. Self-verification was expected to help here but had negligible net effect — it fixed some and regressed others.
@@ -287,8 +287,8 @@ These will be addressed through John's dedicated MindCore benchmark app.
 |------|-------------|
 | `results/longmemeval_full.jsonl` | v1 raw results (500 questions, deduplicate by question_id) |
 | `results/longmemeval_v2.jsonl` | v2 raw results (500 questions) |
-| `results/longmemeval_v3.jsonl` | v3 raw results (with temporal verification — regression) |
-| `results/longmemeval_v3b.jsonl` | v3b raw results (current best — 95.6%) |
+| `results/longmemeval_v3-draft.jsonl` | v3 draft attempt (with temporal verification — regression, kept for research) |
+| `results/longmemeval_v3.jsonl` | v3 final results (current best — 95.6%, formerly v3b) |
 | `results/bench.log` | v1 runtime log |
 | `results/bench_v2.log` | v2 runtime log |
 | `results/bench_v3.log` | v3 runtime log |
