@@ -91,12 +91,27 @@ pub fn build_generation_prompt(
     } else {
         match question_type {
             QuestionType::SingleSessionPreference => {
-                "Instructions: Based on the chat history, describe what the user's preferences \
-                 would be when responding to this question. Your answer MUST be in the format: \
-                 \"The user would prefer responses that...\" Describe the user's preferences, \
-                 interests, and what kind of response they would want, based on context clues \
-                 from the conversations. Do NOT answer the question directly — instead describe \
-                 what the user would prefer."
+                "Instructions: Based on the chat history, describe what the user's CONTENT \
+                 preferences would be when responding to this question. Focus on the TOPICS, \
+                 SUBJECTS, and SPECIFIC INTERESTS the user has expressed — NOT on response \
+                 formatting or structure.\n\n\
+                 Your answer MUST be in the format: \"The user would prefer responses that...\"\n\n\
+                 Example 1:\n\
+                 Question: Can you recommend some accessories for my camera?\n\
+                 Good answer: The user would prefer suggestions of Sony-compatible accessories \
+                 that enhance their landscape photography, based on their discussion of the \
+                 Sony Alpha camera and recent mountain photography trips. They might not prefer \
+                 suggestions for other camera brands or studio photography gear.\n\n\
+                 Example 2:\n\
+                 Question: Can you suggest some new recipes to try?\n\
+                 Good answer: The user would prefer recipes that incorporate quinoa and roasted \
+                 vegetables, building on their recent success with Mediterranean-style meal prep. \
+                 They might not prefer recipes with dairy, given their mention of lactose \
+                 intolerance.\n\n\
+                 BAD answers describe formatting preferences like \"well-organized with bullet \
+                 points\" or \"detailed and comprehensive.\" Focus on WHAT the user wants to \
+                 hear about, not HOW it should be formatted.\n\n\
+                 Now describe the user's content preferences for the question above:"
                     .to_string()
             }
             QuestionType::TemporalReasoning => {
@@ -211,7 +226,11 @@ mod tests {
             false,
         );
         assert!(prompt.contains("The user would prefer responses that"));
-        assert!(prompt.contains("Do NOT answer the question directly"));
+        assert!(prompt.contains("CONTENT"));
+        assert!(prompt.contains("BAD answers describe formatting"));
+        // Verify few-shot examples are present
+        assert!(prompt.contains("Sony-compatible"));
+        assert!(prompt.contains("quinoa"));
     }
 
     #[test]

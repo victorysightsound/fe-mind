@@ -17,12 +17,17 @@ pub fn judge_answer(
     let judge_instruction = if is_abstention {
         "You are evaluating a conversational AI assistant's response. \
          The question is designed to be unanswerable based on the chat history. \
-         Answer \"yes\" if the model indicates it cannot answer from the chat history, \
-         uses language like \"I don't know\", \"not available\", \"cannot determine\", \
-         \"no information\", or clearly states the information is not in the conversations. \
-         Answer \"no\" if the model provides a specific substantive answer to the question, \
-         even if it also expresses some uncertainty. A hedge like \"I'm not sure but...\" \
-         followed by an answer counts as \"no\" (model should have fully abstained)."
+         Answer \"yes\" if the model's PRIMARY response indicates it cannot answer \
+         from the chat history. This includes responses that:\n\
+         - Say \"I don't know\", \"not available\", \"cannot determine\", or similar\n\
+         - State the information is not in the conversations\n\
+         - Correctly identify WHY it can't answer (e.g., \"You mentioned tennis, not table tennis\")\n\
+         - Explain what IS in the chat history while still concluding they can't answer the specific question\n\
+         The model may provide context about what it DID find — this is fine as long as the \
+         conclusion is that it CANNOT answer the specific question asked.\n\
+         Answer \"no\" ONLY if the model provides a specific, direct answer to the question \
+         without indicating it can't answer. A hedge like \"I'm not sure but...\" followed \
+         by a concrete answer counts as \"no\"."
             .to_string()
     } else {
         match question_type {

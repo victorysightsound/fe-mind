@@ -5,6 +5,7 @@ mod judge;
 mod llm;
 mod metrics;
 mod retrieval;
+mod verify;
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -50,6 +51,9 @@ enum Commands {
         /// Model for judging (default: sonnet)
         #[arg(long, default_value = "sonnet")]
         judge_model: String,
+        /// Disable self-verification pass
+        #[arg(long)]
+        no_verify: bool,
     },
     /// Show metrics from a results file
     Report {
@@ -133,6 +137,7 @@ async fn main() -> Result<()> {
             budget,
             model,
             judge_model,
+            no_verify,
         } => {
             let v = parse_variant(&variant);
             let path = download::download_dataset(v).await?;
@@ -167,7 +172,8 @@ async fn main() -> Result<()> {
                 "Running LongMemEval benchmark: {} questions, budget={budget} tokens",
                 remaining.len()
             );
-            println!("Generation: {model} | Judge: {judge_model}");
+            let verify_status = if no_verify { "off" } else { "on (multi-session, temporal, knowledge-update)" };
+            println!("Generation: {model} | Judge: {judge_model} | Verify: {verify_status}");
             println!("Using Claude Code CLI (subscription, no API tokens)\n");
 
             if remaining.is_empty() {
@@ -241,7 +247,29 @@ async fn main() -> Result<()> {
                     }
                 };
 
-                // Step 3: Judge the answer (haiku for speed)
+                // Step 2b: Self-verification (for counting/arithmetic question types)
+                let hypothesis = if no_verify {
+                    hypothesis
+                } else {
+                    match verify::maybe_verify(
+                        &gen_client,
+                        &question.question,
+                        &hypothesis,
+                        question.question_type,
+                        question.is_abstention(),
+                    ) {
+                        Ok(h) => h,
+                        Err(e) => {
+                            pb.println(format!(
+                                "  WARN: verification failed for {}, using unverified: {e}",
+                                question.question_id
+                            ));
+                            hypothesis
+                        }
+                    }
+                };
+
+                // Step 3: Judge the answer
                 let ground_truth = question.answer.as_text();
                 let is_correct = match judge::judge_answer(
                     &judge_client,
