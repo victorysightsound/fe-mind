@@ -189,3 +189,87 @@ fn full_pipeline_with_real_embeddings() {
         .expect("search");
     assert!(!results.is_empty(), "should find music-related memory via semantic similarity");
 }
+
+/// Batch store with real embeddings at 50+ scale.
+#[test]
+fn batch_store_with_real_embeddings() {
+    use mindcore::engine::MemoryEngine;
+    use mindcore::memory::store::StoreResult;
+    use mindcore::traits::{MemoryRecord, MemoryType};
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    struct Mem {
+        id: Option<i64>,
+        text: String,
+        created: chrono::DateTime<chrono::Utc>,
+    }
+
+    impl MemoryRecord for Mem {
+        fn id(&self) -> Option<i64> { self.id }
+        fn searchable_text(&self) -> String { self.text.clone() }
+        fn memory_type(&self) -> MemoryType { MemoryType::Episodic }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created }
+    }
+
+    let backend = CandleNativeBackend::new().expect("load");
+    let engine = MemoryEngine::<Mem>::builder()
+        .embedding_backend(backend)
+        .build()
+        .expect("build");
+
+    // Generate 60 distinct memories
+    let subjects = [
+        "authentication", "database", "caching", "deployment", "testing",
+        "monitoring", "security", "performance", "networking", "storage",
+        "logging", "scheduling",
+    ];
+    let actions = [
+        "error occurred during", "completed successfully for", "timeout in",
+        "was upgraded for", "needs attention in",
+    ];
+
+    let records: Vec<Mem> = subjects.iter().enumerate().flat_map(|(i, subj)| {
+        actions.iter().enumerate().map(move |(j, act)| {
+            Mem {
+                id: None,
+                text: format!("The {subj} system {act} the production environment on day {}", i * 5 + j),
+                created: chrono::Utc::now(),
+            }
+        })
+    }).collect();
+
+    assert!(records.len() >= 50, "should have 60 records, got {}", records.len());
+
+    let start = std::time::Instant::now();
+    let results = engine.store_batch(&records).expect("batch store");
+    let elapsed = start.elapsed();
+
+    assert_eq!(results.len(), records.len());
+    assert!(results.iter().all(|r| matches!(r, StoreResult::Added(_))));
+
+    // Verify all embeddings stored
+    let db = engine.database();
+    let vector_count: i64 = db.with_reader(|conn| {
+        conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+            .map_err(Into::into)
+    }).expect("count");
+    assert_eq!(vector_count, records.len() as i64);
+
+    // Verify embedding_status
+    let success_count: i64 = db.with_reader(|conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE embedding_status = 'success'",
+            [], |row| row.get(0),
+        ).map_err(Into::into)
+    }).expect("count");
+    assert_eq!(success_count, records.len() as i64);
+
+    // Hybrid search finds results
+    let results = engine.search("database timeout production")
+        .limit(5)
+        .execute()
+        .expect("search");
+    assert!(!results.is_empty(), "should find database-related memories");
+
+    println!("Batch store of {} records with embeddings took {:?}", records.len(), elapsed);
+}

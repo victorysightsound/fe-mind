@@ -1,4 +1,4 @@
-# Task: Full pipeline integration test with CandleNativeBackend (feature-gated #[cfg(feature='local-embeddings')]): store 10 memories with distinct topics, hybrid search, verify semantic similarity ranking beats keyword-only.
+# Task: Batch store integration test: store_batch 50+ records, verify all stored with embeddings, hybrid search finds results.
 
 ## ⚠️ SIGNS (Critical Rules)
 
