@@ -1,4 +1,4 @@
-# Task: Distractor scenario test: store 40 conversation sessions (mix relevant + distractors), query for specific buried info, verify hybrid search surfaces it in top-5 results.
+# Task: Add tracing::debug\! spans for embed() calls with duration, embed_batch() with count+duration, and vector store_vector() calls.
 
 ## ⚠️ SIGNS (Critical Rules)
 

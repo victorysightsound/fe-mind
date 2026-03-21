@@ -72,16 +72,22 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     ).unwrap_or(false);
 
                     if !already_exists {
+                        let embed_start = std::time::Instant::now();
                         match backend.embed(&text) {
                             Ok(vec) if vec.is_empty() => {
                                 tracing::warn!("Empty embedding returned for memory {id}");
                                 self.set_embedding_status(*id, "failed");
                             }
                             Ok(vec) => {
+                                let embed_ms = embed_start.elapsed().as_millis();
+                                tracing::debug!(memory_id = id, embed_ms, "embedded memory");
                                 match crate::search::vector::VectorSearch::store_vector(
                                     &self.db, *id, &vec, backend.model_name(), &hash,
                                 ) {
-                                    Ok(()) => self.set_embedding_status(*id, "success"),
+                                    Ok(()) => {
+                                        tracing::debug!(memory_id = id, "stored vector");
+                                        self.set_embedding_status(*id, "success");
+                                    }
                                     Err(e) => {
                                         tracing::warn!("Failed to store embedding for memory {id}: {e}");
                                         self.set_embedding_status(*id, "failed");
@@ -140,8 +146,12 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         if let Some(ref backend) = self.embedding {
             if !to_embed.is_empty() && backend.is_available() {
                 let texts: Vec<&str> = to_embed.iter().map(|(_, t, _)| t.as_str()).collect();
+                let batch_start = std::time::Instant::now();
+                let batch_count = texts.len();
                 match backend.embed_batch(&texts) {
                     Ok(embeddings) => {
+                        let batch_ms = batch_start.elapsed().as_millis();
+                        tracing::debug!(batch_count, batch_ms, "batch embedding complete");
                         // Phase 3: Store all vectors and update status
                         for ((id, _, hash), embedding) in to_embed.iter().zip(embeddings.iter()) {
                             match crate::search::vector::VectorSearch::store_vector(
