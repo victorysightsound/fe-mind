@@ -288,4 +288,80 @@ mod tests {
             .expect("search failed");
         assert_eq!(results.len(), 15); // 5 * 3
     }
+
+    #[test]
+    fn hyphenated_queries_dont_error() {
+        let db = setup();
+        insert(&db, "I participated in faith related activities", None, "episodic");
+        insert(&db, "The well known scientist published a paper", None, "semantic");
+        insert(&db, "The self driving car navigated the highway", None, "procedural");
+
+        // These hyphenated queries previously caused "no such column" errors
+        // because FTS5 interprets "word-other" as a column filter.
+        let queries = [
+            "faith-related activities",
+            "well-known scientist",
+            "self-driving car",
+            "How many faith-related events happened?",
+            "state-of-the-art technology",
+        ];
+
+        for query in &queries {
+            let result = FtsSearch::search(&db, query, 10, None, None);
+            assert!(result.is_ok(), "Query '{query}' should not error: {:?}", result.err());
+        }
+
+        // Verify "faith related" still matches after hyphen→space conversion
+        let results = FtsSearch::search(&db, "faith-related", 10, None, None)
+            .expect("search failed");
+        assert!(!results.is_empty(), "should find 'faith related' content");
+    }
+
+    #[test]
+    fn sanitizer_handles_all_special_chars() {
+        let db = setup();
+        insert(&db, "test content for sanitizer", None, "semantic");
+
+        // Queries with every kind of special character
+        let queries = [
+            "test*",
+            "\"test\"",
+            "(test)",
+            "test:content",
+            "test^2",
+            "{test}",
+            "test+content",
+            "~test",
+            "test?",
+            "test,content",
+            "test.content",
+            "test!content",
+            "test;content",
+            "test'content",
+            "test/content",
+            "test\\content",
+            "test[0]",
+            "<test>",
+            "test&content",
+            "#test",
+            "@test",
+            "test=content",
+        ];
+
+        for query in &queries {
+            let result = FtsSearch::search(&db, query, 10, None, None);
+            assert!(result.is_ok(), "Query '{query}' should not error: {:?}", result.err());
+        }
+    }
+
+    #[test]
+    fn sanitizer_output() {
+        assert_eq!(sanitize_fts5_query("faith-related"), "faith related");
+        assert_eq!(sanitize_fts5_query("self-driving car"), "self driving car");
+        assert_eq!(sanitize_fts5_query("test:column"), "test column");
+        assert_eq!(sanitize_fts5_query("  hello  world  "), "hello world");
+        assert_eq!(sanitize_fts5_query("***"), "");
+        assert_eq!(sanitize_fts5_query(""), "");
+        assert_eq!(sanitize_fts5_query("normal query"), "normal query");
+    }
 }

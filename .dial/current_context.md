@@ -1,4 +1,4 @@
-# Task: Add opt-level=2 override for candle/tokenizers deps in dev profile (workspace Cargo.toml [profile.dev.package] section) so embedding inference is usable during development
+# Task: Fix FTS5 sanitizer: replace ALL hyphens with spaces (already done in fts5.rs). Add tests for hyphenated queries: 'faith-related', 'well-known', 'self-driving'. Verify FTS5 MATCH does not error.
 
 ## ⚠️ SIGNS (Critical Rules)
 
