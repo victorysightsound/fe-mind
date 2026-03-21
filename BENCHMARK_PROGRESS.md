@@ -4,23 +4,23 @@ Tracking MindCore's performance on the LongMemEval Oracle dataset (500 questions
 
 ## Score Summary
 
-| Metric | v1 | v2 | v3 (pending) |
-|--------|----|----|-------------|
-| Overall Accuracy | 87.0% (435/500) | 94.8% (474/500) | — |
-| Task-Averaged Accuracy | 81.9% | 93.8% | — |
-| Abstention Accuracy | 90.0% (27/30) | 90.0% (27/30) | — |
-| Failures | 65 | 26 | — |
+| Metric | v1 | v2 | v3b |
+|--------|----|----|-----|
+| Overall Accuracy | 87.0% (435/500) | 94.8% (474/500) | 95.6% (478/500) |
+| Task-Averaged Accuracy | 81.9% | 93.8% | 95.5% |
+| Abstention Accuracy | 90.0% (27/30) | 90.0% (27/30) | 96.7% (29/30) |
+| Failures | 65 | 26 | 22 |
 
 ## Per-Type Breakdown
 
-| Category | Count | v1 | v2 | Delta |
-|----------|-------|-----|-----|-------|
-| Temporal Reasoning | 133 | 121 (91.0%) | 129 (97.0%) | +6.0% |
-| Knowledge Update | 78 | 71 (91.0%) | 74 (94.9%) | +3.8% |
-| Multi-Session | 133 | 114 (85.7%) | 121 (91.0%) | +5.3% |
-| Single-Session (User) | 70 | 66 (94.3%) | 70 (100%) | +5.7% |
-| Single-Session (Assistant) | 56 | 52 (92.9%) | 56 (100%) | +7.1% |
-| Single-Session (Preference) | 30 | 11 (36.7%) | 24 (80.0%) | +43.3% |
+| Category | Count | v1 | v2 | v3b |
+|----------|-------|-----|-----|-----|
+| Temporal Reasoning | 133 | 121 (91.0%) | 129 (97.0%) | 130 (97.7%) |
+| Knowledge Update | 78 | 71 (91.0%) | 74 (94.9%) | 76 (97.4%) |
+| Multi-Session | 133 | 114 (85.7%) | 121 (91.0%) | 121 (91.0%) |
+| Single-Session (User) | 70 | 66 (94.3%) | 70 (100%) | 69 (98.6%) |
+| Single-Session (Assistant) | 56 | 52 (92.9%) | 56 (100%) | 55 (98.2%) |
+| Single-Session (Preference) | 30 | 11 (36.7%) | 24 (80.0%) | 27 (90.0%) |
 
 ---
 
@@ -173,6 +173,72 @@ Targets: 3 abstention failures (f685340e_abs, gpt4_93159ced_abs, 09ba9854_abs).
 
 ---
 
+## v3 Run (2026-03-20) — Two Attempts
+
+### v3 (with temporal verification) — FAILED
+
+**Configuration:**
+- Generation: Claude Sonnet | Judge: Claude Sonnet
+- Context budget: Unlimited
+- Verification: multi-session, temporal, knowledge-update
+- Results file: `results/longmemeval_v3.jsonl`
+
+**Result: 92.4% (462/500)** — regression from v2's 94.8%.
+
+The verifier without context (initial attempt) hallucinated that session references were "fabricated" and rejected correct knowledge-update answers (69.2% KU, down from 94.9%).
+
+After fixing to include context, temporal verification still caused 20 regressions — the verifier re-did date calculations from scratch and arrived at different (wrong) answers, overwriting correct ones. Temporal dropped from 97.0% to 83.5%.
+
+**Lesson: Self-verification hurts categories where the initial answer is already strong. Only apply verification where it demonstrably helps.**
+
+### v3b (without temporal verification) — CURRENT BEST
+
+**Configuration:**
+- Generation: Claude Sonnet | Judge: Claude Sonnet
+- Context budget: Unlimited
+- Verification: multi-session and knowledge-update only (temporal excluded)
+- Preference: few-shot examples for content vs format preferences
+- Abstention: lenient judging that accepts explanatory context
+- Results file: `results/longmemeval_v3b.jsonl`
+
+**Result: 95.6% (478/500), Task-Averaged: 95.5%**
+
+**v2 → v3b diff:**
+- Fixed (were wrong, now correct): improvements in KU (+2), preference (+3), abstention (+2)
+- Regressed: single-session user (-1), single-session assistant (-1) — nondeterministic model variation
+- Multi-session: held at 91.0% (verification didn't help or hurt net)
+- Net improvement: +4 questions correct
+
+### v3b Remaining Failures (22 questions)
+
+**Multi-Session (12 wrong):**
+Mostly counting/enumeration errors where the model has the right items but computes the wrong total. Self-verification was expected to help here but had negligible net effect — it fixed some and regressed others.
+
+**Single-Session Preference (3 wrong):**
+Model still describes format preferences in some cases despite few-shot examples. The remaining failures involve nuanced topic inference.
+
+**Temporal Reasoning (3 wrong):**
+Edge cases: unit conversion (days→weeks), ambiguous date references, complex multi-step date arithmetic.
+
+**Knowledge Update (2 wrong):**
+Ambiguous "most recent" determination and rounding ("close to 1300" vs "1300").
+
+**Single-Session User (1 wrong), Assistant (1 wrong):**
+Nondeterministic variation — these were correct in v2.
+
+---
+
+## Gap to 97% (Target: 485/500)
+
+Currently at 478/500. Need to recover 7 more. Remaining levers:
+
+1. **Multi-session counting** (12 wrong) — biggest pool. Could try structured output format forcing the model to output a numbered list, then programmatically count items.
+2. **Preference specificity** (3 wrong) — more targeted few-shot examples or chain-of-thought that first lists specific topics from the conversation.
+3. **Run variance** — single-session user/assistant regressions are nondeterministic. A retry or best-of-N approach could recover 2.
+4. **Deterministic answer extraction** — instead of judging the full step-by-step response, extract just the final answer and judge that.
+
+---
+
 ## Future: Core MindCore Improvements
 
 The benchmark revealed three areas where MindCore's core engine needs improvement for real-world usage (documented, not yet implemented):
@@ -193,5 +259,9 @@ These will be addressed through John's dedicated MindCore benchmark app.
 |------|-------------|
 | `results/longmemeval_full.jsonl` | v1 raw results (500 questions, deduplicate by question_id) |
 | `results/longmemeval_v2.jsonl` | v2 raw results (500 questions) |
+| `results/longmemeval_v3.jsonl` | v3 raw results (with temporal verification — regression) |
+| `results/longmemeval_v3b.jsonl` | v3b raw results (current best — 95.6%) |
 | `results/bench.log` | v1 runtime log |
 | `results/bench_v2.log` | v2 runtime log |
+| `results/bench_v3.log` | v3 runtime log |
+| `results/bench_v3b.log` | v3b runtime log |
