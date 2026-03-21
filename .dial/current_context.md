@@ -1,4 +1,4 @@
-# Task: Update MindCoreAdapter::ingest_session() in recallbench to use engine.store_batch() instead of individual store() calls. Collect all ConversationMemory records first, then batch store.
+# Task: Fix stop-word list: remove content words ('spend', 'participating', 'activities' and any others). Audit full list — keep ONLY function words (determiners, prepositions, pronouns, auxiliaries, conjunctions). Update tests.
 
 ## ⚠️ SIGNS (Critical Rules)
 

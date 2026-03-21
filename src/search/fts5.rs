@@ -166,28 +166,38 @@ fn to_or_query(sanitized: &str) -> String {
     terms.join(" OR ")
 }
 
-/// English stop words that carry little semantic meaning for search.
+/// English stop words — ONLY function words (no content-bearing verbs/nouns).
+///
+/// Categories: articles, copulas, auxiliaries, modals, pronouns, demonstratives,
+/// conjunctions, question words, prepositions, adverbs of degree/frequency.
+///
+/// Deliberately excludes common verbs (go, get, make, find, etc.) because they
+/// carry meaning in questions like "What did I find?" or "Where did I go?"
 const STOP_WORDS: &[&str] = &[
-    "a", "an", "the", "is", "are", "was", "were", "am", "be", "been", "being",
-    "do", "did", "does", "done", "doing",
-    "have", "has", "had", "having",
+    // Articles
+    "a", "an", "the",
+    // Copulas & auxiliaries
+    "is", "are", "was", "were", "am", "be", "been", "being",
+    "do", "did", "does",
+    "have", "has", "had",
+    // Modals
     "will", "would", "could", "should", "can", "may", "might", "shall", "must",
+    // Pronouns
     "i", "me", "my", "mine", "we", "us", "our", "ours",
     "you", "your", "yours", "he", "him", "his", "she", "her", "hers",
     "it", "its", "they", "them", "their", "theirs",
+    // Demonstratives
     "this", "that", "these", "those",
-    "and", "or", "but", "nor", "not", "no", "so", "if", "then", "than",
-    "how", "many", "much", "what", "when", "where", "which", "who", "whom", "why",
+    // Conjunctions
+    "and", "or", "but", "nor", "so", "if", "then", "than",
+    // Question words (removed from FTS5 queries, but kept for embedding)
+    "how", "what", "when", "where", "which", "who", "whom", "why",
+    // Prepositions
     "in", "on", "at", "to", "for", "of", "with", "from", "by", "about", "into",
     "up", "out", "off", "over", "under", "between", "through", "during", "before", "after",
-    "there", "here", "very", "just", "also", "too", "only", "some", "any", "all",
-    "each", "every", "both", "few", "more", "most", "other", "such",
-    "as", "like", "because", "since", "while", "until", "although",
-    "get", "got", "go", "went", "come", "came", "make", "made",
-    "say", "said", "tell", "told", "know", "knew", "think", "thought",
-    "see", "saw", "look", "find", "give", "take", "want", "need",
-    "use", "try", "ask", "work", "seem", "feel", "let", "keep", "put",
-    "spend", "participating", "activities",
+    // Adverbs / degree words
+    "not", "no", "very", "just", "also", "too", "only",
+    "there", "here", "as",
 ];
 
 /// Remove stop words from a query, keeping only content-bearing terms.
@@ -442,9 +452,12 @@ mod tests {
 
     #[test]
     fn stop_word_removal() {
-        assert_eq!(strip_stop_words("How many days did I spend participating in activities"), "days");
+        // Content verbs/nouns are preserved — only function words stripped
+        assert_eq!(strip_stop_words("How many days did I spend participating in activities"), "many days spend participating activities");
         assert_eq!(strip_stop_words("What is my favorite color"), "favorite color");
         assert_eq!(strip_stop_words("the cat sat on the mat"), "cat sat mat");
+        assert_eq!(strip_stop_words("Where did I go last weekend"), "go last weekend");
+        assert_eq!(strip_stop_words("What food do I like to eat"), "food like eat");
         // All stop words → return original
         assert_eq!(strip_stop_words("the is a"), "the is a");
         assert_eq!(strip_stop_words(""), "");
