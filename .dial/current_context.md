@@ -1,4 +1,4 @@
-# Task: Batch store integration test: store_batch 50+ records, verify all stored with embeddings, hybrid search finds results.
+# Task: Distractor scenario test: store 40 conversation sessions (mix relevant + distractors), query for specific buried info, verify hybrid search surfaces it in top-5 results.
 
 ## ⚠️ SIGNS (Critical Rules)
 

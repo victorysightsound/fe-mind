@@ -273,3 +273,189 @@ fn batch_store_with_real_embeddings() {
 
     println!("Batch store of {} records with embeddings took {:?}", records.len(), elapsed);
 }
+
+/// Distractor scenario: simulates LongMemEval-S conditions.
+///
+/// Stores 40 conversation sessions (38 distractors + 2 relevant), then queries
+/// for specific information buried in the relevant sessions. Hybrid search must
+/// surface the relevant content in the top-5 results despite overwhelming noise.
+#[test]
+fn distractor_scenario_finds_needle_in_haystack() {
+    use mindcore::engine::MemoryEngine;
+    use mindcore::traits::{MemoryRecord, MemoryType};
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    struct Msg {
+        id: Option<i64>,
+        text: String,
+        created: chrono::DateTime<chrono::Utc>,
+    }
+
+    impl MemoryRecord for Msg {
+        fn id(&self) -> Option<i64> { self.id }
+        fn searchable_text(&self) -> String { self.text.clone() }
+        fn memory_type(&self) -> MemoryType { MemoryType::Episodic }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created }
+    }
+
+    let backend = CandleNativeBackend::new().expect("load");
+    let engine = MemoryEngine::<Msg>::builder()
+        .embedding_backend(backend)
+        .build()
+        .expect("build");
+
+    // 38 distractor sessions — diverse topics unrelated to the target question
+    let distractor_topics = [
+        "I want to plan a trip to Japan next spring. Can you help me with an itinerary for Tokyo and Kyoto?",
+        "What are the best practices for writing unit tests in Python with pytest?",
+        "Can you explain how photosynthesis works at the molecular level?",
+        "I need help debugging a CSS flexbox layout that's not centering properly.",
+        "What are the key differences between SQL and NoSQL databases?",
+        "Can you recommend some classic science fiction novels from the 1960s?",
+        "How do I set up a Docker container for a Node.js application?",
+        "What are the health benefits of intermittent fasting?",
+        "Can you help me write a cover letter for a software engineering position?",
+        "Explain the theory of general relativity in simple terms.",
+        "What are some effective strategies for managing remote teams?",
+        "How do I implement a binary search tree in Java?",
+        "What are the pros and cons of electric vehicles versus hybrid cars?",
+        "Can you help me understand how blockchain consensus mechanisms work?",
+        "What are some good exercises for improving core strength?",
+        "How do I configure nginx as a reverse proxy for multiple services?",
+        "What are the main causes of coral reef bleaching?",
+        "Can you explain the difference between supervised and unsupervised learning?",
+        "What are some tips for growing tomatoes in a home garden?",
+        "How do I set up continuous integration with GitHub Actions?",
+        "What are the key principles of object-oriented programming?",
+        "Can you recommend some good podcasts about history?",
+        "How do I optimize PostgreSQL queries for large datasets?",
+        "What are the symptoms and treatment options for seasonal allergies?",
+        "Can you help me understand how RSA encryption works?",
+        "What are some effective study techniques for college exams?",
+        "How do I implement WebSocket connections in a React application?",
+        "What are the environmental impacts of fast fashion?",
+        "Can you explain how CRISPR gene editing technology works?",
+        "What are some good strategies for paying off student loans?",
+        "How do I set up a Python virtual environment with poetry?",
+        "What are the health risks associated with prolonged sitting?",
+        "Can you help me plan a vegetarian meal prep for the week?",
+        "How do I implement OAuth 2.0 authentication in a web application?",
+        "What are the key features of Rust's ownership system?",
+        "Can you explain the water cycle and its importance?",
+        "How do I build a REST API with Express.js and MongoDB?",
+        "What are some effective techniques for public speaking?",
+    ];
+
+    // RELEVANT sessions — contain the answer to our target question
+    let relevant_turns = [
+        "User: I just adopted a cat! She's a calico named Patches.",
+        "Assistant: Congratulations on your new cat! Calico cats are known for their beautiful tri-color coats. How is Patches settling in?",
+        "User: She's been hiding under the bed but she came out to eat her favorite food — salmon pate.",
+        "Assistant: That's great progress! Salmon pate is a popular choice among cats. Give her time and she'll warm up to her new home.",
+    ];
+
+    let relevant_turns_2 = [
+        "User: Patches knocked over my coffee mug this morning! She's getting more adventurous.",
+        "Assistant: Ha! That's a classic cat move. It sounds like she's getting comfortable in her new home. Is she playing with any toys?",
+        "User: Yes, she loves the feather wand toy. She also discovered she likes sleeping on my keyboard while I work.",
+        "Assistant: Cats have an uncanny ability to find the most inconvenient spots to nap! A feather wand is great for exercise and bonding.",
+    ];
+
+    // Store all distractors (5 turns each to simulate real sessions)
+    let mut all_records = Vec::new();
+    for (i, topic) in distractor_topics.iter().enumerate() {
+        // Each distractor gets a user question and assistant response
+        all_records.push(Msg {
+            id: None,
+            text: format!("User: {topic}"),
+            created: chrono::Utc::now(),
+        });
+        all_records.push(Msg {
+            id: None,
+            text: format!("Assistant: I'd be happy to help with that. Let me provide some detailed information about this topic. Here is a comprehensive overview of the key points to consider."),
+            created: chrono::Utc::now(),
+        });
+        all_records.push(Msg {
+            id: None,
+            text: format!("User: Thanks, that's helpful. Can you go into more detail about the second point you mentioned?"),
+            created: chrono::Utc::now(),
+        });
+        all_records.push(Msg {
+            id: None,
+            text: format!("Assistant: Of course! The second point is particularly important because it relates to the fundamental aspects of {topic}"),
+            created: chrono::Utc::now(),
+        });
+        if i % 2 == 0 {
+            all_records.push(Msg {
+                id: None,
+                text: format!("User: Perfect, I think I understand now. One last question about this topic — are there any common pitfalls I should avoid?"),
+                created: chrono::Utc::now(),
+            });
+        }
+    }
+
+    // Store relevant sessions
+    for turn in &relevant_turns {
+        all_records.push(Msg { id: None, text: turn.to_string(), created: chrono::Utc::now() });
+    }
+    for turn in &relevant_turns_2 {
+        all_records.push(Msg { id: None, text: turn.to_string(), created: chrono::Utc::now() });
+    }
+
+    let total_records = all_records.len();
+    println!("Storing {} records ({} distractor + {} relevant)...",
+        total_records, total_records - 8, 8);
+
+    let start = std::time::Instant::now();
+    let results = engine.store_batch(&all_records).expect("batch store");
+    let store_elapsed = start.elapsed();
+    assert_eq!(results.len(), total_records);
+    println!("Store + embed took {:?}", store_elapsed);
+
+    // THE KEY TEST: Query for information only in the relevant sessions
+    let search_start = std::time::Instant::now();
+    let results = engine.search("What is the name of my cat?")
+        .limit(5)
+        .execute()
+        .expect("search");
+    let search_elapsed = search_start.elapsed();
+    println!("Hybrid search took {:?}", search_elapsed);
+
+    assert!(!results.is_empty(), "should find cat-related memories");
+
+    // Check that at least one of the top-5 results mentions the cat
+    let db = engine.database();
+    let mut found_cat = false;
+    for (rank, sr) in results.iter().enumerate() {
+        let text: String = db.with_reader(|conn| {
+            conn.query_row(
+                "SELECT searchable_text FROM memories WHERE id = ?1",
+                [sr.memory_id], |row| row.get(0),
+            ).map_err(Into::into)
+        }).expect("get");
+        println!("  #{}: (score={:.4}) {}", rank + 1, sr.score, &text[..text.len().min(80)]);
+        if text.contains("Patches") || text.contains("calico") || text.contains("cat") {
+            found_cat = true;
+        }
+    }
+    assert!(found_cat, "Top-5 results should include cat-related memory");
+
+    // Second query: more specific
+    let results = engine.search("What does Patches like to eat?")
+        .limit(5)
+        .execute()
+        .expect("search");
+    let mut found_food = false;
+    for sr in &results {
+        let text: String = db.with_reader(|conn| {
+            conn.query_row(
+                "SELECT searchable_text FROM memories WHERE id = ?1",
+                [sr.memory_id], |row| row.get(0),
+            ).map_err(Into::into)
+        }).expect("get");
+        if text.contains("salmon") {
+            found_food = true;
+        }
+    }
+    assert!(found_food, "Should find that Patches likes salmon pate");
+}
