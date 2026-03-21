@@ -1,4 +1,4 @@
-# Task: Add store_batch(&[T]) -> Result<Vec<StoreResult>> to MemoryEngine: store all records, collect Added texts, call embed_batch() once, store all vectors in single transaction.
+# Task: Add dedup check in engine.store() — call VectorSearch::vector_exists(content_hash) before computing embedding. Skip embed if vector already exists.
 
 ## ⚠️ SIGNS (Critical Rules)
 

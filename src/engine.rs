@@ -57,16 +57,24 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 if backend.is_available() {
                     let text = record.searchable_text();
                     let hash = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
-                    match backend.embed(&text) {
-                        Ok(vec) => {
-                            if let Err(e) = crate::search::vector::VectorSearch::store_vector(
-                                &self.db, *id, &vec, backend.model_name(), &hash,
-                            ) {
-                                tracing::warn!("Failed to store embedding for memory {id}: {e}");
+
+                    // Skip embedding if vector already exists for this content
+                    let already_exists = crate::search::vector::VectorSearch::vector_exists(
+                        &self.db, &hash,
+                    ).unwrap_or(false);
+
+                    if !already_exists {
+                        match backend.embed(&text) {
+                            Ok(vec) => {
+                                if let Err(e) = crate::search::vector::VectorSearch::store_vector(
+                                    &self.db, *id, &vec, backend.model_name(), &hash,
+                                ) {
+                                    tracing::warn!("Failed to store embedding for memory {id}: {e}");
+                                }
                             }
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to compute embedding for memory {id}: {e}");
+                            Err(e) => {
+                                tracing::warn!("Failed to compute embedding for memory {id}: {e}");
+                            }
                         }
                     }
                 }
@@ -97,7 +105,12 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     let text = record.searchable_text();
                     if !text.trim().is_empty() {
                         let hash = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
-                        to_embed.push((*id, text, hash));
+                        let already_exists = crate::search::vector::VectorSearch::vector_exists(
+                            &self.db, &hash,
+                        ).unwrap_or(false);
+                        if !already_exists {
+                            to_embed.push((*id, text, hash));
+                        }
                     }
                 }
             }
