@@ -76,6 +76,62 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         Ok(result)
     }
 
+    /// Store a batch of records with optimized embedding computation.
+    ///
+    /// 1. Stores all records via individual SQL inserts
+    /// 2. Collects texts from newly added records
+    /// 3. Calls `embed_batch()` once for all texts
+    /// 4. Stores all vectors
+    ///
+    /// This is significantly faster than calling `store()` in a loop because
+    /// embedding inference is batched (amortizes model overhead).
+    pub fn store_batch(&self, records: &[T]) -> Result<Vec<StoreResult>> {
+        // Phase 1: Store all records, collect texts needing embeddings
+        let mut results = Vec::with_capacity(records.len());
+        let mut to_embed: Vec<(i64, String, String)> = Vec::new(); // (id, text, hash)
+
+        for record in records {
+            let result = self.store.store(&self.db, record)?;
+            if let StoreResult::Added(id) = &result {
+                if self.embedding.as_ref().is_some_and(|b| b.is_available()) {
+                    let text = record.searchable_text();
+                    if !text.trim().is_empty() {
+                        let hash = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
+                        to_embed.push((*id, text, hash));
+                    }
+                }
+            }
+            results.push(result);
+        }
+
+        // Phase 2: Batch embed all texts at once
+        if let Some(ref backend) = self.embedding {
+            if !to_embed.is_empty() && backend.is_available() {
+                let texts: Vec<&str> = to_embed.iter().map(|(_, t, _)| t.as_str()).collect();
+                match backend.embed_batch(&texts) {
+                    Ok(embeddings) => {
+                        // Phase 3: Store all vectors
+                        for ((id, _, hash), embedding) in to_embed.iter().zip(embeddings.iter()) {
+                            if let Err(e) = crate::search::vector::VectorSearch::store_vector(
+                                &self.db, *id, embedding, backend.model_name(), hash,
+                            ) {
+                                tracing::warn!("Failed to store embedding for memory {id}: {e}");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Batch embedding failed for {} records: {e}",
+                            to_embed.len()
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
     /// Retrieve a memory by ID. Returns `None` if not found.
     pub fn get(&self, id: i64) -> Result<Option<T>> {
         self.store.get(&self.db, id)

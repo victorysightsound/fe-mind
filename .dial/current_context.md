@@ -1,4 +1,4 @@
-# Task: Fix FTS5 sanitizer: replace ALL hyphens with spaces (already done in fts5.rs). Add tests for hyphenated queries: 'faith-related', 'well-known', 'self-driving'. Verify FTS5 MATCH does not error.
+# Task: Add store_batch(&[T]) -> Result<Vec<StoreResult>> to MemoryEngine: store all records, collect Added texts, call embed_batch() once, store all vectors in single transaction.
 
 ## ⚠️ SIGNS (Critical Rules)
 
