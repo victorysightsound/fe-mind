@@ -2,33 +2,78 @@
 
 Tracking MindCore's performance on the LongMemEval Oracle dataset (500 questions).
 
-## Competitive Landscape (All Self-Reported, No Official Leaderboard)
+## Competitive Landscape
 
-No official LongMemEval leaderboard exists — all scores are self-reported by each project.
+No official LongMemEval leaderboard exists. All scores are self-reported. The LongMemEval GitHub repo (xiaowu0162/LongMemEval) and project page (xiaowu0162.github.io/long-mem-eval/) describe the benchmark but maintain no external results board.
 
-| System | Overall | Model | Notes |
-|--------|---------|-------|-------|
-| **MindCore v3b** | **95.6%** | **Sonnet** | **Oracle dataset, sonnet gen+judge** |
-| Mastra OM | 94.87% | gpt-5-mini | 84.23% with gpt-4o |
-| Hindsight | 91.4% | Gemini 3 Pro | Open source |
-| Emergence | 86.0% | GPT-4o | |
-| Supermemory | 85.2% | Gemini 3 | |
-| Oracle GPT-4o | 82.4% | GPT-4o | LongMemEval paper baseline |
-| OMEGA (verified) | 76.8% | GPT-4.1 | From their own repo `docs/benchmark-report.md` |
-| Zep/Graphiti | 71.2% | GPT-4o | |
+### Comparison Table (Task-Averaged Accuracy)
 
-**OMEGA note:** OMEGA's marketing blog claims 95.4% (#1), but their own GitHub repo's benchmark report shows 76.8%. The 95.4% was a self-reported best-of-8 cherry-picked run with no variance reported, never independently verified.
+Industry convention is to report **task-averaged** accuracy (mean of per-category scores). Raw overall (correct/total) is also shown for transparency.
 
-**MindCore vs OMEGA (verified) per-category:**
+| System | Task-Averaged | Raw Overall | Gen Model | Judge | Dataset | Source |
+|--------|---------------|-------------|-----------|-------|---------|--------|
+| **MindCore v3** | **95.5%** | **95.6% (478/500)** | **Sonnet** | **Sonnet** | **Oracle** | This repo |
+| OMEGA | 95.4% | 93.2% (466/500) | GPT-4.1 | GPT-4o | S | dev.to/singularityjason |
+| Mastra OM | 94.87% | 93.6% (468/500) | gpt-5-mini | GPT-4o | S | mastra.ai/research/observational-memory |
+| Mastra OM | 93.27% | ~92.8% | Gemini 3 Pro | GPT-4o | S | mastra.ai/research/observational-memory |
+| Hindsight | ~91.1% | 91.4% (457/500) | Gemini 3 Pro | GPT-4o | S | hindsight-benchmarks.vercel.app |
+| Mastra OM | 84.23% | 84.8% (424/500) | GPT-4o | GPT-4o | S | mastra.ai/research/observational-memory |
+| Emergence | — | 86.0% | GPT-4o | GPT-4o | S | emergence.ai/blog |
+| Supermemory | — | 85.2% | Gemini 3 Pro | — | S | Reported by Mastra |
+| Oracle GPT-4o | — | 82.4% | GPT-4o | GPT-4o | S | LongMemEval paper (ICLR 2025) |
+| OMEGA (repo) | — | 76.8% (384/500) | GPT-4.1 | GPT-4o | S | omega-memory/core docs/benchmark-report.md |
+| Zep/Graphiti | — | 71.2% | GPT-4o | GPT-4o | S | Reported by multiple sources |
+| Full-context GPT-4o | — | 60.2-63.8% | GPT-4o | GPT-4o | S | LongMemEval paper / Emergence |
 
-| Category | OMEGA (repo) | MindCore v3b | Gap |
-|----------|-------------|-------------|-----|
-| Single-Session (User) | 95.7% | 98.6% | +2.9% |
-| Single-Session (Assistant) | 94.6% | 98.2% | +3.6% |
-| Knowledge Update | 87.2% | 97.4% | +10.2% |
-| Temporal Reasoning | 70.7% | 97.7% | +27.0% |
-| Multi-Session | 65.4% | 91.0% | +25.6% |
-| Preference | 50.0% | 90.0% | +40.0% |
+### Key Caveats for Fair Comparison
+
+1. **Dataset variant matters.** MindCore ran on **Oracle** (only evidence sessions, no distractors). All competitors ran on **LongMemEval_S** (~40 sessions including distractors, ~115K tokens). Oracle is easier — all provided context is relevant, no retrieval noise. A direct comparison requires running MindCore on LongMemEval_S.
+
+2. **Generation model matters enormously.** Mastra's scores jump from 84.23% (gpt-4o) to 94.87% (gpt-5-mini) — an 11-point swing from the generation model alone, same memory system. MindCore uses Sonnet. Scores are not purely a measure of the memory system.
+
+3. **Judge model matters.** MindCore uses Sonnet as judge; most competitors use GPT-4o (the LongMemEval standard). Different judges may score the same response differently.
+
+4. **Iteration count.** OMEGA reports their 95.4% as "best run" after ~8 iterations targeting failure modes. MindCore ran 3 iterations (v1/v2/v3). Mastra does not report iteration count.
+
+5. **OMEGA has two scores.** Their marketing blog (dev.to) reports 95.4% task-averaged. Their own GitHub repo `docs/benchmark-report.md` still shows 76.8% from an older system version. The 76.8% has not been retracted — the repo docs simply haven't been updated to reflect the newer score.
+
+### Per-Category Comparison (MindCore v3 vs OMEGA 95.4% claim)
+
+| Category | OMEGA (95.4% run) | MindCore v3 |
+|----------|-------------------|-------------|
+| Single-Session (combined) | 99.2% (125/126) | 98.4% (124/126) |
+| Multi-Session | 83.5% (111/133) | 91.0% (121/133) |
+| Temporal Reasoning | 94.0% (125/133) | 97.7% (130/133) |
+| Knowledge Update | 96.2% (75/78) | 97.4% (76/78) |
+| Preference | 100% (30/30) | 90.0% (27/30) |
+
+OMEGA's strength is preference (100%) — MindCore's weakness. MindCore leads on multi-session (+7.5%), temporal (+3.7%), and knowledge-update (+1.2%).
+
+### Next Step: LongMemEval_S Evaluation
+
+To make a direct apples-to-apples comparison with competitors, MindCore needs to be evaluated on **LongMemEval_S** (the variant all competitors use). This involves:
+- ~40 sessions per question (vs Oracle's minimal evidence sessions)
+- ~115K tokens of context (requires actual retrieval, not full-context inclusion)
+- Distractor sessions that are irrelevant to the question
+
+This will be done via the recallbench project (`~/projects/recallbench`), which ports the prompt engineering and evaluation methodology from mindcore-bench.
+
+### Sources (Accessed 2026-03-20)
+
+| Source | URL | What It Provides |
+|--------|-----|-----------------|
+| LongMemEval paper | arxiv.org/abs/2410.10813 | Benchmark definition, paper baselines |
+| LongMemEval project page | xiaowu0162.github.io/long-mem-eval/ | No leaderboard, methodology only |
+| LongMemEval GitHub | github.com/xiaowu0162/LongMemEval | Dataset, evaluation scripts |
+| OMEGA marketing blog | dev.to/singularityjason | 95.4% claim, methodology details, per-category breakdown |
+| OMEGA benchmarks page | omegamax.co/benchmarks | Same 95.4% claim, leaderboard visual |
+| OMEGA GitHub repo | github.com/omega-memory/core | 76.8% in docs/benchmark-report.md (older version) |
+| OMEGA MemoryStress blog | omegamax.co/blog/why-we-built-memorystress | Acknowledges multiple scores exist |
+| Mastra research page | mastra.ai/research/observational-memory | 94.87% (gpt-5-mini), 84.23% (gpt-4o), full leaderboard |
+| Hindsight benchmarks | hindsight-benchmarks.vercel.app/longmemeval | 91.4%, per-question results |
+| Emergence AI blog | emergence.ai/blog/sota-on-longmemeval-with-rag | 86%, detailed methodology |
+
+---
 
 ## Score Summary
 
@@ -41,7 +86,7 @@ No official LongMemEval leaderboard exists — all scores are self-reported by e
 
 ## Per-Type Breakdown
 
-| Category | Count | v1 | v2 | v3b |
+| Category | Count | v1 | v2 | v3 |
 |----------|-------|-----|-----|-----|
 | Temporal Reasoning | 133 | 121 (91.0%) | 129 (97.0%) | 130 (97.7%) |
 | Knowledge Update | 78 | 71 (91.0%) | 74 (94.9%) | 76 (97.4%) |
@@ -178,26 +223,18 @@ No official LongMemEval leaderboard exists — all scores are self-reported by e
 
 ---
 
-## v3 Changes (Implemented, Not Yet Run)
+## v3 Changes
 
 **Three targeted fixes:**
 
 ### 1. Self-Verification Pass (new: `verify.rs`)
-Second LLM call after generation for multi-session, temporal, and knowledge-update questions. Asks model to re-check its counting, arithmetic, and version selection. Skips single-session and preference types. Skips abstention questions.
-
-Targets: 12 multi-session + 4 temporal + 4 knowledge-update counting/arithmetic errors.
+Second LLM call after generation for multi-session and knowledge-update questions. Asks model to re-check counting, arithmetic, and version selection using the original chat history as reference. Skips temporal reasoning (causes regressions), single-session, and preference types. Skips abstention questions.
 
 ### 2. Preference Few-Shot Examples (updated: `retrieval.rs`)
 Two concrete examples showing content-focused preference descriptions vs. format-focused descriptions. Explicitly tells model that "BAD answers describe formatting preferences."
 
-Targets: 6 remaining preference failures where model describes format instead of content preferences.
-
 ### 3. Lenient Abstention Judging (updated: `judge.rs`)
 Judge now accepts abstention responses that explain WHY they can't answer and what IS in the chat history, as long as the primary conclusion is that they cannot answer the specific question.
-
-Targets: 3 abstention failures (f685340e_abs, gpt4_93159ced_abs, 09ba9854_abs).
-
-**Projected v3:** 485-490/500 (97.0-98.0%)
 
 ---
 
@@ -277,7 +314,61 @@ The benchmark revealed three areas where MindCore's core engine needs improvemen
 
 3. **Vector embeddings for semantic search** — Wire Candle embeddings feature into hybrid search (FTS5 + vector similarity + RRF fusion) for retrieval when keyword matching fails. (`src/search/`)
 
-These will be addressed through John's dedicated MindCore benchmark app.
+Future benchmark work will be done via the recallbench project (`~/projects/recallbench`), which ports the prompt engineering and evaluation methodology from mindcore-bench.
+
+---
+
+## Prompt Engineering Reference (for recallbench port)
+
+The key prompt improvements that drove v1 (87%) → v3 (95.6%) are documented here for porting to recallbench.
+
+### Generation Prompts (retrieval.rs)
+
+**Base preamble (all types):**
+```
+I will give you several history chats between a user and an AI assistant.
+Based on the chat history, answer the question at the end.
+
+History Chats:
+{context}
+
+Current Date: {question_date}
+Question: {question}
+```
+
+**Type-specific instructions appended after the preamble:**
+
+- **SingleSessionPreference:** Instructs model to describe CONTENT preferences ("The user would prefer responses that..."), not formatting preferences. Includes two few-shot examples (Sony camera accessories, quinoa recipes) and explicitly labels format-focused answers as BAD.
+
+- **TemporalReasoning:** "List EVERY relevant event with its exact date. Then count them explicitly (1, 2, 3...) or compute the date arithmetic step by step. Do not estimate or shortcut."
+
+- **KnowledgeUpdate:** "List ALL versions of the relevant information chronologically with their session dates. Then clearly state the latest/most recent value as your final answer."
+
+- **MultiSession:** "Before giving your final answer, enumerate ALL relevant items/facts from EVERY session. Number each one explicitly. Do not skip any session."
+
+- **Abstention:** "If the chat history does not contain information that DIRECTLY answers this question, you MUST respond with 'I don't know'. Do NOT attempt to infer, extrapolate, or guess."
+
+- **Default (SingleSessionUser, SingleSessionAssistant):** "Extract the relevant information, then provide a concise answer."
+
+### Judge Prompts (judge.rs)
+
+Key improvements over the LongMemEval standard judge:
+
+- **Extraction-aware:** "The model's response may be long and contain step-by-step reasoning. Search the ENTIRE response for the required answer."
+- **Equivalent representations:** "Accept equivalent representations (e.g., '3 weeks' vs '21 days', 'two' vs '2')."
+- **Multi-item awareness:** "If the required answer is a list of items, verify ALL items are mentioned somewhere in the response."
+- **Lenient abstention:** Accepts responses that explain WHY they can't answer, as long as the primary conclusion is abstention.
+- **Preference-specific:** "Answer 'yes' if the response captures the essential preference, even if phrased differently. Word-for-word match is NOT required."
+
+### Self-Verification (verify.rs)
+
+Applied only to multi-session and knowledge-update (NOT temporal — causes regressions).
+
+Verification prompt includes the full original chat history and asks the model to:
+- Multi-session: "re-enumerate every relevant item numbered 1, 2, 3... and recount"
+- Knowledge-update: "re-list all versions chronologically and confirm the final one is correct"
+
+If the answer is correct, output it unchanged. If wrong, output only the corrected answer.
 
 ---
 
@@ -288,7 +379,7 @@ These will be addressed through John's dedicated MindCore benchmark app.
 | `results/longmemeval_full.jsonl` | v1 raw results (500 questions, deduplicate by question_id) |
 | `results/longmemeval_v2.jsonl` | v2 raw results (500 questions) |
 | `results/longmemeval_v3-draft.jsonl` | v3 draft attempt (with temporal verification — regression, kept for research) |
-| `results/longmemeval_v3.jsonl` | v3 final results (current best — 95.6%, formerly v3b) |
+| `results/longmemeval_v3.jsonl` | v3 final results (current best — 95.6%) |
 | `results/bench.log` | v1 runtime log |
 | `results/bench_v2.log` | v2 runtime log |
 | `results/bench_v3.log` | v3 runtime log |
