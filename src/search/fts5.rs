@@ -117,12 +117,9 @@ fn sanitize_fts5_query(query: &str) -> String {
                 result.push(' ');
             }
             '-' => {
-                // Only strip leading minus (NOT operator), keep hyphens in words
-                if result.is_empty() || result.ends_with(' ') {
-                    result.push(' ');
-                } else {
-                    result.push(ch);
-                }
+                // Replace ALL hyphens with spaces — FTS5 interprets "word-other"
+                // as a column filter (like "word:other"), causing "no such column" errors.
+                result.push(' ');
             }
             _ => result.push(ch),
         }

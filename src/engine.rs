@@ -2,6 +2,8 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
 
+use sha2::Digest;
+
 use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
 use crate::embeddings::EmbeddingBackend;
 use crate::error::{MindCoreError, Result};
@@ -47,7 +49,31 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// When the `consolidation` feature is enabled and a consolidation strategy
     /// is configured, the strategy is consulted before storing.
     pub fn store(&self, record: &T) -> Result<StoreResult> {
-        self.store.store(&self.db, record)
+        let result = self.store.store(&self.db, record)?;
+
+        // Compute and store embedding for new records
+        if let StoreResult::Added(id) = &result {
+            if let Some(ref backend) = self.embedding {
+                if backend.is_available() {
+                    let text = record.searchable_text();
+                    let hash = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
+                    match backend.embed(&text) {
+                        Ok(vec) => {
+                            if let Err(e) = crate::search::vector::VectorSearch::store_vector(
+                                &self.db, *id, &vec, backend.model_name(), &hash,
+                            ) {
+                                tracing::warn!("Failed to store embedding for memory {id}: {e}");
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to compute embedding for memory {id}: {e}");
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     /// Retrieve a memory by ID. Returns `None` if not found.
