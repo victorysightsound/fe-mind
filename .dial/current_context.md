@@ -1,4 +1,4 @@
-# Task: Add MemoryEngine::embedding_coverage() -> Result<(u64, u64)> returning (memories_with_embeddings, total_memories) for diagnostics.
+# Task: Run full test suite with --features vector-search and --features full, fix any regressions.
 
 ## ⚠️ SIGNS (Critical Rules)
 
