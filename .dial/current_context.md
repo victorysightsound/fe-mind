@@ -1,4 +1,4 @@
-# Task: Implement session ingestion — convert haystack_sessions into MindCore memories with metadata (date, session_id, role)
+# Task: Add opt-level=2 override for candle/tokenizers deps in dev profile (workspace Cargo.toml [profile.dev.package] section) so embedding inference is usable during development
 
 ## ⚠️ SIGNS (Critical Rules)
 
