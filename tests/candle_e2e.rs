@@ -460,4 +460,25 @@ fn distractor_scenario_finds_needle_in_haystack() {
         }
     }
     assert!(found_food, "Should find that Patches likes salmon pate");
+
+    // Third query: long natural language question (tests OR-mode + stop-word removal)
+    // Without OR mode, this query would match nothing because AND requires all terms
+    let results = engine.search("How many days did I spend playing with my cat and what toys does she enjoy?")
+        .limit(5)
+        .execute()
+        .expect("search");
+    assert!(!results.is_empty(), "Long natural language query should find results via OR-mode + stop-word removal");
+    let mut found_toy = false;
+    for sr in &results {
+        let text: String = db.with_reader(|conn| {
+            conn.query_row(
+                "SELECT searchable_text FROM memories WHERE id = ?1",
+                [sr.memory_id], |row| row.get(0),
+            ).map_err(Into::into)
+        }).expect("get");
+        if text.contains("feather") || text.contains("toy") || text.contains("cat") || text.contains("Patches") {
+            found_toy = true;
+        }
+    }
+    assert!(found_toy, "Long query should find cat/toy-related memories via semantic + OR-mode FTS5");
 }
