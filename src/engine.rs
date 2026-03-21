@@ -267,25 +267,28 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 self.db
                     .with_reader(|conn| {
                         let row = conn.query_row(
-                            "SELECT searchable_text, memory_type, category FROM memories WHERE id = ?1",
+                            "SELECT searchable_text, memory_type, category, metadata_json FROM memories WHERE id = ?1",
                             [sr.memory_id],
                             |row| {
                                 Ok((
                                     row.get::<_, String>(0)?,
                                     row.get::<_, String>(1)?,
                                     row.get::<_, Option<String>>(2)?,
+                                    row.get::<_, Option<String>>(3)?,
                                 ))
                             },
                         );
                         match row {
-                            Ok((text, type_str, category)) => {
+                            Ok((text, type_str, category, metadata_json)) => {
                                 let memory_type = crate::traits::MemoryType::from_str(&type_str)
                                     .unwrap_or(crate::traits::MemoryType::Episodic);
+                                // Prepend session date if available in metadata
+                                let content = prepend_date_from_metadata(&text, metadata_json.as_deref());
                                 Ok(Some(ContextItem {
                                     memory_id: sr.memory_id,
-                                    content: text.clone(),
+                                    content: content.clone(),
                                     priority: PRIORITY_LEARNING,
-                                    estimated_tokens: budget.estimate_tokens(&text),
+                                    estimated_tokens: budget.estimate_tokens(&content),
                                     relevance_score: sr.score,
                                     memory_type,
                                     category,
@@ -455,6 +458,24 @@ fn truncate_for_embedding(text: &str) -> &str {
         Some(pos) => &text[..pos],
         None => &text[..MAX_CHARS],
     }
+}
+
+/// Prepend session date from metadata JSON to content text for temporal grounding.
+///
+/// If metadata contains a "session_date" field, prepends "[Date: <date>] " to the text.
+/// This makes dates visible in retrieved context, helping LLMs answer temporal questions.
+fn prepend_date_from_metadata(text: &str, metadata_json: Option<&str>) -> String {
+    let Some(json_str) = metadata_json else { return text.to_string() };
+
+    // Parse metadata JSON to extract session_date
+    if let Ok(meta) = serde_json::from_str::<std::collections::HashMap<String, String>>(json_str) {
+        if let Some(date) = meta.get("session_date") {
+            if !date.is_empty() {
+                return format!("[Date: {date}] {text}");
+            }
+        }
+    }
+    text.to_string()
 }
 
 #[cfg(test)]

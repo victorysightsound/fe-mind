@@ -299,6 +299,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let merged = rrf_merge(&fts_results, &vector_results, &self.query, self.limit * 2);
 
         let mut results = self.apply_filters(merged);
+
+        // Lightweight reranking: boost results with more query content words, penalize short memories
+        rerank_results(self.db, &mut results, &self.query);
+
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
         }
@@ -376,6 +380,56 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             }
         }
     }
+}
+
+/// Lightweight reranking pass after RRF merge.
+///
+/// Adjusts scores based on:
+/// 1. Query content word overlap — boost memories containing more query terms
+/// 2. Length penalty — penalize very short memories (<20 chars) that are likely noise
+fn rerank_results(db: &Database, results: &mut [SearchResult], query: &str) {
+    use crate::search::fts5::strip_stop_words;
+
+    let query_words: Vec<String> = strip_stop_words(query)
+        .to_lowercase()
+        .split_whitespace()
+        .map(String::from)
+        .collect();
+
+    if query_words.is_empty() {
+        return;
+    }
+
+    for result in results.iter_mut() {
+        // Load memory text
+        let text = db.with_reader(|conn| {
+            conn.query_row(
+                "SELECT searchable_text FROM memories WHERE id = ?1",
+                [result.memory_id],
+                |row| row.get::<_, String>(0),
+            ).map_err(|e| crate::error::MindCoreError::Database(e))
+        });
+
+        let Ok(text) = text else { continue };
+        let text_lower = text.to_lowercase();
+
+        // Boost by query word overlap ratio (0.0 to 1.0)
+        let matches = query_words.iter()
+            .filter(|w| text_lower.contains(w.as_str()))
+            .count();
+        let overlap = matches as f32 / query_words.len() as f32;
+        result.score *= 1.0 + overlap * 0.5; // up to 50% boost
+
+        // Penalize very short memories
+        if text.len() < 20 {
+            result.score *= 0.3;
+        } else if text.len() < 50 {
+            result.score *= 0.7;
+        }
+    }
+
+    // Re-sort after reranking
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+pub mod chunking;
 mod passthrough;
 
 pub use passthrough::PassthroughIngest;
