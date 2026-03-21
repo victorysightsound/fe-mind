@@ -14,19 +14,21 @@ fn needs_verification(question_type: QuestionType, is_abstention: bool) -> bool 
     }
     matches!(
         question_type,
-        QuestionType::MultiSession
-            | QuestionType::TemporalReasoning
-            | QuestionType::KnowledgeUpdate
+        QuestionType::MultiSession | QuestionType::KnowledgeUpdate
     )
 }
 
 /// Optionally verify a hypothesis by asking the model to re-check its work.
 ///
 /// Returns the original hypothesis unchanged for question types that don't
-/// need verification. For multi-session, temporal, and knowledge-update
-/// questions, makes a second LLM call to verify counts and computations.
+/// need verification. For multi-session and temporal reasoning questions,
+/// makes a second LLM call to verify counts and computations.
+///
+/// The `context` parameter provides the original chat history so the verifier
+/// can check claims against the source material rather than hallucinating.
 pub fn maybe_verify(
     client: &ClaudeCliClient,
+    context: &str,
     question: &str,
     hypothesis: &str,
     question_type: QuestionType,
@@ -36,7 +38,7 @@ pub fn maybe_verify(
         return Ok(hypothesis.to_string());
     }
 
-    let verify_prompt = build_verify_prompt(question, hypothesis, question_type);
+    let verify_prompt = build_verify_prompt(context, question, hypothesis, question_type);
     let verified = client.complete(&verify_prompt, 512)?;
 
     // If verification produced a non-empty response, use it.
@@ -48,31 +50,40 @@ pub fn maybe_verify(
     }
 }
 
-fn build_verify_prompt(question: &str, hypothesis: &str, question_type: QuestionType) -> String {
+fn build_verify_prompt(
+    context: &str,
+    question: &str,
+    hypothesis: &str,
+    question_type: QuestionType,
+) -> String {
     let type_check = match question_type {
         QuestionType::MultiSession => {
-            "Specifically: if the answer involves a count, re-enumerate every item \
-             numbered 1, 2, 3... and recount. If the answer is a list, verify every \
-             item is accounted for and none are duplicated or missing."
+            "Your job: if the answer involves a count, re-enumerate every relevant item \
+             from the chat history numbered 1, 2, 3... and recount. If the answer is a \
+             list, verify every item from the chat history is accounted for and none are \
+             duplicated or missing. If it involves a sum, recompute the arithmetic."
         }
         QuestionType::TemporalReasoning => {
-            "Specifically: if the answer involves date arithmetic, recompute the \
-             number of days/weeks/months between the dates step by step. If it \
-             involves ordering events, re-list each event with its date and re-sort."
+            "Your job: if the answer involves date arithmetic, recompute the \
+             number of days/weeks/months between the dates step by step using the \
+             chat history timestamps. If it involves ordering events, re-list each \
+             event with its date from the chat history and re-sort."
         }
         QuestionType::KnowledgeUpdate => {
-            "Specifically: verify that the answer uses the value from the MOST RECENT \
-             session. Re-list all versions chronologically and confirm the final one \
-             is correct."
+            "Your job: verify the answer uses the value from the MOST RECENT \
+             session in the chat history. Re-list all versions chronologically \
+             from the chat history and confirm the final one is correct."
         }
         _ => "",
     };
 
     format!(
-        "You are verifying an answer to a question. Review the reasoning below \
-         and check whether the final answer is correct.\n\n\
+        "You are verifying an answer. You have the original chat history and the \
+         model's answer. Check whether the final answer is correct by going back \
+         to the source material.\n\n\
+         Chat History:\n{context}\n\n\
          Question: {question}\n\n\
-         Model's reasoning and answer:\n{hypothesis}\n\n\
+         Model's answer:\n{hypothesis}\n\n\
          {type_check}\n\n\
          If the answer is correct, output it again unchanged. \
          If you find an error (wrong count, wrong arithmetic, wrong item, wrong \
@@ -104,8 +115,9 @@ mod tests {
     #[test]
     fn multi_session_needs_verification() {
         assert!(needs_verification(QuestionType::MultiSession, false));
-        assert!(needs_verification(QuestionType::TemporalReasoning, false));
         assert!(needs_verification(QuestionType::KnowledgeUpdate, false));
+        // Temporal reasoning excluded — verification causes regressions
+        assert!(!needs_verification(QuestionType::TemporalReasoning, false));
     }
 
     #[test]
@@ -116,17 +128,19 @@ mod tests {
 
     #[test]
     fn verify_prompt_contains_type_check() {
+        let ctx = "some chat history";
         let prompt =
-            build_verify_prompt("How many?", "I counted 5 items.", QuestionType::MultiSession);
+            build_verify_prompt(ctx, "How many?", "I counted 5 items.", QuestionType::MultiSession);
         assert!(prompt.contains("re-enumerate"));
         assert!(prompt.contains("recount"));
+        assert!(prompt.contains("Chat History:"));
 
         let prompt =
-            build_verify_prompt("How long?", "14 days.", QuestionType::TemporalReasoning);
+            build_verify_prompt(ctx, "How long?", "14 days.", QuestionType::TemporalReasoning);
         assert!(prompt.contains("recompute"));
 
         let prompt =
-            build_verify_prompt("What now?", "The new value.", QuestionType::KnowledgeUpdate);
+            build_verify_prompt(ctx, "What now?", "The new value.", QuestionType::KnowledgeUpdate);
         assert!(prompt.contains("MOST RECENT"));
     }
 }

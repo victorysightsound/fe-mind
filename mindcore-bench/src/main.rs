@@ -253,6 +253,7 @@ async fn main() -> Result<()> {
                 } else {
                     match verify::maybe_verify(
                         &gen_client,
+                        &ctx.context_text,
                         &question.question,
                         &hypothesis,
                         question.question_type,
