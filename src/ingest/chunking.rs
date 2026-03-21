@@ -54,8 +54,17 @@ pub fn chunk_session<'a>(
                 text: format!("{date_prefix}{current_text}"),
                 turn_count: current_turns,
             });
+            // Overlap: carry last ~100 chars into next chunk to prevent boundary info loss
+            let overlap_size = 100.min(current_text.len());
+            let overlap_start = current_text.len() - overlap_size;
+            // Find a word boundary for clean overlap
+            let overlap_pos = current_text[overlap_start..].find(' ')
+                .map(|p| overlap_start + p + 1)
+                .unwrap_or(overlap_start);
+            let overlap = current_text[overlap_pos..].to_string();
             current_text.clear();
-            current_turns = 0;
+            current_text.push_str(&overlap);
+            current_turns = 0; // overlap turns aren't counted as new
         }
 
         current_text.push_str(&line);

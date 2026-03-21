@@ -243,7 +243,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             return self.execute_keyword();
         }
 
-        let query_vec = embedding.embed(&self.query)?;
+        let query_vec = embedding.embed_query(&self.query)?;
         let model = embedding.model_name();
 
         let vector_results = VectorSearch::search(
@@ -286,7 +286,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         )?;
 
         // Vector similarity search
-        let query_vec = embedding.embed(&self.query)?;
+        let query_vec = embedding.embed_query(&self.query)?;
         let model = embedding.model_name();
         let vector_results = VectorSearch::search(
             self.db,
@@ -300,8 +300,11 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let mut results = self.apply_filters(merged);
 
-        // Lightweight reranking: boost results with more query content words, penalize short memories
+        // Reranking: bigram overlap + length penalty
         rerank_results(self.db, &mut results, &self.query);
+
+        // Near-duplicate filtering: remove results >0.95 similar to higher-ranked ones
+        deduplicate_by_vector_similarity(self.db, &mut results, model, 0.95);
 
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
@@ -382,26 +385,26 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     }
 }
 
-/// Lightweight reranking pass after RRF merge.
+/// Reranking pass after RRF merge with bigram overlap and length penalty.
 ///
-/// Adjusts scores based on:
-/// 1. Query content word overlap — boost memories containing more query terms
-/// 2. Length penalty — penalize very short memories (<20 chars) that are likely noise
+/// 1. Unigram + bigram overlap scoring — captures phrase-level matches
+/// 2. Length penalty — penalizes very short memories as noise
 fn rerank_results(db: &Database, results: &mut [SearchResult], query: &str) {
     use crate::search::fts5::strip_stop_words;
 
-    let query_words: Vec<String> = strip_stop_words(query)
-        .to_lowercase()
-        .split_whitespace()
-        .map(String::from)
-        .collect();
+    let stripped = strip_stop_words(query).to_lowercase();
+    let query_words: Vec<&str> = stripped.split_whitespace().collect();
 
     if query_words.is_empty() {
         return;
     }
 
+    // Extract query bigrams for phrase-level matching
+    let query_bigrams: Vec<String> = query_words.windows(2)
+        .map(|w| format!("{} {}", w[0], w[1]))
+        .collect();
+
     for result in results.iter_mut() {
-        // Load memory text
         let text = db.with_reader(|conn| {
             conn.query_row(
                 "SELECT searchable_text FROM memories WHERE id = ?1",
@@ -413,14 +416,26 @@ fn rerank_results(db: &Database, results: &mut [SearchResult], query: &str) {
         let Ok(text) = text else { continue };
         let text_lower = text.to_lowercase();
 
-        // Boost by query word overlap ratio (0.0 to 1.0)
-        let matches = query_words.iter()
-            .filter(|w| text_lower.contains(w.as_str()))
+        // Unigram overlap (0.0 to 1.0)
+        let unigram_matches = query_words.iter()
+            .filter(|w| text_lower.contains(*w))
             .count();
-        let overlap = matches as f32 / query_words.len() as f32;
-        result.score *= 1.0 + overlap * 0.5; // up to 50% boost
+        let unigram_ratio = unigram_matches as f32 / query_words.len() as f32;
 
-        // Penalize very short memories
+        // Bigram overlap (0.0 to 1.0) — captures phrase matching
+        let bigram_ratio = if !query_bigrams.is_empty() {
+            let bigram_matches = query_bigrams.iter()
+                .filter(|bg| text_lower.contains(bg.as_str()))
+                .count();
+            bigram_matches as f32 / query_bigrams.len() as f32
+        } else {
+            0.0
+        };
+
+        // Combined boost: unigrams (30%) + bigrams (20%)
+        result.score *= 1.0 + unigram_ratio * 0.3 + bigram_ratio * 0.2;
+
+        // Penalize very short memories (noise)
         if text.len() < 20 {
             result.score *= 0.3;
         } else if text.len() < 50 {
@@ -428,8 +443,57 @@ fn rerank_results(db: &Database, results: &mut [SearchResult], query: &str) {
         }
     }
 
-    // Re-sort after reranking
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+}
+
+/// Filter near-duplicate results based on stored vector cosine similarity.
+///
+/// Removes results with >0.95 similarity to any higher-ranked result.
+/// Maximizes information density in the context budget.
+fn deduplicate_by_vector_similarity(
+    db: &Database,
+    results: &mut Vec<SearchResult>,
+    model_name: &str,
+    threshold: f32,
+) {
+    use crate::embeddings::pooling::{bytes_to_vec, cosine_similarity};
+
+    if results.len() < 2 {
+        return;
+    }
+
+    // Load vectors for all results
+    let vectors: Vec<Option<Vec<f32>>> = results.iter().map(|r| {
+        db.with_reader(|conn| {
+            let blob = conn.query_row(
+                "SELECT embedding FROM memory_vectors WHERE memory_id = ?1 AND model_name = ?2",
+                rusqlite::params![r.memory_id, model_name],
+                |row| row.get::<_, Vec<u8>>(0),
+            );
+            match blob {
+                Ok(b) => Ok(Some(bytes_to_vec(&b))),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(crate::error::MindCoreError::Database(e)),
+            }
+        }).ok().flatten()
+    }).collect();
+
+    // Greedy deduplication: keep item if not too similar to any already-kept item
+    let mut keep = vec![true; results.len()];
+    for i in 1..results.len() {
+        let Some(ref vi) = vectors[i] else { continue };
+        for j in 0..i {
+            if !keep[j] { continue; }
+            let Some(ref vj) = vectors[j] else { continue };
+            if cosine_similarity(vi, vj) > threshold {
+                keep[i] = false;
+                break;
+            }
+        }
+    }
+
+    let mut idx = 0;
+    results.retain(|_| { let k = keep[idx]; idx += 1; k });
 }
 
 #[cfg(test)]

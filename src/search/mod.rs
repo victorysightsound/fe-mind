@@ -1,5 +1,5 @@
 pub mod builder;
-mod fts5;
+pub mod fts5;
 pub mod hybrid;
 pub mod query_expand;
 pub mod vector;

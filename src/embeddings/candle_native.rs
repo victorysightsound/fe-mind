@@ -137,6 +137,10 @@ mod inner {
         }
     }
 
+    /// Query instruction prefix for granite-embedding models.
+    /// Aligns query embeddings with passage embeddings in the vector space.
+    const QUERY_PREFIX: &str = "Represent this sentence for searching relevant passages: ";
+
     impl EmbeddingBackend for CandleNativeBackend {
         fn embed(&self, text: &str) -> Result<Vec<f32>> {
             let results = self.embed_batch(&[text])?;
@@ -144,6 +148,11 @@ mod inner {
                 .into_iter()
                 .next()
                 .ok_or_else(|| MindCoreError::Embedding("empty batch result".into()))
+        }
+
+        fn embed_query(&self, query: &str) -> Result<Vec<f32>> {
+            let prefixed = format!("{QUERY_PREFIX}{query}");
+            self.embed(&prefixed)
         }
 
         fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {

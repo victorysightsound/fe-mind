@@ -23,6 +23,17 @@ pub trait EmbeddingBackend: Send + Sync {
         Ok(results)
     }
 
+    /// Generate embedding for a search query.
+    ///
+    /// Many embedding models use instruction prefixes to align query and document
+    /// embeddings (e.g., "Represent this sentence for searching relevant passages: ").
+    /// Override this method to add the appropriate prefix for your model.
+    ///
+    /// Default: delegates to `embed()` (no prefix).
+    fn embed_query(&self, query: &str) -> Result<Vec<f32>> {
+        self.embed(query)
+    }
+
     /// Number of dimensions in output vectors.
     fn dimensions(&self) -> usize;
 
