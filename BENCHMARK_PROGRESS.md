@@ -8,22 +8,24 @@ No official LongMemEval leaderboard exists. All scores are self-reported. The Lo
 
 ### Comparison Table (Task-Averaged Accuracy)
 
+> **Last verified: 2026-03-20.** Competitor scores are scraped from their published pages. Re-verify before citing — these projects update frequently and scores may change.
+
 Industry convention is to report **task-averaged** accuracy (mean of per-category scores). Raw overall (correct/total) is also shown for transparency.
 
-| System | Task-Averaged | Raw Overall | Gen Model | Judge | Dataset | Source |
-|--------|---------------|-------------|-----------|-------|---------|--------|
-| **MindCore v3** | **95.5%** | **95.6% (478/500)** | **Sonnet** | **Sonnet** | **Oracle** | This repo |
-| OMEGA | 95.4% | 93.2% (466/500) | GPT-4.1 | GPT-4o | S | dev.to/singularityjason |
-| Mastra OM | 94.87% | 93.6% (468/500) | gpt-5-mini | GPT-4o | S | mastra.ai/research/observational-memory |
-| Mastra OM | 93.27% | ~92.8% | Gemini 3 Pro | GPT-4o | S | mastra.ai/research/observational-memory |
-| Hindsight | ~91.1% | 91.4% (457/500) | Gemini 3 Pro | GPT-4o | S | hindsight-benchmarks.vercel.app |
-| Mastra OM | 84.23% | 84.8% (424/500) | GPT-4o | GPT-4o | S | mastra.ai/research/observational-memory |
-| Emergence | — | 86.0% | GPT-4o | GPT-4o | S | emergence.ai/blog |
-| Supermemory | — | 85.2% | Gemini 3 Pro | — | S | Reported by Mastra |
-| Oracle GPT-4o | — | 82.4% | GPT-4o | GPT-4o | S | LongMemEval paper (ICLR 2025) |
-| OMEGA (repo) | — | 76.8% (384/500) | GPT-4.1 | GPT-4o | S | omega-memory/core docs/benchmark-report.md |
-| Zep/Graphiti | — | 71.2% | GPT-4o | GPT-4o | S | Reported by multiple sources |
-| Full-context GPT-4o | — | 60.2-63.8% | GPT-4o | GPT-4o | S | LongMemEval paper / Emergence |
+| System | Task-Averaged | Raw Overall | Gen Model | Judge | Dataset | Measured | Source |
+|--------|---------------|-------------|-----------|-------|---------|----------|--------|
+| **MindCore v3** | **95.5%** | **95.6% (478/500)** | **Sonnet** | **Sonnet** | **Oracle** | **2026-03-20** | This repo |
+| OMEGA | 95.4% | 93.2% (466/500) | GPT-4.1 | GPT-4o | S | ~2026-02 | dev.to/singularityjason |
+| Mastra OM | 94.87% | 93.6% (468/500) | gpt-5-mini | GPT-4o | S | 2026-02-09 | mastra.ai/research/observational-memory |
+| Mastra OM | 93.27% | ~92.8% | Gemini 3 Pro | GPT-4o | S | 2026-02-09 | mastra.ai/research/observational-memory |
+| Hindsight | ~91.1% | 91.4% (457/500) | Gemini 3 Pro | GPT-4o | S | ~2026-02 | hindsight-benchmarks.vercel.app |
+| Mastra OM | 84.23% | 84.8% (424/500) | GPT-4o | GPT-4o | S | 2026-02-09 | mastra.ai/research/observational-memory |
+| Emergence | — | 86.0% | GPT-4o | GPT-4o | S | 2025-06-18 | emergence.ai/blog |
+| Supermemory | — | 85.2% | Gemini 3 Pro | — | S | ~2026-01 | Reported by Mastra |
+| Oracle GPT-4o | — | 82.4% | GPT-4o | GPT-4o | S | 2024-10 | LongMemEval paper (ICLR 2025) |
+| OMEGA (repo) | — | 76.8% (384/500) | GPT-4.1 | GPT-4o | S | older ver. | omega-memory/core docs/benchmark-report.md |
+| Zep/Graphiti | — | 71.2% | GPT-4o | GPT-4o | S | ~2025 | Reported by multiple sources |
+| Full-context GPT-4o | — | 60.2-63.8% | GPT-4o | GPT-4o | S | 2024-10 | LongMemEval paper / Emergence |
 
 ### Key Caveats for Fair Comparison
 
@@ -37,7 +39,7 @@ Industry convention is to report **task-averaged** accuracy (mean of per-categor
 
 5. **OMEGA has two scores.** Their marketing blog (dev.to) reports 95.4% task-averaged. Their own GitHub repo `docs/benchmark-report.md` still shows 76.8% from an older system version. The 76.8% has not been retracted — the repo docs simply haven't been updated to reflect the newer score.
 
-### Per-Category Comparison (MindCore v3 vs OMEGA 95.4% claim)
+### Per-Category Comparison (MindCore v3 vs OMEGA 95.4% claim, as of 2026-03-20)
 
 | Category | OMEGA (95.4% run) | MindCore v3 |
 |----------|-------------------|-------------|
@@ -77,8 +79,8 @@ This will be done via the recallbench project (`~/projects/recallbench`), which 
 
 ## Score Summary
 
-| Metric | v1 | v2 | v3 |
-|--------|----|----|-----|
+| Metric | v1 (2026-03-20) | v2 (2026-03-20) | v3 (2026-03-21) |
+|--------|-----------------|-----------------|-----------------|
 | Overall Accuracy | 87.0% (435/500) | 94.8% (474/500) | 95.6% (478/500) |
 | Task-Averaged Accuracy | 81.9% | 93.8% | 95.5% |
 | Abstention Accuracy | 90.0% (27/30) | 90.0% (27/30) | 96.7% (29/30) |
