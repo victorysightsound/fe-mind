@@ -1,4 +1,4 @@
-# Task: Update embedding_status in memories table after embedding: SET embedding_status='success' on success, 'failed' on failure. Add to engine.store() after vector store.
+# Task: Add edge case handling in engine.store() embedding path: skip embedding for empty/whitespace-only text, truncate text >8192 tokens before embedding, handle zero-length embedding results.
 
 ## ⚠️ SIGNS (Critical Rules)
 

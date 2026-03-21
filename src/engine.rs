@@ -56,6 +56,14 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             if let Some(ref backend) = self.embedding {
                 if backend.is_available() {
                     let text = record.searchable_text();
+
+                    // Skip embedding for empty/whitespace-only text
+                    if text.trim().is_empty() {
+                        return Ok(result);
+                    }
+
+                    // Truncate to ~8192 tokens (~32K chars) for model context window
+                    let text = truncate_for_embedding(&text);
                     let hash = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
 
                     // Skip embedding if vector already exists for this content
@@ -65,6 +73,10 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
                     if !already_exists {
                         match backend.embed(&text) {
+                            Ok(vec) if vec.is_empty() => {
+                                tracing::warn!("Empty embedding returned for memory {id}");
+                                self.set_embedding_status(*id, "failed");
+                            }
                             Ok(vec) => {
                                 match crate::search::vector::VectorSearch::store_vector(
                                     &self.db, *id, &vec, backend.model_name(), &hash,
@@ -401,6 +413,22 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             scoring,
             embedding: self.embedding,
         })
+    }
+}
+
+/// Truncate text to fit within the embedding model's context window.
+///
+/// Granite-small-r2 supports 8192 tokens. At ~4 chars/token, we cap at 32K chars.
+/// Truncates on a word boundary to avoid splitting tokens.
+fn truncate_for_embedding(text: &str) -> &str {
+    const MAX_CHARS: usize = 32_000;
+    if text.len() <= MAX_CHARS {
+        return text;
+    }
+    // Find a word boundary near the limit
+    match text[..MAX_CHARS].rfind(' ') {
+        Some(pos) => &text[..pos],
+        None => &text[..MAX_CHARS],
     }
 }
 
