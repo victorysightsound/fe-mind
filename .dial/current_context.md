@@ -1,4 +1,4 @@
-# Task: Add edge case handling in engine.store() embedding path: skip embedding for empty/whitespace-only text, truncate text >8192 tokens before embedding, handle zero-length embedding results.
+# Task: Full pipeline integration test with NoopBackend: create engine, store 20+ memories, search with Auto mode, verify hybrid path returns results, verify search ranking.
 
 ## ⚠️ SIGNS (Critical Rules)
 

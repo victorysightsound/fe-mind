@@ -234,3 +234,142 @@ fn dedup_at_scale() {
 
     assert_eq!(engine.count().expect("count"), 50);
 }
+
+/// Full pipeline with NoopBackend: store → embed → hybrid search → context assembly.
+///
+/// Uses NoopBackend (zero vectors), so vector search won't add signal, but it verifies
+/// the entire embedding-at-store + hybrid-search path executes without errors.
+#[test]
+fn full_pipeline_with_noop_embedding() {
+    use mindcore::embeddings::NoopBackend;
+
+    let backend = NoopBackend::new(384);
+    let engine = MemoryEngine::<Mem>::builder()
+        .embedding_backend(backend)
+        .build()
+        .expect("build");
+
+    // Store 25 diverse memories
+    let topics = [
+        "The authentication system uses JWT tokens with 15-minute expiry",
+        "Database queries timeout after 30 seconds of inactivity",
+        "The CI pipeline runs tests in parallel across 4 workers",
+        "User preferences are stored in a PostgreSQL JSONB column",
+        "The caching layer uses Redis with a 5-minute TTL",
+        "Error monitoring is handled by Sentry with PII scrubbing",
+        "The API rate limiter allows 100 requests per minute per user",
+        "Deployments use blue-green strategy with health checks",
+        "The search feature uses Elasticsearch with custom analyzers",
+        "File uploads are stored in S3 with server-side encryption",
+        "The notification system supports email SMS and push",
+        "Background jobs are processed by Sidekiq with Redis backend",
+        "The frontend uses React with server-side rendering",
+        "GraphQL subscriptions use WebSocket connections",
+        "The payment gateway integration handles Stripe webhooks",
+        "Logging is structured JSON sent to CloudWatch",
+        "The auth middleware validates tokens on every request",
+        "Database migrations are managed by Flyway",
+        "The test suite includes unit integration and e2e tests",
+        "Performance monitoring uses Datadog APM traces",
+        "The mobile app communicates via REST and gRPC endpoints",
+        "Session management uses HttpOnly secure cookies",
+        "The CDN caches static assets for 24 hours",
+        "Feature flags are managed by LaunchDarkly",
+        "The backup system runs daily incremental and weekly full",
+    ];
+
+    for (i, text) in topics.iter().enumerate() {
+        let mt = [MemoryType::Semantic, MemoryType::Procedural, MemoryType::Episodic][i % 3];
+        let result = engine.store(&mem(text, 5, mt, None)).expect("store");
+        assert!(matches!(result, StoreResult::Added(_)), "memory {i} should be added");
+    }
+
+    assert_eq!(engine.count().expect("count"), 25);
+
+    // Verify embedding_status was set (NoopBackend always succeeds)
+    let db = engine.database();
+    let success_count: i64 = db.with_reader(|conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE embedding_status = 'success'",
+            [],
+            |row| row.get(0),
+        ).map_err(Into::into)
+    }).expect("count query");
+    assert_eq!(success_count, 25, "all memories should have embedding_status='success'");
+
+    // Verify vectors were stored
+    let vector_count: i64 = db.with_reader(|conn| {
+        conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+            .map_err(Into::into)
+    }).expect("vector count");
+    assert_eq!(vector_count, 25, "all memories should have stored vectors");
+
+    // Search with Auto mode (should use hybrid since embedding backend is configured)
+    let results = engine.search("authentication JWT token")
+        .limit(10)
+        .execute()
+        .expect("search");
+    // NoopBackend produces zero vectors (cosine similarity = NaN/0 for all),
+    // so hybrid search degrades to FTS5-only ranking. Still should find results.
+    assert!(!results.is_empty(), "should find results via FTS5 path");
+    assert!(results[0].score > 0.0);
+
+    // Context assembly
+    let assembly = engine.assemble_context("database query timeout", &ContextBudget::new(4000))
+        .expect("assemble");
+    assert!(!assembly.items.is_empty(), "context should contain relevant memories");
+    assert!(assembly.total_tokens <= 4000);
+
+    // Search for a topic that requires keyword matching
+    let results = engine.search("Redis caching TTL")
+        .limit(5)
+        .execute()
+        .expect("search");
+    assert!(!results.is_empty(), "should find Redis-related memory");
+
+    // Search with memory type filter
+    let results = engine.search("authentication")
+        .memory_type(MemoryType::Semantic)
+        .limit(10)
+        .execute()
+        .expect("search");
+    assert!(!results.is_empty(), "should find semantic memories about auth");
+}
+
+/// Test store_batch with NoopBackend.
+#[test]
+fn store_batch_with_noop_embedding() {
+    use mindcore::embeddings::NoopBackend;
+
+    let backend = NoopBackend::new(384);
+    let engine = MemoryEngine::<Mem>::builder()
+        .embedding_backend(backend)
+        .build()
+        .expect("build");
+
+    let records: Vec<Mem> = (0..30).map(|i| {
+        mem(
+            &format!("batch memory {i}: topic about engineering and systems"),
+            5, MemoryType::Semantic, None,
+        )
+    }).collect();
+
+    let results = engine.store_batch(&records).expect("batch store");
+    assert_eq!(results.len(), 30);
+    assert!(results.iter().all(|r| matches!(r, StoreResult::Added(_))));
+
+    // Verify all embeddings stored
+    let db = engine.database();
+    let vector_count: i64 = db.with_reader(|conn| {
+        conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+            .map_err(Into::into)
+    }).expect("vector count");
+    assert_eq!(vector_count, 30);
+
+    // Search works after batch store
+    let results = engine.search("engineering systems")
+        .limit(5)
+        .execute()
+        .expect("search");
+    assert!(!results.is_empty());
+}
