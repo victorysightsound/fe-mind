@@ -1,4 +1,4 @@
-# Task: Add tracing::debug\! spans for embed() calls with duration, embed_batch() with count+duration, and vector store_vector() calls.
+# Task: Add MemoryEngine::embedding_coverage() -> Result<(u64, u64)> returning (memories_with_embeddings, total_memories) for diagnostics.
 
 ## ⚠️ SIGNS (Critical Rules)
 

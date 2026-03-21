@@ -232,6 +232,21 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         self.store.count(&self.db)
     }
 
+    /// Returns (memories_with_embeddings, total_memories) for diagnostic purposes.
+    ///
+    /// Counts memories where `embedding_status = 'success'` vs total count.
+    pub fn embedding_coverage(&self) -> Result<(u64, u64)> {
+        let total = self.store.count(&self.db)?;
+        let with_embeddings: i64 = self.db.with_reader(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM memories WHERE embedding_status = 'success'",
+                [],
+                |row| row.get(0),
+            ).map_err(Into::into)
+        })?;
+        Ok((with_embeddings as u64, total))
+    }
+
     /// Assemble context for an LLM prompt within a token budget.
     ///
     /// Searches for relevant memories, converts them to context items,
