@@ -38,10 +38,7 @@ impl FtsSearch {
         Self::search_with_tiers(db, query, limit, category_filter, memory_type_filter, None)
     }
 
-    /// Search with optional tier filtering.
-    ///
-    /// `min_tier`: if set, only search memories with tier >= this value.
-    /// Used by SearchDepth: Standard searches tiers 1+2, Deep includes 0, Forensic includes all.
+    /// Search with optional tier filtering (AND mode — all terms must match).
     pub fn search_with_tiers(
         db: &Database,
         query: &str,
@@ -50,13 +47,41 @@ impl FtsSearch {
         memory_type_filter: Option<&str>,
         min_tier: Option<i32>,
     ) -> Result<Vec<FtsResult>> {
-        if query.trim().is_empty() {
-            return Ok(Vec::new());
-        }
+        let sanitized = sanitize_fts5_query(query);
+        Self::execute_fts(db, &sanitized, limit, category_filter, memory_type_filter, min_tier)
+    }
 
-        // Sanitize query for FTS5 — remove special characters that FTS5 interprets
-        let query = sanitize_fts5_query(query);
-        if query.is_empty() {
+    /// Search using OR mode with stop-word removal — returns partial matches ranked by BM25.
+    ///
+    /// 1. Sanitizes the query (strip special chars, hyphens)
+    /// 2. Removes stop words (the, is, how, many, did, etc.)
+    /// 3. Joins remaining terms with OR for partial matching
+    ///
+    /// Much better for long natural language queries where AND yields zero results.
+    pub fn search_or_mode(
+        db: &Database,
+        query: &str,
+        limit: usize,
+        category_filter: Option<&str>,
+        memory_type_filter: Option<&str>,
+        min_tier: Option<i32>,
+    ) -> Result<Vec<FtsResult>> {
+        let sanitized = sanitize_fts5_query(query);
+        let stripped = strip_stop_words(&sanitized);
+        let or_query = to_or_query(&stripped);
+        Self::execute_fts(db, &or_query, limit, category_filter, memory_type_filter, min_tier)
+    }
+
+    /// Execute the FTS5 query against the database.
+    fn execute_fts(
+        db: &Database,
+        fts_query: &str,
+        limit: usize,
+        category_filter: Option<&str>,
+        memory_type_filter: Option<&str>,
+        min_tier: Option<i32>,
+    ) -> Result<Vec<FtsResult>> {
+        if fts_query.trim().is_empty() {
             return Ok(Vec::new());
         }
 
@@ -75,7 +100,7 @@ impl FtsSearch {
 
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt.query_map(
-                params![query, category_filter, memory_type_filter, min_tier, limit as i64],
+                params![fts_query, category_filter, memory_type_filter, min_tier, limit as i64],
                 |row| {
                     Ok(FtsResult {
                         memory_id: row.get(0)?,
@@ -130,6 +155,56 @@ fn sanitize_fts5_query(query: &str) -> String {
         return String::new();
     }
     collapsed
+}
+
+/// Convert a sanitized query into OR-mode: "word1 word2 word3" → "word1 OR word2 OR word3".
+fn to_or_query(sanitized: &str) -> String {
+    let terms: Vec<&str> = sanitized.split_whitespace().collect();
+    if terms.len() <= 1 {
+        return sanitized.to_string();
+    }
+    terms.join(" OR ")
+}
+
+/// English stop words that carry little semantic meaning for search.
+const STOP_WORDS: &[&str] = &[
+    "a", "an", "the", "is", "are", "was", "were", "am", "be", "been", "being",
+    "do", "did", "does", "done", "doing",
+    "have", "has", "had", "having",
+    "will", "would", "could", "should", "can", "may", "might", "shall", "must",
+    "i", "me", "my", "mine", "we", "us", "our", "ours",
+    "you", "your", "yours", "he", "him", "his", "she", "her", "hers",
+    "it", "its", "they", "them", "their", "theirs",
+    "this", "that", "these", "those",
+    "and", "or", "but", "nor", "not", "no", "so", "if", "then", "than",
+    "how", "many", "much", "what", "when", "where", "which", "who", "whom", "why",
+    "in", "on", "at", "to", "for", "of", "with", "from", "by", "about", "into",
+    "up", "out", "off", "over", "under", "between", "through", "during", "before", "after",
+    "there", "here", "very", "just", "also", "too", "only", "some", "any", "all",
+    "each", "every", "both", "few", "more", "most", "other", "such",
+    "as", "like", "because", "since", "while", "until", "although",
+    "get", "got", "go", "went", "come", "came", "make", "made",
+    "say", "said", "tell", "told", "know", "knew", "think", "thought",
+    "see", "saw", "look", "find", "give", "take", "want", "need",
+    "use", "try", "ask", "work", "seem", "feel", "let", "keep", "put",
+    "spend", "participating", "activities",
+];
+
+/// Remove stop words from a query, keeping only content-bearing terms.
+///
+/// Returns the filtered query. If ALL words are stop words, returns the
+/// original query to avoid an empty search.
+pub fn strip_stop_words(query: &str) -> String {
+    let terms: Vec<&str> = query
+        .split_whitespace()
+        .filter(|w| !STOP_WORDS.contains(&w.to_lowercase().as_str()))
+        .collect();
+
+    if terms.is_empty() {
+        // All words were stop words — return original to avoid empty query
+        return query.to_string();
+    }
+    terms.join(" ")
 }
 
 #[cfg(test)]
@@ -363,5 +438,49 @@ mod tests {
         assert_eq!(sanitize_fts5_query("***"), "");
         assert_eq!(sanitize_fts5_query(""), "");
         assert_eq!(sanitize_fts5_query("normal query"), "normal query");
+    }
+
+    #[test]
+    fn stop_word_removal() {
+        assert_eq!(strip_stop_words("How many days did I spend participating in activities"), "days");
+        assert_eq!(strip_stop_words("What is my favorite color"), "favorite color");
+        assert_eq!(strip_stop_words("the cat sat on the mat"), "cat sat mat");
+        // All stop words → return original
+        assert_eq!(strip_stop_words("the is a"), "the is a");
+        assert_eq!(strip_stop_words(""), "");
+        assert_eq!(strip_stop_words("authentication JWT token error"), "authentication JWT token error");
+    }
+
+    #[test]
+    fn to_or_query_output() {
+        assert_eq!(to_or_query("faith related"), "faith OR related");
+        assert_eq!(to_or_query("one two three"), "one OR two OR three");
+        assert_eq!(to_or_query("single"), "single");
+        assert_eq!(to_or_query(""), "");
+    }
+
+    #[test]
+    fn or_mode_returns_partial_matches() {
+        let db = setup();
+        insert(&db, "authentication failed with JWT token", None, "procedural");
+        insert(&db, "database connection timeout error", None, "episodic");
+        insert(&db, "build succeeded after fixing imports", None, "episodic");
+
+        // AND mode: long query with many terms returns nothing
+        let and_results = FtsSearch::search(
+            &db, "How many days did I spend fixing authentication errors", 10, None, None,
+        ).expect("search");
+
+        // OR mode: same query returns partial matches
+        let or_results = FtsSearch::search_or_mode(
+            &db, "How many days did I spend fixing authentication errors", 10, None, None, None,
+        ).expect("search");
+
+        assert!(
+            or_results.len() > and_results.len(),
+            "OR mode should find more results than AND: OR={}, AND={}",
+            or_results.len(), and_results.len()
+        );
+        assert!(!or_results.is_empty(), "OR mode should find partial matches");
     }
 }

@@ -257,7 +257,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         budget: &ContextBudget,
     ) -> Result<ContextAssembly> {
         // Search for relevant memories (3x budget to have plenty of candidates)
-        let results = self.search(query).limit(50).execute()?;
+        let results = self.search(query).limit(200).execute()?;
 
         // Convert search results to context items
         let candidates: Vec<ContextItem> = results

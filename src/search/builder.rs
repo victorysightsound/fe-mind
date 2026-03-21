@@ -275,8 +275,8 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let type_filter = self.memory_type.map(|t| t.as_str());
         let min_tier = self.depth_to_min_tier();
 
-        // FTS5 keyword search (over-fetch 3x for RRF)
-        let fts_results = FtsSearch::search_with_tiers(
+        // FTS5 keyword search (OR mode + stop-word removal for better recall, over-fetch 3x for RRF)
+        let fts_results = FtsSearch::search_or_mode(
             self.db,
             &self.query,
             self.limit * 3,
