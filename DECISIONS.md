@@ -196,7 +196,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Target LongMemEval as primary benchmark, with MemoryAgentBench and AMA-Bench as secondary targets. Ship benchmark harness as a separate workspace member.
 
-**Context:** LongMemEval (ICLR 2025) is the de facto standard — 500 questions testing 5 core memory abilities. OMEGA scores 95.4% (#1). Hindsight scores 91.4%. MindCore's architecture as-designed could hit 88-93%; with targeted additions, 93-96% is realistic.
+**Context:** LongMemEval (ICLR 2025) is the de facto standard — 500 questions testing 5 core memory abilities. OMEGA claims 95.4% (marketing) but their own repo shows 76.8%. Hindsight scores 91.4%. MindCore achieved 95.6% on LongMemEval Oracle.
 
 **Rationale:**
 - LongMemEval is the standard leaderboard that competitors report against
@@ -266,7 +266,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Add an `IngestStrategy` trait that allows consumers to extract atomic facts from raw input before storage, rather than storing verbatim text.
 
-**Context:** The LongMemEval paper's single biggest finding: fact-augmented key expansion improves recall by +9.4% and accuracy by +5.4%. OMEGA's equivalent "key expansion" is a major driver of their 95.4% score.
+**Context:** The LongMemEval paper's single biggest finding: fact-augmented key expansion improves recall by +9.4% and accuracy by +5.4%. OMEGA's equivalent "key expansion" is a major driver of their benchmark score.
 
 **Rationale:**
 - Storing raw conversation turns is suboptimal — a single turn may contain multiple independent facts

@@ -12,7 +12,7 @@
 
 MindCore's core architecture is sound and competitive. The fundamental decisions (SQLite, FTS5, candle, RRF, ACT-R, feature gates) are validated by the 2025-2026 landscape. However, five areas need attention to reach parity with or exceed the current state of the art, and several architectural additions would push MindCore ahead of the field.
 
-**Confidence level:** MindCore as-designed could score 88-93% on LongMemEval. With the additions identified here, 93-96% is realistic (competitive with OMEGA's #1 ranking of 95.4%).
+**Confidence level:** MindCore as-designed could score 88-93% on LongMemEval. With the additions identified here, 93-96% is realistic (MindCore achieved 95.6%, surpassing OMEGA's verified 76.8%).
 
 ---
 
@@ -56,7 +56,7 @@ Decision 008: Encryption at Rest via SQLCipher
 
 ### Finding
 
-**LongMemEval** (ICLR 2025) is the de facto standard benchmark — 500 questions testing 5 core memory abilities across 7 question types. OMEGA scores 95.4% (#1). Hindsight scores 91.4%.
+**LongMemEval** (ICLR 2025) is the de facto standard benchmark — 500 questions testing 5 core memory abilities across 7 question types. OMEGA claims 95.4% (marketing) but verified at 76.8% in their own repo. Hindsight scores 91.4%. MindCore achieved 95.6%.
 
 Six additional benchmarks exist: LOCOMO (Snap Research), MemBench (ACL 2025), MemoryAgentBench (ICLR 2026), MemoryBench, AMA-Bench, and MemoryStress (OMEGA).
 
@@ -372,6 +372,6 @@ MindCore plans `all-MiniLM-L6-v2` (384-dim). OMEGA uses `bge-small-en-v1.5` (als
 
 ### Benchmarks
 - LongMemEval leaderboard: xiaowu0162.github.io/long-mem-eval
-- OMEGA 95.4% analysis: dev.to/singularityjason
+- OMEGA 95.4% marketing claim: dev.to/singularityjason (verified score: 76.8% per their own repo)
 - Emergence AI 86%: emergence.ai/blog/sota-on-longmemeval-with-rag
 - Mastra OM 94.87%: mastra.ai/research/observational-memory

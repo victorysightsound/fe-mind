@@ -10,7 +10,7 @@
 
 MindCore-Bench is a separate binary crate within the mindcore workspace that runs the LongMemEval benchmark against MindCore's memory engine. It downloads the dataset, ingests conversation histories as memories, retrieves answers to 500 questions, and uses an LLM judge (Claude) to score accuracy.
 
-**Target:** 93-96% task-averaged accuracy (competitive with OMEGA's 95.4%).
+**Target:** 93-96% task-averaged accuracy (MindCore achieved 95.6%, surpassing OMEGA's verified 76.8%).
 
 ---
 

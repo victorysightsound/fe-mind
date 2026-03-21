@@ -1915,6 +1915,6 @@ MindCore is a **composable, feature-gated memory engine** that unifies proven pa
 - Library, not framework — consumer controls scheduling and lifecycle
 - WASM-compatible for browser deployment (SQLite+FTS5 via `sqlite-wasm-rs`)
 
-**LongMemEval target: 93-96%** (competitive with OMEGA's #1 ranking of 95.4%)
+**LongMemEval achieved: 95.6%** (surpasses OMEGA's verified 76.8% and their marketing claim of 95.4%)
 
 **Target: ~6-8K lines of Rust for the full engine.**

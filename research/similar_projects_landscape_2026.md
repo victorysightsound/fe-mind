@@ -108,7 +108,7 @@ This document catalogs projects with philosophies, patterns, and architectures r
 
 ### OMEGA Memory
 - **GitHub:** https://github.com/omega-memory/core
-- **Description:** Persistent memory for AI coding agents via MCP server with 25 tools. Ranked #1 on LongMemEval (95.4%). Stores decisions, lessons, error patterns with semantic search. SQLite + CPU-only ONNX embeddings, fully local. Features memory decay, graph relationships, and encryption at rest.
+- **Description:** Persistent memory for AI coding agents via MCP server with 25 tools. LongMemEval: 76.8% verified (marketing claims 95.4%, unverified best-of-8). Stores decisions, lessons, error patterns with semantic search. SQLite + CPU-only ONNX embeddings, fully local. Features memory decay, graph relationships, and encryption at rest.
 - **Key Innovation:** "Forgetting intelligence" — memory decay with exemptions for error patterns. ~8ms embedding time and <50ms query latency set a performance benchmark.
 - **PIRDLY Insight:** Architecture is remarkably close to PIRDLY's memory design — SQLite-backed, local-first, with error pattern tracking and cross-session learning. The memory decay concept (less-used learnings fade while validated patterns persist) is something PIRDLY should consider. The performance benchmarks (<50ms queries) set a target.
 

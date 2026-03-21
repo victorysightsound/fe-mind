@@ -252,7 +252,7 @@ Agent memory systems that don't model temporal validity will:
 **Performance Benchmarks (Reference Targets):**
 - ~8ms embedding time (ONNX, CPU-only)
 - <50ms query latency (hybrid search, 10K memories)
-- #1 on LongMemEval benchmark (95.4%)
+- LongMemEval benchmark: 76.8% (from OMEGA's own repo `docs/benchmark-report.md`). Note: OMEGA's marketing blog claims 95.4% but this was a self-reported best-of-8 cherry-picked run; their own GitHub benchmark report shows 76.8% under standard evaluation.
 
 **MindCore's Take:** The ACT-R activation model subsumes OMEGA's forgetting intelligence. Memories naturally decay through the power-law formula. Memories that are accessed frequently (like proven error patterns) stay strong. No need for explicit "exempt from decay" rules — the math handles it.
 
@@ -582,7 +582,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 ### Where Competitors Are Stronger
 
 1. **Mem0:** Larger community (37K stars), more LLM integrations, cloud sync
-2. **OMEGA:** #1 on LongMemEval (95.4%), encryption at rest, more mature MCP tools
+2. **OMEGA:** LongMemEval 76.8% verified (marketing claims 95.4%), encryption at rest, more mature MCP tools
 3. **MemOS:** Multi-modal memory (images, tool traces), more sophisticated graph
 4. **Engram:** Simpler to deploy (single Go binary with TUI)
 

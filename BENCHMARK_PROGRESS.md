@@ -2,6 +2,34 @@
 
 Tracking MindCore's performance on the LongMemEval Oracle dataset (500 questions).
 
+## Competitive Landscape (All Self-Reported, No Official Leaderboard)
+
+No official LongMemEval leaderboard exists — all scores are self-reported by each project.
+
+| System | Overall | Model | Notes |
+|--------|---------|-------|-------|
+| **MindCore v3b** | **95.6%** | **Sonnet** | **Oracle dataset, sonnet gen+judge** |
+| Mastra OM | 94.87% | gpt-5-mini | 84.23% with gpt-4o |
+| Hindsight | 91.4% | Gemini 3 Pro | Open source |
+| Emergence | 86.0% | GPT-4o | |
+| Supermemory | 85.2% | Gemini 3 | |
+| Oracle GPT-4o | 82.4% | GPT-4o | LongMemEval paper baseline |
+| OMEGA (verified) | 76.8% | GPT-4.1 | From their own repo `docs/benchmark-report.md` |
+| Zep/Graphiti | 71.2% | GPT-4o | |
+
+**OMEGA note:** OMEGA's marketing blog claims 95.4% (#1), but their own GitHub repo's benchmark report shows 76.8%. The 95.4% was a self-reported best-of-8 cherry-picked run with no variance reported, never independently verified.
+
+**MindCore vs OMEGA (verified) per-category:**
+
+| Category | OMEGA (repo) | MindCore v3b | Gap |
+|----------|-------------|-------------|-----|
+| Single-Session (User) | 95.7% | 98.6% | +2.9% |
+| Single-Session (Assistant) | 94.6% | 98.2% | +3.6% |
+| Knowledge Update | 87.2% | 97.4% | +10.2% |
+| Temporal Reasoning | 70.7% | 97.7% | +27.0% |
+| Multi-Session | 65.4% | 91.0% | +25.6% |
+| Preference | 50.0% | 90.0% | +40.0% |
+
 ## Score Summary
 
 | Metric | v1 | v2 | v3b |
