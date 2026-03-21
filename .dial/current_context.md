@@ -1,4 +1,4 @@
-# Task: Add dedup check in engine.store() — call VectorSearch::vector_exists(content_hash) before computing embedding. Skip embed if vector already exists.
+# Task: Update embedding_status in memories table after embedding: SET embedding_status='success' on success, 'failed' on failure. Add to engine.store() after vector store.
 
 ## ⚠️ SIGNS (Critical Rules)
 

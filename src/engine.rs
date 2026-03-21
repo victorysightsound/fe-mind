@@ -66,16 +66,23 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     if !already_exists {
                         match backend.embed(&text) {
                             Ok(vec) => {
-                                if let Err(e) = crate::search::vector::VectorSearch::store_vector(
+                                match crate::search::vector::VectorSearch::store_vector(
                                     &self.db, *id, &vec, backend.model_name(), &hash,
                                 ) {
-                                    tracing::warn!("Failed to store embedding for memory {id}: {e}");
+                                    Ok(()) => self.set_embedding_status(*id, "success"),
+                                    Err(e) => {
+                                        tracing::warn!("Failed to store embedding for memory {id}: {e}");
+                                        self.set_embedding_status(*id, "failed");
+                                    }
                                 }
                             }
                             Err(e) => {
                                 tracing::warn!("Failed to compute embedding for memory {id}: {e}");
+                                self.set_embedding_status(*id, "failed");
                             }
                         }
+                    } else {
+                        self.set_embedding_status(*id, "success");
                     }
                 }
             }
@@ -123,12 +130,16 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 let texts: Vec<&str> = to_embed.iter().map(|(_, t, _)| t.as_str()).collect();
                 match backend.embed_batch(&texts) {
                     Ok(embeddings) => {
-                        // Phase 3: Store all vectors
+                        // Phase 3: Store all vectors and update status
                         for ((id, _, hash), embedding) in to_embed.iter().zip(embeddings.iter()) {
-                            if let Err(e) = crate::search::vector::VectorSearch::store_vector(
+                            match crate::search::vector::VectorSearch::store_vector(
                                 &self.db, *id, embedding, backend.model_name(), hash,
                             ) {
-                                tracing::warn!("Failed to store embedding for memory {id}: {e}");
+                                Ok(()) => self.set_embedding_status(*id, "success"),
+                                Err(e) => {
+                                    tracing::warn!("Failed to store embedding for memory {id}: {e}");
+                                    self.set_embedding_status(*id, "failed");
+                                }
                             }
                         }
                     }
@@ -137,12 +148,27 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                             "Batch embedding failed for {} records: {e}",
                             to_embed.len()
                         );
+                        // Mark all as failed
+                        for (id, _, _) in &to_embed {
+                            self.set_embedding_status(*id, "failed");
+                        }
                     }
                 }
             }
         }
 
         Ok(results)
+    }
+
+    /// Update the embedding_status column for a memory.
+    fn set_embedding_status(&self, id: i64, status: &str) {
+        let _ = self.db.with_writer(|conn| {
+            conn.execute(
+                "UPDATE memories SET embedding_status = ?1 WHERE id = ?2",
+                rusqlite::params![status, id],
+            )?;
+            Ok(())
+        });
     }
 
     /// Retrieve a memory by ID. Returns `None` if not found.
