@@ -10,11 +10,11 @@ use mindcore::embeddings::pooling::cosine_similarity;
 
 #[test]
 fn candle_backend_loads_and_embeds() {
-    let backend = CandleNativeBackend::new().expect("failed to load granite-small-r2");
+    let backend = CandleNativeBackend::new().expect("failed to load all-MiniLM-L6-v2");
 
     assert_eq!(backend.dimensions(), 384);
     assert!(backend.is_available());
-    assert_eq!(backend.model_name(), "granite-embedding-small-english-r2");
+    assert_eq!(backend.model_name(), "all-MiniLM-L6-v2");
 
     let vec = backend.embed("authentication error with JWT token").expect("embed failed");
     assert_eq!(vec.len(), 384, "expected 384 dimensions");

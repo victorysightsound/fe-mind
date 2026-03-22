@@ -1,4 +1,4 @@
-# Task: Fix stop-word list: remove content words ('spend', 'participating', 'activities' and any others). Audit full list — keep ONLY function words (determiners, prepositions, pronouns, auxiliaries, conjunctions). Update tests.
+# Task: Switch CandleNativeBackend from granite ModernBERT to all-MiniLM-L6-v2 BERT: change MODEL_REPO, MODEL_NAME, model import from candle_transformers::models::modernbert to candle_transformers::models::bert, update tensor key renaming for sentence-transformers BERT naming, verify mean pooling + L2 norm still correct for MiniLM.
 
 ## ⚠️ SIGNS (Critical Rules)
 

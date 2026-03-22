@@ -1,13 +1,13 @@
-//! CandleNativeBackend: granite-small-r2 via ModernBERT
+//! CandleNativeBackend: all-MiniLM-L6-v2 via BERT
 //!
 //! Only compiled when `local-embeddings` feature is enabled.
-//! Provides 384-dimensional embeddings with 8K token context.
+//! Provides 384-dimensional embeddings. WASM-compatible (standard BERT).
 
 #[cfg(feature = "local-embeddings")]
 mod inner {
     use candle_core::{DType, Device, Tensor};
     use candle_nn::VarBuilder;
-    use candle_transformers::models::modernbert::{Config, ModernBert};
+    use candle_transformers::models::bert::{BertModel, Config};
     use hf_hub::api::sync::Api;
     use hf_hub::{Repo, RepoType};
     use std::path::Path;
@@ -16,16 +16,19 @@ mod inner {
     use crate::embeddings::EmbeddingBackend;
     use crate::error::{MindCoreError, Result};
 
-    const MODEL_REPO: &str = "ibm-granite/granite-embedding-small-english-r2";
-    const MODEL_NAME: &str = "granite-embedding-small-english-r2";
+    const MODEL_REPO: &str = "sentence-transformers/all-MiniLM-L6-v2";
+    const MODEL_NAME: &str = "all-MiniLM-L6-v2";
     const DIMENSIONS: usize = 384;
 
-    /// Embedding backend using IBM granite-small-r2 via candle's ModernBERT.
+    /// Embedding backend using all-MiniLM-L6-v2 via candle's BERT.
     ///
-    /// Auto-downloads model files (~95MB) from HuggingFace on first use.
+    /// Auto-downloads model files (~80MB) from HuggingFace on first use.
     /// Cached at the HuggingFace cache directory (`~/.cache/huggingface/hub/`).
+    ///
+    /// Same model works native and WASM — standard BERT architecture.
+    /// Same vectors as the DeepInfra API endpoint — interchangeable.
     pub struct CandleNativeBackend {
-        model: ModernBert,
+        model: BertModel,
         tokenizer: Tokenizer,
         device: Device,
         dimensions_override: Option<usize>,
@@ -105,14 +108,7 @@ mod inner {
                     .map_err(|e| MindCoreError::Embedding(format!("weights load: {e}")))?
             };
 
-            // granite-small-r2 uses sentence-transformers naming (no "model." prefix)
-            // but candle's ModernBert expects HuggingFace transformers naming.
-            // Remap: when candle asks for "model.X.weight", look for "X.weight" in the file.
-            let vb = vb.rename_f(|name| {
-                name.strip_prefix("model.").unwrap_or(name).to_string()
-            });
-
-            let model = ModernBert::load(vb, &config)
+            let model = BertModel::load(vb, &config)
                 .map_err(|e| MindCoreError::Embedding(format!("model load: {e}")))?;
 
             Ok(Self {
@@ -170,9 +166,13 @@ mod inner {
             let attention_mask = Tensor::stack(&attention_masks, 0)
                 .map_err(|e| MindCoreError::Embedding(format!("stack masks: {e}")))?;
 
+            // BERT requires token_type_ids (zeros for single-segment input)
+            let token_type_ids = token_ids.zeros_like()
+                .map_err(|e| MindCoreError::Embedding(format!("token_type_ids: {e}")))?;
+
             let hidden_states = self
                 .model
-                .forward(&token_ids, &attention_mask)
+                .forward(&token_ids, &token_type_ids, Some(&attention_mask))
                 .map_err(|e| MindCoreError::Embedding(format!("forward: {e}")))?;
 
             let pooled = Self::mean_pool(&hidden_states, &attention_mask)
@@ -213,13 +213,11 @@ mod inner {
                 .ok_or_else(|| MindCoreError::Embedding("empty batch result".into()))
         }
 
-        // granite-embedding-small-english-r2 is a symmetric bi-encoder —
+        // all-MiniLM-L6-v2 is a symmetric bi-encoder —
         // queries and documents are encoded identically, no prefix needed.
         // embed_query() falls through to the default (delegates to embed()).
 
         fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-            // Sub-batch to avoid giant padded tensors (e.g., 336×500 = OOM-prone, slow).
-            // Process in groups of 16 for a good balance of throughput vs memory.
             const SUB_BATCH_SIZE: usize = 16;
 
             let mut all_results = Vec::with_capacity(texts.len());
