@@ -56,7 +56,11 @@ pub fn chunk_session<'a>(
             });
             // Overlap: carry last ~100 chars into next chunk to prevent boundary info loss
             let overlap_size = 100.min(current_text.len());
-            let overlap_start = current_text.len() - overlap_size;
+            let mut overlap_start = current_text.len() - overlap_size;
+            // Ensure we're at a char boundary (for multi-byte UTF-8 like ₹, é, etc.)
+            while overlap_start > 0 && !current_text.is_char_boundary(overlap_start) {
+                overlap_start += 1;
+            }
             // Find a word boundary for clean overlap
             let overlap_pos = current_text[overlap_start..].find(' ')
                 .map(|p| overlap_start + p + 1)
