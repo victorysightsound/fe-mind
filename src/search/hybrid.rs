@@ -56,7 +56,7 @@ fn analyze_query(query: &str) -> (u32, u32) {
             .split_whitespace()
             .any(|w| question_words.contains(&w))
         {
-            (60, 40) // Question → favor semantic
+            (100, 20) // Question → heavily favor semantic
         } else {
             (60, 60) // Default → equal weight
         }

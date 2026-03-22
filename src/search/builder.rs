@@ -275,7 +275,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let type_filter = self.memory_type.map(|t| t.as_str());
         let min_tier = self.depth_to_min_tier();
 
-        // FTS5 keyword search (OR mode + stop-word removal for better recall, over-fetch 3x for RRF)
+        // FTS5 keyword search (OR mode + stop-word removal, over-fetch 3x for RRF)
         let fts_results = FtsSearch::search_or_mode(
             self.db,
             &self.query,
@@ -285,7 +285,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             min_tier,
         )?;
 
-        // Vector similarity search
+        // Vector similarity search (over-fetch 3x)
         let query_vec = embedding.embed_query(&self.query)?;
         let model = embedding.model_name();
         let vector_results = VectorSearch::search(
@@ -300,8 +300,8 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let mut results = self.apply_filters(merged);
 
-        // Reranking: bigram overlap + length penalty
-        rerank_results(self.db, &mut results, &self.query);
+        // Reranking disabled — RRF + vector weighting provides better ranking
+        // rerank_results(self.db, &mut results, &self.query);
 
         // Near-duplicate filtering: remove results >0.95 similar to higher-ranked ones
         deduplicate_by_vector_similarity(self.db, &mut results, model, 0.95);

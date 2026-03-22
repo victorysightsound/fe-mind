@@ -299,7 +299,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
             let count = session_counts.entry(session_key).or_insert(0);
             *count += 1;
-            *count <= 3
+            *count <= 1 // Maximum diversity
         }).collect();
 
         Ok(diversified)
