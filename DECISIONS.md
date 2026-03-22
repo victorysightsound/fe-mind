@@ -369,9 +369,9 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Consequences:**
 - `CandleBackend` is the primary backend on all native targets (feature: `local-embeddings`)
-- Native default model: `all-MiniLM-L6-v2` (ModernBERT, 384-dim, 8K context)
-- WASM fallback: `bge-small-en-v1.5` (standard BERT, 384-dim) — vectors are NOT cross-compatible with granite; see Decision 020
-- WASM can't use granite because ModernBERT ops may not compile cleanly to WASM, model is 95MB (too large for browser), and WASM is single-threaded
+- Native default model: `all-MiniLM-L6-v2` (BERT, 384-dim)
+- WASM uses the same model (standard BERT compiles to WASM cleanly)
+- No more dual-model split — same vectors everywhere (native, WASM, API)
 - Cross-model vectors are isolated: different models produce incomparable embedding spaces despite same dimensionality — see Decision 020
 - Dependencies: `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`, `hf-hub`
 - Model cached at `~/.cache/mindcore/models/`, auto-downloaded on first use
@@ -383,23 +383,22 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Date:** 2026-03-17 (updated: 2026-03-18 — removed fastembed references after Decision 016 revision)
 
-**Decision:** Use `all-MiniLM-L6-v2` (IBM, 47M params, 384-dim, 8K context) as the default embedding model on native targets. Use `bge-small-en-v1.5` (384-dim) as the WASM fallback. Drop `all-MiniLM-L6-v2`.
+**Decision:** Use `all-MiniLM-L6-v2` (22M params, 384-dim) as the default embedding model on ALL targets. Same model native, WASM, and API.
 
-**Context:** Benchmarked three 384-dim models for agent memory retrieval. all-MiniLM-L6-v2 scores 17% better than bge-small on code retrieval (CoIR 53.8 vs 45.8) and has 16x longer context (8K vs 512 tokens). Loaded via candle-transformers' native ModernBERT implementation with safetensors weights.
+**Context:** Originally chose granite-small-r2 (ModernBERT, 47M params) for higher code retrieval scores. Switched to all-MiniLM-L6-v2 because: (1) granite's ModernBERT doesn't compile to WASM, forcing a dual-model split with bge-small for browsers — vectors were incompatible across platforms; (2) MiniLM is 3x faster on CPU; (3) MiniLM is available on DeepInfra and other API providers for fast batch embedding; (4) the 3-4 point MTEB gap is negligible when combined with hybrid search (FTS5 + vector + RRF + reranking).
 
 **Rationale:**
-- Code retrieval (CoIR): granite 53.8 vs bge-small 45.8 — 17% better on the workload that matters most for dev tool memory
-- 8K token context captures full error traces, decision rationale, and code blocks without truncation
-- Standard retrieval matches bge-small exactly (MTEB-v2: 53.9 vs 53.9)
-- Same 384 dimensions as bge-small — but cross-model similarity is unreliable (see Decision 020); FTS5 fallback handles platform transitions
-- ModernBERT architecture with Flash Attention 2 keeps inference fast despite 47M params
-- Apache 2.0 license, safetensors weights are 95MB
-- candle-transformers has native ModernBERT support — no ONNX conversion needed
+- Standard BERT architecture — works everywhere (native, WASM, any API provider)
+- Same vectors from local Candle and DeepInfra API — interchangeable, no cross-model issues
+- 22M params, 6 BERT layers — fast on CPU, suitable for real-time embedding
+- 384 dimensions, Apache 2.0 license, ~80MB safetensors
+- Most widely deployed embedding model in the world — battle-tested
 
 **Consequences:**
-- `CandleBackend::new()` auto-downloads all-MiniLM-L6-v2 safetensors from HuggingFace, caches at `~/.cache/mindcore/models/`
-- WASM backend uses `bge-small-en-v1.5` (standard BERT, 384-dim)
-- Cross-model note: vectors from different models are NOT comparable — engine falls back to FTS5 when model_name mismatches (Decision 020)
+- `CandleBackend::new()` auto-downloads all-MiniLM-L6-v2 from HuggingFace
+- `ApiBackend::deepinfra_minilm(api_key)` uses the same model via API
+- No more dual-model WASM/native split — one model everywhere
+- Supersedes the original granite-small-r2 selection
 - `all-MiniLM-L6-v2` not used
 
 ---

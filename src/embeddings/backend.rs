@@ -7,7 +7,8 @@ use crate::error::Result;
 /// Shipped implementations:
 /// - `NoopBackend`: returns zero vectors (testing)
 /// - `FallbackBackend`: wraps an optional backend, degrades to FTS5-only
-/// - `CandleNativeBackend`: granite-small-r2 via ModernBERT (feature: `local-embeddings`)
+/// - `CandleNativeBackend`: all-MiniLM-L6-v2 via BERT (feature: `local-embeddings`)
+/// - `ApiBackend`: OpenAI-compatible embedding API (feature: `api-embeddings`)
 pub trait EmbeddingBackend: Send + Sync {
     /// Generate embedding for a single text.
     fn embed(&self, text: &str) -> Result<Vec<f32>>;

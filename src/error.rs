@@ -72,11 +72,11 @@ mod tests {
     #[test]
     fn model_mismatch_display() {
         let err = MindCoreError::ModelMismatch {
-            stored: "granite-small-r2".into(),
-            current: "bge-small-en-v1.5".into(),
+            stored: "model-a".into(),
+            current: "model-b".into(),
         };
-        assert!(err.to_string().contains("granite-small-r2"));
-        assert!(err.to_string().contains("bge-small-en-v1.5"));
+        assert!(err.to_string().contains("model-a"));
+        assert!(err.to_string().contains("model-b"));
     }
 
     #[test]

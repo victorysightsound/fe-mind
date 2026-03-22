@@ -8,7 +8,7 @@ efficient, well-tested, and performant enough for real workloads (LongMemEval-S:
 
 ## Current State
 
-- CandleNativeBackend exists (granite-small-r2, 384-dim, ModernBERT)
+- CandleNativeBackend exists (all-MiniLM-L6-v2, 384-dim, BERT)
 - Vector storage/search is brute-force O(n) — fine for <100K
 - Hybrid search (FTS5 + vector + RRF) is implemented
 - FTS5 sanitizer has a bug with hyphens (fix in progress)

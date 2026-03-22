@@ -419,7 +419,7 @@ When `dimensions_override` is set, the backend truncates and re-normalizes vecto
 
 **Why WASM can't use all-MiniLM-L6-v2:**
 1. BERT architecture (GeGLU activation, alternating local/global attention, RoPE) — ops may not all compile cleanly to WASM
-2. Model weights are 95MB — too large for browser download
+2. Model weights are 80MB — too large for browser download
 3. WASM is single-threaded — 47M param inference would be slow
 4. candle's WASM support is proven with standard BERT, not BERT
 
@@ -433,7 +433,7 @@ This section provides everything needed to implement the custom candle embedding
 
 | File | Source Repo | Size | Purpose |
 |------|------------|------|---------|
-| `model.safetensors` | `ibm-granite/all-MiniLM-L6-v2` | 95MB | Model weights |
+| `model.safetensors` | `sentence-transformers/all-MiniLM-L6-v2` | 80MB | Model weights |
 | `config.json` | Same | 1.3KB | Architecture config |
 | `tokenizer.json` | Same | 3.6MB | Tokenizer vocabulary and rules |
 
@@ -481,7 +481,7 @@ use hf_hub::{api::sync::Api, Repo, RepoType};
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
 use std::path::PathBuf;
 
-const MODEL_REPO: &str = "ibm-granite/all-MiniLM-L6-v2";
+const MODEL_REPO: &str = "sentence-transformers/all-MiniLM-L6-v2";
 const CACHE_DIR: &str = ".cache/mindcore/models/all-MiniLM-L6-v2";
 
 pub struct CandleNativeBackend {
@@ -535,7 +535,7 @@ impl CandleNativeBackend {
         Ok(Self { model, tokenizer, device })
     }
 
-    /// Construct with a progress callback for first-run model download (~95MB).
+    /// Construct with a progress callback for first-run model download (~80MB).
     /// The callback receives (bytes_downloaded, total_bytes).
     pub fn with_progress(callback: impl Fn(u64, u64) + Send + 'static) -> Result<Self> {
         // Same as new() but passes callback to hf-hub download
@@ -550,7 +550,7 @@ impl CandleNativeBackend {
     }
 }
 
-// First-run experience: CandleNativeBackend::new() downloads ~95MB of model files
+// First-run experience: CandleNativeBackend::new() downloads ~80MB of model files
 // from HuggingFace on first use (cached at ~/.cache/mindcore/models/ afterward).
 // If the download fails (no network, HF rate limit), FallbackBackend degrades
 // gracefully to FTS5-only search — no panic, no error to the consumer unless

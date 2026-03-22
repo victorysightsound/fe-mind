@@ -186,7 +186,7 @@ Candle embedding backend, brute-force vector search, and RRF hybrid merge. After
 
 **Deliverables:**
 - `EmbeddingBackend` trait (async fn embed, embed_batch, dimensions, model_name)
-- `CandleNativeBackend` — granite-small-r2 via ModernBERT (~100-130 lines)
+- `CandleNativeBackend` — all-MiniLM-L6-v2 via BERT (~100-130 lines)
 - Mean pooling and L2 normalization (shared `pooling.rs`)
 - `NoopBackend` for testing
 - `FallbackBackend` wrapping `Option<Box<dyn EmbeddingBackend>>`
@@ -209,7 +209,7 @@ Candle embedding backend, brute-force vector search, and RRF hybrid merge. After
 **Tasks (Phase 5):**
 35. Implement `EmbeddingBackend` trait
 36. Implement `pooling.rs` (mean pooling + L2 normalization)
-37. Implement `CandleNativeBackend` with granite-small-r2 via ModernBERT
+37. Implement `CandleNativeBackend` with all-MiniLM-L6-v2 via BERT
 38. Implement model auto-download via hf-hub with `from_path()` fallback
 39. Implement `NoopBackend` and `FallbackBackend`
 40. Add `memory_vectors` table (migration v3→v4)

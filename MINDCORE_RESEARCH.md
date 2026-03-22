@@ -315,7 +315,7 @@ Where:
 
 **Decision:** Candle with custom embedding module (Decision 016, updated 2026-03-18). The ~3ms latency difference vs. ort is irrelevant for agent memory workloads (embedding happens in background). The dependency and binary size savings are significant. Candle also supports WASM. fastembed-rs was evaluated and rejected due to single-maintainer risk, pre-release ort pin, and 50-150MB C++ shared library dependency.
 
-**Model choice:** granite-embedding-small-english-r2 (Decision 017)
+**Model choice:** all-MiniLM-L6-v2 (Decision 017, updated — switched from granite for WASM compatibility and API interoperability)
 - 384 dimensions (compact vectors, compatible with bge-small WASM fallback)
 - 47M parameters, ModernBERT architecture with Flash Attention 2
 - 8,192 token context (captures full error traces, code blocks, decision rationale)

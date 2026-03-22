@@ -14,7 +14,7 @@ from Phase 2 and adds the techniques that separate good retrieval from great.
    the stop list
 
 ### Retrieval Precision
-2. No query/passage prefixes for granite-small-r2 — the model supports
+2. No query/passage prefixes for all-MiniLM-L6-v2 — the model supports
    instruction prefixes that align the embedding space for retrieval
 3. Chunks hard-cut at 500 chars — information at boundaries gets split;
    overlapping sliding window prevents this
@@ -52,7 +52,7 @@ Update CandleNativeBackend:
   falls back to `embed()`
 - Update SearchBuilder to use `embed_query()` for search queries
 
-Check granite-small-r2 documentation for the exact prefix format.
+Check all-MiniLM-L6-v2 documentation for the exact prefix format.
 
 ### 7.3 — Overlapping chunk windows
 
@@ -105,7 +105,7 @@ Remove later-ranked items that are >0.95 similar to any higher-ranked item.
 ## Success Criteria
 
 1. Stop-word list contains ONLY function words
-2. Query prefix used for search embeddings (if granite-small-r2 supports it)
+2. Query prefix used for search embeddings (if all-MiniLM-L6-v2 supports it)
 3. Overlapping chunks prevent boundary information loss
 4. No more than 3 results from any single session in top-20
 5. Multi-query retrieval finds items that single query misses
