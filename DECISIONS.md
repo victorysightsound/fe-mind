@@ -66,7 +66,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Consequences:**
 - Feature-gated behind `local-embeddings` flag
-- Default model: `granite-embedding-small-english-r2` (384 dims, 47M params, ~95MB download) — updated by Decision 017
+- Default model: `all-MiniLM-L6-v2` (384 dims, 47M params, ~95MB download) — updated by Decision 017
 - Model downloaded from HF Hub on first use, cached locally
 - Graceful degradation to FTS5-only if candle fails to load
 
@@ -356,12 +356,12 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Build a custom embedding module (~100-130 lines) inside MindCore using candle-transformers' native ModernBERT implementation. Drop fastembed-rs entirely.
 
-**Context:** fastembed-rs stability assessment (March 2026) revealed: single maintainer (Anush008/Qdrant, bus factor 1), pinned to pre-release `ort =2.0.0-rc.11`, ships 50-150MB C++ ONNX Runtime shared library, uses `anyhow` in library crate, yearly breaking major versions. candle-transformers already has native ModernBERT support (PR #2791, merged March 2025), and granite-small-r2 ships safetensors weights that candle loads directly.
+**Context:** fastembed-rs stability assessment (March 2026) revealed: single maintainer (Anush008/Qdrant, bus factor 1), pinned to pre-release `ort =2.0.0-rc.11`, ships 50-150MB C++ ONNX Runtime shared library, uses `anyhow` in library crate, yearly breaking major versions. candle-transformers already has native ModernBERT support (PR #2791, merged March 2025), and all-MiniLM-L6-v2 ships safetensors weights that candle loads directly.
 
 **Rationale:**
 - Pure Rust — no C++ shared library, no ONNX Runtime, aligns with design principle #5
 - candle-transformers has native ModernBERT (GeGLU, alternating attention, RoPE) — no architecture gaps
-- granite-small-r2 ships `model.safetensors` (95MB), `config.json`, `tokenizer.json` — everything candle needs
+- all-MiniLM-L6-v2 ships `model.safetensors` (95MB), `config.json`, `tokenizer.json` — everything candle needs
 - Eliminates: fastembed (single-maintainer), ort (pre-release pin), ndarray, anyhow (transitive)
 - ~100-130 lines replaces an external crate with full ownership
 - `EmbeddingBackend` trait still lets consumers plug in fastembed or anything else if they want
@@ -369,7 +369,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Consequences:**
 - `CandleBackend` is the primary backend on all native targets (feature: `local-embeddings`)
-- Native default model: `granite-embedding-small-english-r2` (ModernBERT, 384-dim, 8K context)
+- Native default model: `all-MiniLM-L6-v2` (ModernBERT, 384-dim, 8K context)
 - WASM fallback: `bge-small-en-v1.5` (standard BERT, 384-dim) — vectors are NOT cross-compatible with granite; see Decision 020
 - WASM can't use granite because ModernBERT ops may not compile cleanly to WASM, model is 95MB (too large for browser), and WASM is single-threaded
 - Cross-model vectors are isolated: different models produce incomparable embedding spaces despite same dimensionality — see Decision 020
@@ -379,13 +379,13 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 ---
 
-## Decision 017: Default Embedding Model — granite-small-r2
+## Decision 017: Default Embedding Model — all-MiniLM-L6-v2
 
 **Date:** 2026-03-17 (updated: 2026-03-18 — removed fastembed references after Decision 016 revision)
 
-**Decision:** Use `granite-embedding-small-english-r2` (IBM, 47M params, 384-dim, 8K context) as the default embedding model on native targets. Use `bge-small-en-v1.5` (384-dim) as the WASM fallback. Drop `all-MiniLM-L6-v2`.
+**Decision:** Use `all-MiniLM-L6-v2` (IBM, 47M params, 384-dim, 8K context) as the default embedding model on native targets. Use `bge-small-en-v1.5` (384-dim) as the WASM fallback. Drop `all-MiniLM-L6-v2`.
 
-**Context:** Benchmarked three 384-dim models for agent memory retrieval. granite-small-r2 scores 17% better than bge-small on code retrieval (CoIR 53.8 vs 45.8) and has 16x longer context (8K vs 512 tokens). Loaded via candle-transformers' native ModernBERT implementation with safetensors weights.
+**Context:** Benchmarked three 384-dim models for agent memory retrieval. all-MiniLM-L6-v2 scores 17% better than bge-small on code retrieval (CoIR 53.8 vs 45.8) and has 16x longer context (8K vs 512 tokens). Loaded via candle-transformers' native ModernBERT implementation with safetensors weights.
 
 **Rationale:**
 - Code retrieval (CoIR): granite 53.8 vs bge-small 45.8 — 17% better on the workload that matters most for dev tool memory
@@ -397,7 +397,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - candle-transformers has native ModernBERT support — no ONNX conversion needed
 
 **Consequences:**
-- `CandleBackend::new()` auto-downloads granite-small-r2 safetensors from HuggingFace, caches at `~/.cache/mindcore/models/`
+- `CandleBackend::new()` auto-downloads all-MiniLM-L6-v2 safetensors from HuggingFace, caches at `~/.cache/mindcore/models/`
 - WASM backend uses `bge-small-en-v1.5` (standard BERT, 384-dim)
 - Cross-model note: vectors from different models are NOT comparable — engine falls back to FTS5 when model_name mismatches (Decision 020)
 - `all-MiniLM-L6-v2` not used
@@ -457,7 +457,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Vectors from different embedding models are isolated — vector search is skipped for records whose stored `model_name` differs from the current backend's model. The engine falls back to FTS5-only for mismatched records.
 
-**Context:** The architecture previously claimed granite-small-r2 and bge-small-en-v1.5 produce "cross-compatible" 384-dim vectors with only 5-10% quality degradation. This is incorrect. Different model architectures produce fundamentally different embedding spaces — cross-model cosine similarity produces unreliable rankings, not slightly degraded ones.
+**Context:** The architecture previously claimed all-MiniLM-L6-v2 and bge-small-en-v1.5 produce "cross-compatible" 384-dim vectors with only 5-10% quality degradation. This is incorrect. Different model architectures produce fundamentally different embedding spaces — cross-model cosine similarity produces unreliable rankings, not slightly degraded ones.
 
 **Rationale:**
 - Vectors from different models are not comparable even at the same dimensionality

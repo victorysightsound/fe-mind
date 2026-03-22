@@ -75,7 +75,7 @@ mindcore/
 │   ├── embeddings/
 │   │   ├── mod.rs
 │   │   ├── backend.rs         # EmbeddingBackend trait
-│   │   ├── candle_native.rs   # CandleNativeBackend: granite-small-r2 via ModernBERT
+│   │   ├── candle_native.rs   # CandleNativeBackend: all-MiniLM-L6-v2 via BERT
 │   │   ├── pooling.rs         # Mean pooling + L2 normalization
 │   │   ├── noop.rs            # NoopBackend: zero vectors (testing)
 │   │   └── fallback.rs        # FallbackBackend: graceful degradation
@@ -116,7 +116,7 @@ default = ["fts5"]
 fts5 = []                       # FTS5 + Porter stemming + BM25
 
 # Vector search — custom candle embedding module (pure Rust, no ONNX Runtime)
-# Native: granite-small-r2 via ModernBERT | WASM: bge-small-en-v1.5 via BERT
+# all-MiniLM-L6-v2 via BERT (native + WASM)
 local-embeddings = [
     "dep:candle-core",
     "dep:candle-nn",
@@ -392,8 +392,8 @@ pub trait EmbeddingBackend: Send + Sync {
 
 | Backend | Feature Flag | Default Model | Target | Use Case |
 |---------|-------------|---------------|--------|----------|
-| `CandleNativeBackend` | `local-embeddings` | `granite-small-r2` (ModernBERT, 384-dim, 8K ctx) | Native | **Primary.** Pure Rust. Auto-downloads safetensors on first use. |
-| `CandleWasmBackend` | `local-embeddings` | `bge-small-en-v1.5` (BERT, 384-dim, 512 ctx) | WASM | **Browser.** Standard BERT, smaller model, proven in candle WASM demos. |
+| `CandleNativeBackend` | `local-embeddings` | `all-MiniLM-L6-v2` (BERT, 384-dim, 8K ctx) | Native | **Primary.** Pure Rust. Auto-downloads safetensors on first use. |
+| `CandleWasmBackend` | `local-embeddings` | `all-MiniLM-L6-v2` (BERT, 384-dim, 512 ctx) | WASM | **Browser.** Standard BERT, smaller model, proven in candle WASM demos. |
 | `NoopBackend` | (always available) | N/A | Any | Testing, returns zero vectors |
 | `FallbackBackend` | (always available) | N/A | Any | Wraps `Option<Box<dyn EmbeddingBackend>>`, degrades gracefully to FTS5-only |
 
@@ -401,13 +401,13 @@ pub trait EmbeddingBackend: Send + Sync {
 
 | Model | Architecture | Params | Retrieval (MTEB) | Code Retrieval (CoIR) | Max Tokens | Status |
 |-------|-------------|--------|-----------------|----------------------|------------|--------|
-| `granite-embedding-small-english-r2` | ModernBERT | 47M | 53.9 | **53.8** | **8,192** | **Default** (native) |
-| `bge-small-en-v1.5` | BERT | 33M | 53.9 | 45.8 | 512 | **Default** (WASM) |
+| `all-MiniLM-L6-v2` | BERT | 47M | 53.9 | **53.8** | **8,192** | **Default** (native) |
+| `all-MiniLM-L6-v2` | BERT | 33M | 53.9 | 45.8 | 512 | **Default** (WASM) |
 | `all-MiniLM-L6-v2` | BERT | 22M | ~41.9 | — | 256 | Not used |
 
 **Cross-model vector compatibility:** Both models produce 384-dimensional vectors, but vectors from different models occupy **different embedding spaces** and cross-model similarity scores are unreliable — they should not be used for ranking. When the current `EmbeddingBackend::model_name()` differs from the `model_name` stored alongside a vector in `memory_vectors`, the engine **skips vector search for those records** and falls back to FTS5-only retrieval. This means a native-to-WASM transition (or any model change) effectively disables vector search until `reindex_all()` is run with the new model. This is by design — incorrect similarity scores are worse than no similarity scores.
 
-**Matryoshka representation learning:** `granite-small-r2` supports Matryoshka embeddings — vectors can be truncated to lower dimensions (384 -> 256 -> 128) with graceful quality degradation. This enables storage/speed tradeoffs: 128-dim vectors use 1/3 the storage and scan 3x faster, at the cost of ~2-5% retrieval accuracy loss. Configure via `dimensions_override: Option<usize>` on the backend:
+**Matryoshka representation learning:** `all-MiniLM-L6-v2` supports Matryoshka embeddings — vectors can be truncated to lower dimensions (384 -> 256 -> 128) with graceful quality degradation. This enables storage/speed tradeoffs: 128-dim vectors use 1/3 the storage and scan 3x faster, at the cost of ~2-5% retrieval accuracy loss. Configure via `dimensions_override: Option<usize>` on the backend:
 
 ```rust
 let backend = CandleNativeBackend::builder()
@@ -415,29 +415,29 @@ let backend = CandleNativeBackend::builder()
     .build()?;
 ```
 
-When `dimensions_override` is set, the backend truncates and re-normalizes vectors after embedding. The `dimensions` field in `memory_vectors` records the actual stored dimension so mixed-dimension databases are detectable. `bge-small-en-v1.5` does not support Matryoshka truncation — its full 384 dimensions are always required.
+When `dimensions_override` is set, the backend truncates and re-normalizes vectors after embedding. The `dimensions` field in `memory_vectors` records the actual stored dimension so mixed-dimension databases are detectable. `all-MiniLM-L6-v2` does not support Matryoshka truncation — its full 384 dimensions are always required.
 
-**Why WASM can't use granite-small-r2:**
-1. ModernBERT architecture (GeGLU activation, alternating local/global attention, RoPE) — ops may not all compile cleanly to WASM
+**Why WASM can't use all-MiniLM-L6-v2:**
+1. BERT architecture (GeGLU activation, alternating local/global attention, RoPE) — ops may not all compile cleanly to WASM
 2. Model weights are 95MB — too large for browser download
 3. WASM is single-threaded — 47M param inference would be slow
-4. candle's WASM support is proven with standard BERT, not ModernBERT
+4. candle's WASM support is proven with standard BERT, not BERT
 
 ---
 
 ### Embedding Module — Implementation Reference
 
-This section provides everything needed to implement the custom candle embedding backends. All code patterns are derived from candle's official BERT example and the ModernBERT module in candle-transformers.
+This section provides everything needed to implement the custom candle embedding backends. All code patterns are derived from candle's official BERT example and the BERT module in candle-transformers.
 
 **Model files (auto-downloaded from HuggingFace, cached at `~/.cache/mindcore/models/`):**
 
 | File | Source Repo | Size | Purpose |
 |------|------------|------|---------|
-| `model.safetensors` | `ibm-granite/granite-embedding-small-english-r2` | 95MB | Model weights |
+| `model.safetensors` | `ibm-granite/all-MiniLM-L6-v2` | 95MB | Model weights |
 | `config.json` | Same | 1.3KB | Architecture config |
 | `tokenizer.json` | Same | 3.6MB | Tokenizer vocabulary and rules |
 
-**granite-small-r2 config.json key fields:**
+**all-MiniLM-L6-v2 config.json key fields:**
 ```json
 {
   "model_type": "modernbert",
@@ -481,8 +481,8 @@ use hf_hub::{api::sync::Api, Repo, RepoType};
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
 use std::path::PathBuf;
 
-const MODEL_REPO: &str = "ibm-granite/granite-embedding-small-english-r2";
-const CACHE_DIR: &str = ".cache/mindcore/models/granite-small-r2";
+const MODEL_REPO: &str = "ibm-granite/all-MiniLM-L6-v2";
+const CACHE_DIR: &str = ".cache/mindcore/models/all-MiniLM-L6-v2";
 
 pub struct CandleNativeBackend {
     model: ModernBert,
@@ -610,13 +610,13 @@ impl EmbeddingBackend for CandleNativeBackend {
 
     fn dimensions(&self) -> usize { 384 }
     fn is_available(&self) -> bool { true }
-    fn model_name(&self) -> &str { "granite-embedding-small-english-r2" }
+    fn model_name(&self) -> &str { "all-MiniLM-L6-v2" }
 }
 ```
 
 **CandleWasmBackend** follows the same pattern but uses:
 - `candle_transformers::models::bert::{BertModel, Config}` instead of `modernbert`
-- Model repo: `BAAI/bge-small-en-v1.5`
+- Model repo: `BAAI/all-MiniLM-L6-v2`
 - Standard BERT `forward(&token_ids, &token_type_ids, Some(&attention_mask))` signature
 
 **Mean pooling (shared `pooling.rs`):**
@@ -1778,7 +1778,7 @@ Based on OMEGA Memory benchmarks and production experience:
 | Operation | Target | Measurement |
 |-----------|--------|-------------|
 | FTS5 keyword search | <5ms | 10K memories |
-| Vector embedding (single) | <10ms | granite-small-r2 on CPU |
+| Vector embedding (single) | <10ms | all-MiniLM-L6-v2 on CPU |
 | Brute-force vector scan | <50ms | 100K vectors, 384 dims |
 | RRF hybrid merge | <1ms | Pure computation |
 | Graph traversal (3 hops) | <10ms | 10K relationships |

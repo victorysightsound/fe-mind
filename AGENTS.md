@@ -34,7 +34,7 @@ session-context
 |-----------|------------|
 | Language | Rust |
 | Storage | SQLite + rusqlite + FTS5 |
-| Embeddings | Candle (granite-small-r2 native, bge-small-en-v1.5 WASM), feature-gated |
+| Embeddings | Candle (all-MiniLM-L6-v2 native, bge-small-en-v1.5 WASM), feature-gated |
 | Search | FTS5 keyword + vector similarity + RRF hybrid |
 | Decay Model | ACT-R activation-based |
 
