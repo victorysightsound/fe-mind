@@ -135,22 +135,9 @@ mod inner {
         fn normalize(v: &Tensor) -> std::result::Result<Tensor, candle_core::Error> {
             v.broadcast_div(&v.sqr()?.sum_keepdim(1)?.sqrt()?)
         }
-    }
 
-    impl EmbeddingBackend for CandleNativeBackend {
-        fn embed(&self, text: &str) -> Result<Vec<f32>> {
-            let results = self.embed_batch(&[text])?;
-            results
-                .into_iter()
-                .next()
-                .ok_or_else(|| MindCoreError::Embedding("empty batch result".into()))
-        }
-
-        // granite-embedding-small-english-r2 is a symmetric bi-encoder —
-        // queries and documents are encoded identically, no prefix needed.
-        // embed_query() falls through to the default (delegates to embed()).
-
-        fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        /// Process a single sub-batch through the model.
+        fn embed_sub_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
             let mut tokenizer = self.tokenizer.clone();
             tokenizer
                 .with_padding(Some(PaddingParams {
@@ -203,11 +190,9 @@ mod inner {
                     .to_vec1::<f32>()
                     .map_err(|e| MindCoreError::Embedding(format!("to_vec1: {e}")))?;
 
-                // Matryoshka truncation
                 if let Some(dims) = self.dimensions_override {
                     if dims < vec.len() {
                         vec.truncate(dims);
-                        // Re-normalize after truncation
                         crate::embeddings::pooling::normalize_l2_inplace(&mut vec);
                     }
                 }
@@ -216,6 +201,35 @@ mod inner {
             }
 
             Ok(results)
+        }
+    }
+
+    impl EmbeddingBackend for CandleNativeBackend {
+        fn embed(&self, text: &str) -> Result<Vec<f32>> {
+            let results = self.embed_batch(&[text])?;
+            results
+                .into_iter()
+                .next()
+                .ok_or_else(|| MindCoreError::Embedding("empty batch result".into()))
+        }
+
+        // granite-embedding-small-english-r2 is a symmetric bi-encoder —
+        // queries and documents are encoded identically, no prefix needed.
+        // embed_query() falls through to the default (delegates to embed()).
+
+        fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+            // Sub-batch to avoid giant padded tensors (e.g., 336×500 = OOM-prone, slow).
+            // Process in groups of 16 for a good balance of throughput vs memory.
+            const SUB_BATCH_SIZE: usize = 16;
+
+            let mut all_results = Vec::with_capacity(texts.len());
+
+            for chunk in texts.chunks(SUB_BATCH_SIZE) {
+                let sub_results = self.embed_sub_batch(chunk)?;
+                all_results.extend(sub_results);
+            }
+
+            Ok(all_results)
         }
 
         fn dimensions(&self) -> usize {

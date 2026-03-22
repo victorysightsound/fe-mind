@@ -437,6 +437,15 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
         self
     }
 
+    /// Set the embedding backend from an existing `Arc`.
+    ///
+    /// Use this to share a single backend instance across multiple engines
+    /// (e.g., to avoid re-loading model weights on reset).
+    pub fn embedding_backend_arc(mut self, backend: Arc<dyn EmbeddingBackend>) -> Self {
+        self.embedding = Some(backend);
+        self
+    }
+
     /// Build the engine, creating or opening the database.
     ///
     /// Runs schema migrations to ensure the database is at the current version.
