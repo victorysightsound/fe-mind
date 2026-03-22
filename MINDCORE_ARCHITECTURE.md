@@ -397,275 +397,70 @@ pub trait EmbeddingBackend: Send + Sync {
 | `NoopBackend` | (always available) | N/A | Any | Testing, returns zero vectors |
 | `FallbackBackend` | (always available) | N/A | Any | Wraps `Option<Box<dyn EmbeddingBackend>>`, degrades gracefully to FTS5-only |
 
-**Model comparison (384-dim class):**
+**Embedding model: `all-MiniLM-L6-v2`**
 
-| Model | Architecture | Params | Retrieval (MTEB) | Code Retrieval (CoIR) | Max Tokens | Status |
-|-------|-------------|--------|-----------------|----------------------|------------|--------|
-| `all-MiniLM-L6-v2` | BERT | 47M | 53.9 | **53.8** | **8,192** | **Default** (native) |
-| `all-MiniLM-L6-v2` | BERT | 33M | 53.9 | 45.8 | 512 | **Default** (WASM) |
-| `all-MiniLM-L6-v2` | BERT | 22M | ~41.9 | — | 256 | Not used |
+| Property | Value |
+|----------|-------|
+| Architecture | BERT (6 layers) |
+| Parameters | 22M |
+| Dimensions | 384 |
+| Max Tokens | 256 |
+| MTEB Retrieval | ~49 |
+| License | Apache 2.0 |
+| Download | ~80MB safetensors |
 
-**Cross-model vector compatibility:** Both models produce 384-dimensional vectors, but vectors from different models occupy **different embedding spaces** and cross-model similarity scores are unreliable — they should not be used for ranking. When the current `EmbeddingBackend::model_name()` differs from the `model_name` stored alongside a vector in `memory_vectors`, the engine **skips vector search for those records** and falls back to FTS5-only retrieval. This means a native-to-WASM transition (or any model change) effectively disables vector search until `reindex_all()` is run with the new model. This is by design — incorrect similarity scores are worse than no similarity scores.
+**One model everywhere:** all-MiniLM-L6-v2 uses standard BERT architecture which compiles to native and WASM. The same model is available on DeepInfra and other API providers. Vectors from local Candle and API are identical — fully interchangeable with zero quality degradation.
 
-**Matryoshka representation learning:** `all-MiniLM-L6-v2` supports Matryoshka embeddings — vectors can be truncated to lower dimensions (384 -> 256 -> 128) with graceful quality degradation. This enables storage/speed tradeoffs: 128-dim vectors use 1/3 the storage and scan 3x faster, at the cost of ~2-5% retrieval accuracy loss. Configure via `dimensions_override: Option<usize>` on the backend:
+**Three backend options:**
+- `CandleNativeBackend` — local CPU inference (offline, free)
+- `ApiBackend` — OpenAI-compatible API endpoint like DeepInfra (fast, cheap)
+- `FallbackBackend::api_with_local_fallback(api, local)` — tries API first, falls back to local
 
-```rust
-let backend = CandleNativeBackend::builder()
-    .dimensions_override(Some(256))  // Truncate 384-dim to 256-dim
-    .build()?;
-```
-
-When `dimensions_override` is set, the backend truncates and re-normalizes vectors after embedding. The `dimensions` field in `memory_vectors` records the actual stored dimension so mixed-dimension databases are detectable. `all-MiniLM-L6-v2` does not support Matryoshka truncation — its full 384 dimensions are always required.
-
-**Why WASM can't use all-MiniLM-L6-v2:**
-1. BERT architecture (GeGLU activation, alternating local/global attention, RoPE) — ops may not all compile cleanly to WASM
-2. Model weights are 80MB — too large for browser download
-3. WASM is single-threaded — 47M param inference would be slow
-4. candle's WASM support is proven with standard BERT, not BERT
+**Model isolation (Decision 020):** When the `model_name` stored alongside a vector differs from the current backend's `model_name()`, vector search is skipped and the engine falls back to FTS5-only. This prevents cross-model comparison issues if the model is ever changed.
 
 ---
 
 ### Embedding Module — Implementation Reference
 
-This section provides everything needed to implement the custom candle embedding backends. All code patterns are derived from candle's official BERT example and the BERT module in candle-transformers.
+**Model:** `sentence-transformers/all-MiniLM-L6-v2` (BERT, 22M params, 384-dim)
 
-**Model files (auto-downloaded from HuggingFace, cached at `~/.cache/mindcore/models/`):**
-
-| File | Source Repo | Size | Purpose |
-|------|------------|------|---------|
-| `model.safetensors` | `sentence-transformers/all-MiniLM-L6-v2` | 80MB | Model weights |
-| `config.json` | Same | 1.3KB | Architecture config |
-| `tokenizer.json` | Same | 3.6MB | Tokenizer vocabulary and rules |
-
-**all-MiniLM-L6-v2 config.json key fields:**
-```json
-{
-  "model_type": "modernbert",
-  "architectures": ["ModernBertModel"],
-  "hidden_size": 384,
-  "num_hidden_layers": 12,
-  "num_attention_heads": 12,
-  "intermediate_size": 1536,
-  "max_position_embeddings": 8192,
-  "vocab_size": 50368,
-  "classifier_pooling": "mean",
-  "global_attn_every_n_layers": 3,
-  "global_rope_theta": 80000,
-  "local_attention": 128,
-  "local_rope_theta": 10000.0,
-  "layer_norm_eps": 1e-05,
-  "pad_token_id": 50283
-}
-```
+Auto-downloaded from HuggingFace on first use (~80MB), cached at `~/.cache/huggingface/hub/`.
 
 **Candle API mapping:**
 
 | Operation | Candle API | Module |
 |-----------|-----------|--------|
-| Load config | `serde_json::from_str::<modernbert::Config>(&json)` | `candle_transformers::models::modernbert` |
+| Load config | `serde_json::from_str::<bert::Config>(&json)` | `candle_transformers::models::bert` |
 | Load weights | `VarBuilder::from_mmaped_safetensors(&[path], DType::F32, &device)` | `candle_nn` |
-| Build model | `ModernBert::load(vb, &config)` | `candle_transformers::models::modernbert` |
+| Build model | `BertModel::load(vb, &config)` | `candle_transformers::models::bert` |
 | Tokenize | `Tokenizer::from_file(path)` + `encode_batch()` | `tokenizers` crate |
-| Forward pass | `model.forward(&token_ids, &attention_mask)` → hidden states `[batch, seq_len, 384]` | — |
-| Mean pooling | Mask-weighted sum / mask count (see below) | Custom (~5 lines) |
+| Forward pass | `model.forward(&token_ids, &token_type_ids, Some(&attention_mask))` | BERT requires token_type_ids (zeros) |
+| Mean pooling | Mask-weighted sum / mask count | Custom (~5 lines) |
 | L2 normalize | `v.broadcast_div(&v.sqr()?.sum_keepdim(1)?.sqrt()?)` | Custom (1 line) |
 | Download model | `Api::new()?.repo(Repo::with_revision(...)).get("model.safetensors")` | `hf_hub` crate |
 
-**CandleNativeBackend implementation (~100-130 lines total):**
+**Usage examples:**
 
 ```rust
-use candle_core::{Device, DType, Tensor};
-use candle_nn::VarBuilder;
-use candle_transformers::models::modernbert::{Config, ModernBert};
-use hf_hub::{api::sync::Api, Repo, RepoType};
-use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
-use std::path::PathBuf;
+// Local backend (all-MiniLM-L6-v2 via Candle BERT)
+let local = CandleNativeBackend::new()?;
 
-const MODEL_REPO: &str = "sentence-transformers/all-MiniLM-L6-v2";
-const CACHE_DIR: &str = ".cache/mindcore/models/all-MiniLM-L6-v2";
+// API backend (DeepInfra or any OpenAI-compatible endpoint)
+let api = ApiBackend::deepinfra_minilm(api_key);
 
-pub struct CandleNativeBackend {
-    model: ModernBert,
-    tokenizer: Tokenizer,
-    device: Device,
-    /// Optional Matryoshka dimension override (e.g., 256 or 128).
-    /// When set, vectors are truncated and re-normalized after embedding.
-    dimensions_override: Option<usize>,
-}
+// Fallback: tries API first, falls back to local
+let fallback = FallbackBackend::api_with_local_fallback(
+    Box::new(api),
+    Box::new(local),
+);
 
-impl CandleNativeBackend {
-    pub fn new() -> Result<Self> {
-        // Auto-detect best available device:
-        // - Device::Metal on macOS if available (significant speedup for batch embedding)
-        // - Device::Cuda(0) on Linux/Windows with NVIDIA GPU
-        // - Device::Cpu as fallback (always works)
-        // GPU acceleration benefits the background indexer most (batch of 32+).
-        // Single-query embedding is fast enough on CPU (~8ms).
-        let device = Device::Cpu;
-
-        // Download model files from HuggingFace (cached after first use)
-        let repo = Repo::with_revision(
-            MODEL_REPO.to_string(),
-            RepoType::Model,
-            "main".to_string(),
-        );
-        let api = Api::new()?;
-        let api = api.repo(repo);
-        let config_path = api.get("config.json")?;
-        let tokenizer_path = api.get("tokenizer.json")?;
-        let weights_path = api.get("model.safetensors")?;
-
-        // Load config
-        let config: Config = serde_json::from_str(
-            &std::fs::read_to_string(&config_path)?
-        )?;
-
-        // Load tokenizer
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-        // Load model weights from safetensors (memory-mapped for efficiency)
-        let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(
-                &[weights_path], DType::F32, &device
-            )?
-        };
-        let model = ModernBert::load(vb, &config)?;
-
-        Ok(Self { model, tokenizer, device })
-    }
-
-    /// Construct with a progress callback for first-run model download (~80MB).
-    /// The callback receives (bytes_downloaded, total_bytes).
-    pub fn with_progress(callback: impl Fn(u64, u64) + Send + 'static) -> Result<Self> {
-        // Same as new() but passes callback to hf-hub download
-        todo!()
-    }
-
-    /// Construct from a local directory containing pre-downloaded model files.
-    /// Useful for bundled/offline deployments where HuggingFace download is not desired.
-    /// Expected files: model.safetensors, config.json, tokenizer.json
-    pub fn from_path(model_dir: impl Into<PathBuf>) -> Result<Self> {
-        todo!()
-    }
-}
-
-// First-run experience: CandleNativeBackend::new() downloads ~80MB of model files
-// from HuggingFace on first use (cached at ~/.cache/mindcore/models/ afterward).
-// If the download fails (no network, HF rate limit), FallbackBackend degrades
-// gracefully to FTS5-only search — no panic, no error to the consumer unless
-// they explicitly requested SearchMode::Vector.
-
-impl EmbeddingBackend for CandleNativeBackend {
-    async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        let results = self.embed_batch(&[text]).await?;
-        Ok(results.into_iter().next().unwrap())
-    }
-
-    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        // Configure tokenizer for batch — pad to longest in batch
-        let mut tokenizer = self.tokenizer.clone();
-        tokenizer.with_padding(Some(PaddingParams {
-            strategy: PaddingStrategy::BatchLongest,
-            ..Default::default()
-        }));
-
-        // Tokenize batch
-        let encodings = tokenizer.encode_batch(texts.to_vec(), true)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-        // Build input tensors
-        let token_ids: Vec<Tensor> = encodings.iter()
-            .map(|enc| Tensor::new(enc.get_ids(), &self.device))
-            .collect::<Result<Vec<_>>>()?;
-        let attention_masks: Vec<Tensor> = encodings.iter()
-            .map(|enc| Tensor::new(enc.get_attention_mask(), &self.device))
-            .collect::<Result<Vec<_>>>()?;
-
-        let token_ids = Tensor::stack(&token_ids, 0)?;
-        let attention_mask = Tensor::stack(&attention_masks, 0)?;
-
-        // Forward pass → hidden states [batch, seq_len, 384]
-        let hidden_states = self.model.forward(&token_ids, &attention_mask)?;
-
-        // Mean pooling (mask-weighted)
-        let mask_f32 = attention_mask.to_dtype(DType::F32)?.unsqueeze(2)?;
-        let sum_embeddings = hidden_states.broadcast_mul(&mask_f32)?.sum(1)?;
-        let sum_mask = mask_f32.sum(1)?;
-        let pooled = sum_embeddings.broadcast_div(&sum_mask)?;
-
-        // L2 normalize
-        let normalized = pooled.broadcast_div(
-            &pooled.sqr()?.sum_keepdim(1)?.sqrt()?
-        )?;
-
-        // Convert to Vec<Vec<f32>>
-        let batch_size = texts.len();
-        let mut results = Vec::with_capacity(batch_size);
-        for i in 0..batch_size {
-            results.push(normalized.get(i)?.to_vec1::<f32>()?);
-        }
-        Ok(results)
-    }
-
-    fn dimensions(&self) -> usize { 384 }
-    fn is_available(&self) -> bool { true }
-    fn model_name(&self) -> &str { "all-MiniLM-L6-v2" }
-}
+// Wire into engine
+let engine = MemoryEngine::<MyRecord>::builder()
+    .embedding_backend(fallback)
+    .build()?;
 ```
 
-**CandleWasmBackend** follows the same pattern but uses:
-- `candle_transformers::models::bert::{BertModel, Config}` instead of `modernbert`
-- Model repo: `BAAI/all-MiniLM-L6-v2`
-- Standard BERT `forward(&token_ids, &token_type_ids, Some(&attention_mask))` signature
-
-**Mean pooling (shared `pooling.rs`):**
-
-```rust
-use candle_core::{DType, Tensor, Result};
-
-/// Attention-mask-weighted mean pooling over token dimension.
-/// Input: hidden_states [batch, seq_len, hidden_dim], mask [batch, seq_len]
-/// Output: [batch, hidden_dim]
-pub fn mean_pool(hidden_states: &Tensor, attention_mask: &Tensor) -> Result<Tensor> {
-    let mask = attention_mask.to_dtype(DType::F32)?.unsqueeze(2)?;
-    let sum_embeddings = hidden_states.broadcast_mul(&mask)?.sum(1)?;
-    let sum_mask = mask.sum(1)?;
-    sum_embeddings.broadcast_div(&sum_mask)
-}
-
-/// L2 normalization along the last dimension.
-/// Input: [batch, hidden_dim] → Output: [batch, hidden_dim] with unit norm
-pub fn normalize_l2(v: &Tensor) -> Result<Tensor> {
-    v.broadcast_div(&v.sqr()?.sum_keepdim(1)?.sqrt()?)
-}
-```
-
-**Dual-backend conditional compilation:**
-
-```rust
-// src/embeddings/mod.rs
-
-#[cfg(not(target_family = "wasm"))]
-mod candle_native;
-#[cfg(target_family = "wasm")]
-mod candle_wasm;
-
-mod pooling;
-mod noop;
-mod fallback;
-
-/// Create the default embedding backend for the current platform.
-#[cfg(all(feature = "local-embeddings", not(target_family = "wasm")))]
-pub fn default_backend() -> Result<Box<dyn EmbeddingBackend>> {
-    Ok(Box::new(candle_native::CandleNativeBackend::new()?))
-}
-
-#[cfg(all(feature = "local-embeddings", target_family = "wasm"))]
-pub fn default_backend() -> Result<Box<dyn EmbeddingBackend>> {
-    Ok(Box::new(candle_wasm::CandleWasmBackend::new()?))
-}
-```
+Same model everywhere — native, WASM, and API produce identical vectors.
 
 **User-provided implementations (not shipped):**
 

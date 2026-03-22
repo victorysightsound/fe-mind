@@ -1,7 +1,7 @@
 //! End-to-end test for CandleNativeBackend with real model inference.
 //!
 //! Only runs with: cargo test --features local-embeddings --test candle_e2e
-//! Requires ~95MB model download on first run.
+//! Requires ~80MB model download on first run.
 
 #![cfg(feature = "local-embeddings")]
 

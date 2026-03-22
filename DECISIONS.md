@@ -66,7 +66,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Consequences:**
 - Feature-gated behind `local-embeddings` flag
-- Default model: `all-MiniLM-L6-v2` (384 dims, 47M params, ~95MB download) — updated by Decision 017
+- Default model: `all-MiniLM-L6-v2` (384 dims, 22M params, ~80MB download) — updated by Decision 017
 - Model downloaded from HF Hub on first use, cached locally
 - Graceful degradation to FTS5-only if candle fails to load
 
