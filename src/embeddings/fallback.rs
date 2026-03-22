@@ -1,62 +1,102 @@
 use crate::embeddings::EmbeddingBackend;
 use crate::error::{MindCoreError, Result};
 
-/// Wraps an optional embedding backend with graceful degradation.
+/// Wraps embedding backends with graceful degradation.
 ///
-/// If the inner backend is `None` or unavailable, operations return
-/// errors that the engine interprets as "skip vector search, use FTS5 only."
+/// Supports three modes:
+/// - Single backend (API or local)
+/// - API-first with local fallback (tries API, falls back to local on error)
+/// - None (FTS5-only mode)
 pub struct FallbackBackend {
-    inner: Option<Box<dyn EmbeddingBackend>>,
+    primary: Option<Box<dyn EmbeddingBackend>>,
+    fallback: Option<Box<dyn EmbeddingBackend>>,
     dims: usize,
 }
 
 impl FallbackBackend {
-    /// Create wrapping an existing backend.
+    /// Create wrapping a single backend.
     pub fn new(backend: Box<dyn EmbeddingBackend>) -> Self {
         let dims = backend.dimensions();
         Self {
-            inner: Some(backend),
+            primary: Some(backend),
+            fallback: None,
             dims,
         }
     }
 
     /// Create without a backend (FTS5-only mode).
     pub fn none(dims: usize) -> Self {
-        Self { inner: None, dims }
+        Self { primary: None, fallback: None, dims }
     }
 
-    /// Whether an embedding backend is available.
+    /// Create with API as primary and local as fallback.
+    ///
+    /// Tries the primary (API) backend first. If it fails (network error,
+    /// rate limit, etc.), falls back to the local backend transparently.
+    pub fn api_with_local_fallback(
+        api: Box<dyn EmbeddingBackend>,
+        local: Box<dyn EmbeddingBackend>,
+    ) -> Self {
+        let dims = api.dimensions();
+        Self {
+            primary: Some(api),
+            fallback: Some(local),
+            dims,
+        }
+    }
+
+    /// Whether any embedding backend is available.
     pub fn has_backend(&self) -> bool {
-        self.inner
-            .as_ref()
-            .map(|b| b.is_available())
-            .unwrap_or(false)
+        self.primary.as_ref().is_some_and(|b| b.is_available())
+            || self.fallback.as_ref().is_some_and(|b| b.is_available())
+    }
+
+    /// Try primary, fall back to secondary on error.
+    fn try_with_fallback<F, T>(&self, op: F) -> Result<T>
+    where
+        F: Fn(&dyn EmbeddingBackend) -> Result<T>,
+    {
+        if let Some(ref primary) = self.primary {
+            if primary.is_available() {
+                match op(primary.as_ref()) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        if self.fallback.is_some() {
+                            tracing::warn!("Primary embedding failed, falling back to local: {e}");
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(ref fallback) = self.fallback {
+            if fallback.is_available() {
+                return op(fallback.as_ref());
+            }
+        }
+
+        Err(MindCoreError::ModelNotAvailable(
+            "no embedding backend available".into(),
+        ))
     }
 }
 
 impl EmbeddingBackend for FallbackBackend {
     fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        match &self.inner {
-            Some(backend) if backend.is_available() => backend.embed(text),
-            _ => Err(MindCoreError::ModelNotAvailable(
-                "no embedding backend available".into(),
-            )),
-        }
+        self.try_with_fallback(|b| b.embed(text))
     }
 
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        match &self.inner {
-            Some(backend) if backend.is_available() => backend.embed_batch(texts),
-            _ => Err(MindCoreError::ModelNotAvailable(
-                "no embedding backend available".into(),
-            )),
-        }
+        self.try_with_fallback(|b| b.embed_batch(texts))
     }
 
     fn dimensions(&self) -> usize {
-        self.inner
+        self.primary
             .as_ref()
             .map(|b| b.dimensions())
+            .or_else(|| self.fallback.as_ref().map(|b| b.dimensions()))
             .unwrap_or(self.dims)
     }
 
@@ -65,9 +105,10 @@ impl EmbeddingBackend for FallbackBackend {
     }
 
     fn model_name(&self) -> &str {
-        self.inner
+        self.primary
             .as_ref()
             .map(|b| b.model_name())
+            .or_else(|| self.fallback.as_ref().map(|b| b.model_name()))
             .unwrap_or("none")
     }
 }
@@ -108,5 +149,30 @@ mod tests {
     fn model_name_without_backend() {
         let backend = FallbackBackend::none(384);
         assert_eq!(backend.model_name(), "none");
+    }
+
+    #[test]
+    fn api_with_local_fallback_uses_primary() {
+        let primary = Box::new(NoopBackend::new(384));
+        let local = Box::new(NoopBackend::new(384));
+        let backend = FallbackBackend::api_with_local_fallback(primary, local);
+
+        assert!(backend.is_available());
+        let vec = backend.embed("test").expect("embed");
+        assert_eq!(vec.len(), 384);
+    }
+
+    #[test]
+    fn fallback_when_primary_unavailable() {
+        // Primary is None, fallback is available
+        let backend = FallbackBackend {
+            primary: None,
+            fallback: Some(Box::new(NoopBackend::new(384))),
+            dims: 384,
+        };
+
+        assert!(backend.is_available());
+        let vec = backend.embed("test").expect("should use fallback");
+        assert_eq!(vec.len(), 384);
     }
 }
