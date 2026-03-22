@@ -2,6 +2,8 @@
 //!
 //! Works with DeepInfra, OpenAI, Together AI, or any provider using the
 //! OpenAI embeddings API format. Feature-gated behind `api-embeddings`.
+//!
+//! Uses ureq (sync HTTP) to avoid tokio runtime conflicts.
 
 #[cfg(feature = "api-embeddings")]
 mod inner {
@@ -11,9 +13,9 @@ mod inner {
     /// Embedding backend using an OpenAI-compatible API endpoint.
     ///
     /// Sends POST requests to `{base_url}/embeddings` with the standard format.
-    /// Uses reqwest blocking client (sync, matches EmbeddingBackend trait).
+    /// Uses ureq (sync HTTP client) — no tokio runtime conflicts.
     pub struct ApiBackend {
-        client: reqwest::blocking::Client,
+        agent: ureq::Agent,
         base_url: String,
         api_key: String,
         model: String,
@@ -22,11 +24,6 @@ mod inner {
 
     impl ApiBackend {
         /// Create a new API embedding backend.
-        ///
-        /// - `base_url`: API base URL (e.g., "https://api.deepinfra.com/v1/openai")
-        /// - `api_key`: Bearer token for authentication
-        /// - `model`: Model name (e.g., "sentence-transformers/all-MiniLM-L6-v2")
-        /// - `dimensions`: Expected embedding dimensions (384 for MiniLM)
         pub fn new(
             base_url: impl Into<String>,
             api_key: impl Into<String>,
@@ -34,7 +31,7 @@ mod inner {
             dimensions: usize,
         ) -> Self {
             Self {
-                client: reqwest::blocking::Client::new(),
+                agent: ureq::Agent::new(),
                 base_url: base_url.into().trim_end_matches('/').to_string(),
                 api_key: api_key.into(),
                 model: model.into(),
@@ -43,9 +40,6 @@ mod inner {
         }
 
         /// Create from a base URL and a command that produces the API key.
-        ///
-        /// Runs the command at construction time and captures stdout as the key.
-        /// Useful for fetching keys from 1Password, macOS Keychain, etc.
         pub fn with_key_cmd(
             base_url: impl Into<String>,
             key_cmd: &str,
@@ -90,20 +84,14 @@ mod inner {
                 "encoding_format": "float",
             });
 
-            let response = self.client
+            let response = self.agent
                 .post(&url)
-                .bearer_auth(&self.api_key)
-                .json(&body)
-                .send()
+                .set("Authorization", &format!("Bearer {}", self.api_key))
+                .set("Content-Type", "application/json")
+                .send_json(&body)
                 .map_err(|e| MindCoreError::Embedding(format!("API request failed: {e}")))?;
 
-            if !response.status().is_success() {
-                let status = response.status();
-                let body = response.text().unwrap_or_default();
-                return Err(MindCoreError::Embedding(format!("API error {status}: {body}")));
-            }
-
-            let resp: ApiResponse = response.json()
+            let resp: ApiResponse = response.into_json()
                 .map_err(|e| MindCoreError::Embedding(format!("API response parse: {e}")))?;
 
             // Sort by index to maintain input order
@@ -136,7 +124,6 @@ mod inner {
         }
 
         fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-            // API endpoints typically handle batching well, but cap at 256 per request
             const MAX_BATCH: usize = 256;
 
             let mut all_results = Vec::with_capacity(texts.len());

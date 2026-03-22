@@ -29,7 +29,7 @@ local-embeddings = [
 ]
 
 # API embeddings — OpenAI-compatible /v1/embeddings endpoint (DeepInfra, etc.)
-api-embeddings = ["dep:reqwest"]
+api-embeddings = ["dep:ureq"]
 
 vector-search = ["local-embeddings", "dep:tokio"]
 
@@ -96,8 +96,8 @@ candle-transformers = { version = "0.9", optional = true }
 tokenizers = { version = "0.22", optional = true, default-features = false, features = ["onig"] }
 hf-hub = { version = "0.4", optional = true }
 
-# API embeddings (OpenAI-compatible endpoint)
-reqwest = { version = "0.12", features = ["json", "blocking"], optional = true }
+# API embeddings (OpenAI-compatible endpoint) — ureq is sync, no tokio conflicts
+ureq = { version = "2", features = ["json"], optional = true }
 
 # MCP server
 axum = { version = "0.7", optional = true }
