@@ -247,7 +247,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         Ok((with_embeddings as u64, total))
     }
 
-    /// Multi-query search: run original query + key-phrase variant, merge and deduplicate.
+    /// Multi-query search: run original + key-phrase variant, merge, diversify.
     fn multi_query_search(
         &self,
         query: &str,
@@ -282,10 +282,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let mut merged: Vec<_> = best.into_values().collect();
         merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Diversification: limit to max 3 results per session (by metadata session_date)
+        // Diversification: max 1 chunk per session for maximum coverage
         let mut session_counts: HashMap<String, usize> = HashMap::new();
         let diversified: Vec<_> = merged.into_iter().filter(|r| {
-            // Load session_date from metadata
             let session_key = self.db.with_reader(|conn| {
                 conn.query_row(
                     "SELECT metadata_json FROM memories WHERE id = ?1",
@@ -299,7 +298,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
             let count = session_counts.entry(session_key).or_insert(0);
             *count += 1;
-            *count <= 1 // Maximum diversity
+            *count <= 1
         }).collect();
 
         Ok(diversified)
