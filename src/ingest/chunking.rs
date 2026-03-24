@@ -48,6 +48,44 @@ pub fn chunk_session<'a>(
 
         let line = format!("{role}: {content}\n");
 
+        // If the line itself exceeds target, split it into sub-chunks
+        if line.len() > target_chars * 2 {
+            // Flush any accumulated text first
+            if !current_text.is_empty() {
+                chunks.push(SessionChunk {
+                    text: format!("{date_prefix}{current_text}"),
+                    turn_count: current_turns,
+                });
+                current_text.clear();
+                current_turns = 0;
+            }
+
+            // Split the long line by newlines (for fact lists) or by target_chars
+            let mut remaining = line.as_str();
+            while !remaining.is_empty() {
+                let split_at = if remaining.len() <= target_chars {
+                    remaining.len()
+                } else {
+                    // Try to split at a newline near the target
+                    let search_range = &remaining[..target_chars.min(remaining.len())];
+                    search_range.rfind('\n')
+                        .map(|p| p + 1)
+                        .or_else(|| search_range.rfind(' ').map(|p| p + 1))
+                        .unwrap_or(target_chars.min(remaining.len()))
+                };
+
+                let chunk_text = &remaining[..split_at];
+                if chunk_text.trim().len() >= min_turn_chars {
+                    chunks.push(SessionChunk {
+                        text: format!("{date_prefix}{chunk_text}"),
+                        turn_count: 1,
+                    });
+                }
+                remaining = &remaining[split_at..];
+            }
+            continue;
+        }
+
         // If adding this turn would exceed target, flush current chunk
         if !current_text.is_empty() && current_text.len() + line.len() > target_chars {
             chunks.push(SessionChunk {
