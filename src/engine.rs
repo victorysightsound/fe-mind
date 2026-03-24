@@ -317,35 +317,38 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
         merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Graph expansion: follow edges from top results to find connected memories
+        // Graph filtering: demote results that have been superseded by newer facts.
+        // If memory A has a SupersededBy edge to memory B, A is outdated — reduce its score.
         if config.graph_depth > 0 {
-            use crate::memory::GraphMemory;
-            let top_ids: Vec<i64> = merged.iter().take(20).map(|r| r.memory_id).collect();
-            let mut graph_results = Vec::new();
+            use crate::memory::{GraphMemory, RelationType};
 
-            for id in &top_ids {
-                if let Ok(nodes) = GraphMemory::traverse(&self.db, *id, config.graph_depth) {
-                    for node in nodes {
-                        // Don't add if already in results
-                        if !merged.iter().any(|r| r.memory_id == node.memory_id)
-                           && !graph_results.iter().any(|r: &crate::search::builder::SearchResult| r.memory_id == node.memory_id) {
-                            // Score based on the source result's score, decayed by hop distance
-                            let source_score = merged.iter()
-                                .find(|r| r.memory_id == *id)
-                                .map(|r| r.score)
-                                .unwrap_or(0.0);
-                            graph_results.push(crate::search::builder::SearchResult {
-                                memory_id: node.memory_id,
-                                score: source_score * GraphMemory::depth_boost(node.depth),
-                            });
-                        }
-                    }
+            let mut superseded_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+
+            // Check each result: does anything supersede it?
+            for r in &merged {
+                // Look for incoming SupersededBy edges (this memory IS the old one)
+                let is_superseded = self.db.with_reader(|conn| {
+                    let count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM memory_relations
+                         WHERE source_id = ?1 AND relation = 'superseded_by'",
+                        [r.memory_id],
+                        |row| row.get(0),
+                    ).unwrap_or(0);
+                    Ok::<bool, crate::error::MindCoreError>(count > 0)
+                }).unwrap_or(false);
+
+                if is_superseded {
+                    superseded_ids.insert(r.memory_id);
                 }
             }
 
-            if !graph_results.is_empty() {
-                tracing::debug!("Graph expansion added {} results from {} top hits", graph_results.len(), top_ids.len());
-                merged.extend(graph_results);
+            if !superseded_ids.is_empty() {
+                tracing::debug!("Graph filtering: {} results demoted as superseded", superseded_ids.len());
+                for r in &mut merged {
+                    if superseded_ids.contains(&r.memory_id) {
+                        r.score *= 0.1; // Heavily demote outdated facts
+                    }
+                }
                 merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
             }
         }
