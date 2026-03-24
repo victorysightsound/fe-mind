@@ -1,4 +1,4 @@
-# Task: Make diversification limit configurable on MemoryEngine::assemble_context and multi_query_search. Add max_per_session parameter (default: 1). Pass through from ContextBudget or a new AssemblyConfig struct. Update adapter to set per-dataset.
+# Task: Add recency weighting to search scoring. After RRF merge in execute_hybrid, boost results by position in document (later = higher score). Use chunk_index from metadata or created_at timestamp. Make the boost factor configurable (default: moderate, e.g. 1.0 + 0.3 * position_ratio).
 
 ## ⚠️ SIGNS (Critical Rules)
 

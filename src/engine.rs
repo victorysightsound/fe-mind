@@ -281,6 +281,40 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
 
         let mut merged: Vec<_> = best.into_values().collect();
+
+        // Recency weighting: boost later chunks (higher turn_index = more recent)
+        if config.recency_boost > 0.0 {
+            // Find max turn_index across all results for normalization
+            let max_index = merged.iter().filter_map(|r| {
+                self.db.with_reader(|conn| {
+                    conn.query_row(
+                        "SELECT metadata_json FROM memories WHERE id = ?1",
+                        [r.memory_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    ).map_err(|e| crate::error::MindCoreError::Database(e))
+                }).ok().flatten().and_then(|json| {
+                    serde_json::from_str::<HashMap<String, String>>(&json).ok()
+                }).and_then(|meta| meta.get("turn_index").and_then(|v| v.parse::<f32>().ok()))
+            }).fold(1.0_f32, f32::max);
+
+            for r in &mut merged {
+                let turn_index = self.db.with_reader(|conn| {
+                    conn.query_row(
+                        "SELECT metadata_json FROM memories WHERE id = ?1",
+                        [r.memory_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    ).map_err(|e| crate::error::MindCoreError::Database(e))
+                }).ok().flatten().and_then(|json| {
+                    serde_json::from_str::<HashMap<String, String>>(&json).ok()
+                }).and_then(|meta| meta.get("turn_index").and_then(|v| v.parse::<f32>().ok()))
+                .unwrap_or(0.0);
+
+                // position_ratio: 0.0 (oldest) to 1.0 (newest)
+                let position_ratio = turn_index / max_index;
+                r.score *= 1.0 + config.recency_boost * position_ratio;
+            }
+        }
+
         merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
         // Diversification: limit chunks per session (0 = unlimited)
