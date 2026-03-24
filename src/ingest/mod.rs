@@ -1,4 +1,5 @@
 pub mod chunking;
+pub mod fact_extraction;
 mod passthrough;
 
 pub use passthrough::PassthroughIngest;

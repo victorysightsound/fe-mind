@@ -1,4 +1,4 @@
-# Task: Add recency weighting to search scoring. After RRF merge in execute_hybrid, boost results by position in document (later = higher score). Use chunk_index from metadata or created_at timestamp. Make the boost factor configurable (default: moderate, e.g. 1.0 + 0.3 * position_ratio).
+# Task: Build graph extraction pipeline: parse MAB fact list statements into entity triples using Haiku via CLI. Input: cached session text. Output: (subject, relationship, object) triples stored in memory_relations table. Handle MAB's numbered fact format ('N. Subject relationship Object.'). Batch facts for efficiency.
 
 ## ⚠️ SIGNS (Critical Rules)
 
