@@ -1,4 +1,4 @@
-# Task: Switch CandleNativeBackend from granite ModernBERT to all-MiniLM-L6-v2 BERT: change MODEL_REPO, MODEL_NAME, model import from candle_transformers::models::modernbert to candle_transformers::models::bert, update tensor key renaming for sentence-transformers BERT naming, verify mean pooling + L2 norm still correct for MiniLM.
+# Task: Make diversification limit configurable on MemoryEngine::assemble_context and multi_query_search. Add max_per_session parameter (default: 1). Pass through from ContextBudget or a new AssemblyConfig struct. Update adapter to set per-dataset.
 
 ## ⚠️ SIGNS (Critical Rules)
 

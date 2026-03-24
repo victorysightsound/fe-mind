@@ -251,8 +251,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     fn multi_query_search(
         &self,
         query: &str,
-        limit: usize,
+        config: &crate::context::AssemblyConfig,
     ) -> Result<Vec<crate::search::builder::SearchResult>> {
+        let limit = config.search_limit;
         use std::collections::HashMap;
         use crate::search::fts5::strip_stop_words;
 
@@ -282,39 +283,56 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let mut merged: Vec<_> = best.into_values().collect();
         merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Diversification: max 1 chunk per session for maximum coverage
-        let mut session_counts: HashMap<String, usize> = HashMap::new();
-        let diversified: Vec<_> = merged.into_iter().filter(|r| {
-            let session_key = self.db.with_reader(|conn| {
-                conn.query_row(
-                    "SELECT metadata_json FROM memories WHERE id = ?1",
-                    [r.memory_id],
-                    |row| row.get::<_, Option<String>>(0),
-                ).map_err(|e| crate::error::MindCoreError::Database(e))
-            }).ok().flatten().and_then(|json| {
-                serde_json::from_str::<HashMap<String, String>>(&json).ok()
-            }).and_then(|meta| meta.get("session_date").cloned())
-            .unwrap_or_else(|| format!("unknown_{}", r.memory_id));
+        // Diversification: limit chunks per session (0 = unlimited)
+        let max_per = config.max_per_session;
+        let diversified: Vec<_> = if max_per == 0 {
+            merged // No diversification
+        } else {
+            let mut session_counts: HashMap<String, usize> = HashMap::new();
+            merged.into_iter().filter(|r| {
+                let session_key = self.db.with_reader(|conn| {
+                    conn.query_row(
+                        "SELECT metadata_json FROM memories WHERE id = ?1",
+                        [r.memory_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    ).map_err(|e| crate::error::MindCoreError::Database(e))
+                }).ok().flatten().and_then(|json| {
+                    serde_json::from_str::<HashMap<String, String>>(&json).ok()
+                }).and_then(|meta| meta.get("session_date").cloned())
+                .unwrap_or_else(|| format!("unknown_{}", r.memory_id));
 
-            let count = session_counts.entry(session_key).or_insert(0);
-            *count += 1;
-            *count <= 1
-        }).collect();
+                let count = session_counts.entry(session_key).or_insert(0);
+                *count += 1;
+                *count <= max_per
+            }).collect()
+        };
 
         Ok(diversified)
     }
 
     /// Assemble context for an LLM prompt within a token budget.
     ///
-    /// Searches for relevant memories, converts them to context items,
-    /// and assembles within the budget using priority-ranked selection.
+    /// Uses default AssemblyConfig (max 1/session, no recency boost).
     pub fn assemble_context(
         &self,
         query: &str,
         budget: &ContextBudget,
     ) -> Result<ContextAssembly> {
+        self.assemble_context_with_config(query, budget, &crate::context::AssemblyConfig::default())
+    }
+
+    /// Assemble context with custom assembly configuration.
+    ///
+    /// Allows tuning diversification, recency weighting, and search limits
+    /// per dataset or question type.
+    pub fn assemble_context_with_config(
+        &self,
+        query: &str,
+        budget: &ContextBudget,
+        config: &crate::context::AssemblyConfig,
+    ) -> Result<ContextAssembly> {
         // Multi-query retrieval: run original + key-phrase variant, merge results
-        let results = self.multi_query_search(query, 200)?;
+        let results = self.multi_query_search(query, config)?;
 
         // Convert search results to context items
         let candidates: Vec<ContextItem> = results

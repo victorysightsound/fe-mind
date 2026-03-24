@@ -8,6 +8,54 @@ pub const PRIORITY_SIMILAR: u8 = 25;
 pub const PRIORITY_LEARNING: u8 = 40;
 pub const PRIORITY_HISTORICAL: u8 = 60;
 
+/// Configuration for context assembly behavior.
+#[derive(Debug, Clone)]
+pub struct AssemblyConfig {
+    /// Maximum chunks per session in search results (0 = unlimited).
+    /// Use 1 for multi-session queries (spread across sessions).
+    /// Use 0 for single-document queries (focus on one session).
+    pub max_per_session: usize,
+
+    /// Recency boost factor. Chunks later in a session get a score boost.
+    /// 0.0 = no boost, 0.3 = moderate (30% boost for latest content).
+    pub recency_boost: f32,
+
+    /// Search result limit for multi-query search.
+    pub search_limit: usize,
+}
+
+impl Default for AssemblyConfig {
+    fn default() -> Self {
+        Self {
+            max_per_session: 1,
+            recency_boost: 0.0,
+            search_limit: 200,
+        }
+    }
+}
+
+impl AssemblyConfig {
+    /// Configuration optimized for multi-session retrieval (LongMemEval style).
+    /// Max diversity across sessions, no recency bias.
+    pub fn multi_session() -> Self {
+        Self {
+            max_per_session: 1,
+            recency_boost: 0.0,
+            search_limit: 200,
+        }
+    }
+
+    /// Configuration optimized for single-document fact retrieval (MAB style).
+    /// No session limit, moderate recency boost for contradicting facts.
+    pub fn single_document() -> Self {
+        Self {
+            max_per_session: 0, // unlimited
+            recency_boost: 0.3,
+            search_limit: 200,
+        }
+    }
+}
+
 /// Token budget configuration for context assembly.
 #[derive(Debug, Clone)]
 pub struct ContextBudget {
