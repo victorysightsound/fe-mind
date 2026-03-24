@@ -317,6 +317,39 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
         merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
+        // Graph expansion: follow edges from top results to find connected memories
+        if config.graph_depth > 0 {
+            use crate::memory::GraphMemory;
+            let top_ids: Vec<i64> = merged.iter().take(20).map(|r| r.memory_id).collect();
+            let mut graph_results = Vec::new();
+
+            for id in &top_ids {
+                if let Ok(nodes) = GraphMemory::traverse(&self.db, *id, config.graph_depth) {
+                    for node in nodes {
+                        // Don't add if already in results
+                        if !merged.iter().any(|r| r.memory_id == node.memory_id)
+                           && !graph_results.iter().any(|r: &crate::search::builder::SearchResult| r.memory_id == node.memory_id) {
+                            // Score based on the source result's score, decayed by hop distance
+                            let source_score = merged.iter()
+                                .find(|r| r.memory_id == *id)
+                                .map(|r| r.score)
+                                .unwrap_or(0.0);
+                            graph_results.push(crate::search::builder::SearchResult {
+                                memory_id: node.memory_id,
+                                score: source_score * GraphMemory::depth_boost(node.depth),
+                            });
+                        }
+                    }
+                }
+            }
+
+            if !graph_results.is_empty() {
+                tracing::debug!("Graph expansion added {} results from {} top hits", graph_results.len(), top_ids.len());
+                merged.extend(graph_results);
+                merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            }
+        }
+
         // Diversification: limit chunks per session (0 = unlimited)
         let max_per = config.max_per_session;
         let diversified: Vec<_> = if max_per == 0 {

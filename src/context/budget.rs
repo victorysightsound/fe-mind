@@ -22,6 +22,11 @@ pub struct AssemblyConfig {
 
     /// Search result limit for multi-query search.
     pub search_limit: usize,
+
+    /// Enable graph expansion: after initial search, traverse graph edges
+    /// to pull in connected memories. Depth controls how many hops to follow.
+    /// 0 = disabled, 1 = direct connections only, 2+ = multi-hop.
+    pub graph_depth: u32,
 }
 
 impl Default for AssemblyConfig {
@@ -30,6 +35,7 @@ impl Default for AssemblyConfig {
             max_per_session: 1,
             recency_boost: 0.0,
             search_limit: 200,
+            graph_depth: 0,
         }
     }
 }
@@ -42,16 +48,18 @@ impl AssemblyConfig {
             max_per_session: 1,
             recency_boost: 0.0,
             search_limit: 200,
+            graph_depth: 0,
         }
     }
 
     /// Configuration optimized for single-document fact retrieval (MAB style).
-    /// No session limit, moderate recency boost for contradicting facts.
+    /// No session limit, moderate recency boost, graph expansion enabled.
     pub fn single_document() -> Self {
         Self {
             max_per_session: 0, // unlimited
             recency_boost: 0.3,
             search_limit: 200,
+            graph_depth: 2, // follow entity chains up to 2 hops
         }
     }
 }

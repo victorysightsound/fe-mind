@@ -1,4 +1,4 @@
-# Task: Build graph extraction pipeline: parse MAB fact list statements into entity triples using Haiku via CLI. Input: cached session text. Output: (subject, relationship, object) triples stored in memory_relations table. Handle MAB's numbered fact format ('N. Subject relationship Object.'). Batch facts for efficiency.
+# Task: Connect graph traversal to search pipeline: after initial vector+FTS5 search finds chunks, expand results by following graph edges from entities mentioned in top results. Pull in chunks containing related entities. Add as optional step in multi_query_search controlled by AssemblyConfig.
 
 ## ⚠️ SIGNS (Critical Rules)
 
@@ -60,3 +60,5 @@ warn
 - [build] Candle inference in debug mode is ~100x slower than optimized. Add [profile.dev.package.candle-core] opt-level = 2 (and similar for candle-nn, tokenizers, gemm, half) to make dev builds usable.
 
 - [gotcha] FTS5 interprets hyphens in queries as column filters — 'faith-related' becomes 'faith:related' causing 'no such column' errors. Must replace ALL hyphens with spaces in sanitizer.
+
+- [pattern] MAB fact lists can be parsed with regex at 98.7% accuracy — no LLM needed for structured fact extraction. Only need LLM for conversational text (LongMemEval).
