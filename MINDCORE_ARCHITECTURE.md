@@ -1,10 +1,133 @@
 # MindCore: Universal Memory Engine Architecture
 
-**Version:** 0.1.0 (Released)
-**Date:** 2026-03-16
-**Status:** v0.1.0 published on crates.io
+**Version:** 0.3.0-dev
+**Updated:** 2026-03-25
+**Status:** Production pipeline built, pre-release
 
 ---
+
+## Current Pipeline (2026-03-25)
+
+### Ingest Modes
+
+**1. LLM Extraction (production mode):**
+```
+Raw text → LlmCallback → extract facts → store each fact as individual memory
+  → compute embedding → create graph edges (SupersededBy, RelatedTo)
+  → deduplicate via content hash
+```
+Method: `engine.store_with_extraction(text, llm)`
+
+**2. Chunk-based (benchmark/no-LLM mode):**
+```
+Session text → chunk at configurable size → store each chunk as memory
+  → batch compute embeddings → diversify by session
+```
+Method: `engine.store(record)` / `engine.store_batch(records)`
+
+### Search Pipeline
+```
+Query → multi-query (original + key-phrases)
+  → Hybrid: FTS5 OR-mode + vector similarity + RRF fusion
+  → Graph filtering: demote superseded results (if graph_enabled)
+  → Recency weighting (configurable)
+  → Session diversification (configurable limit)
+  → Context assembly within token budget
+```
+Method: `engine.assemble_context(query, budget)` or `engine.assemble_context_with_config(query, budget, config)`
+
+### Runtime Feature Toggles (EngineConfig)
+
+| Toggle | Controls | Default |
+|--------|----------|---------|
+| `embedding_enabled` | Vector embedding at store time | true |
+| `graph_enabled` | Graph edge creation + search filtering | true |
+| `dedup_enabled` | Content hash deduplication | true |
+| `vector_search_mode` | "exact" / "ann" / "off" | "exact" |
+
+### Search Tuning (AssemblyConfig)
+
+| Setting | Controls | Default |
+|---------|----------|---------|
+| `max_per_session` | Diversification (0=unlimited, 1=max diversity) | 1 |
+| `recency_boost` | Score boost for newer content (0.0-1.0) | 0.0 |
+| `search_limit` | Max results from multi-query search | 200 |
+| `graph_depth` | Graph traversal hops (0=off) | 0 |
+
+### Presets
+- `AssemblyConfig::multi_session()` — max 1/session, no recency (LongMemEval)
+- `AssemblyConfig::single_document()` — unlimited, 0.3 recency (MAB)
+
+### Embedding Backends
+
+| Backend | Feature | Usage |
+|---------|---------|-------|
+| `CandleNativeBackend` | `local-embeddings` | all-MiniLM-L6-v2 via Candle BERT, local CPU |
+| `ApiBackend` | `api-embeddings` | DeepInfra/OpenAI-compatible /v1/embeddings |
+| `FallbackBackend` | — | API-first with local fallback |
+| `NoopBackend` | — | Zero vectors for testing |
+
+### LLM Backends
+
+| Backend | Feature | Usage |
+|---------|---------|-------|
+| `ApiLlmCallback` | `api-llm` | DeepInfra/OpenAI-compatible /v1/chat/completions |
+| `CliLlmCallback` | `cli-llm` | Claude/ChatGPT/Gemini via CLI |
+
+### ANN Vector Search
+
+| Mode | Feature | Implementation |
+|------|---------|---------------|
+| `"exact"` | — | Brute-force cosine similarity (default) |
+| `"ann"` | `ann` | HNSW via instant-distance (built, not yet wired into hybrid path) |
+| `"off"` | — | FTS5 keyword search only |
+
+### Compile-Time Feature Flags
+
+```toml
+local-embeddings   # CandleNativeBackend (MiniLM local)
+api-embeddings     # ApiBackend (DeepInfra embedding API)
+api-llm            # ApiLlmCallback (chat completions API)
+cli-llm            # CliLlmCallback (CLI tools)
+llm-ingest         # LlmIngest extraction strategy
+vector-search      # local-embeddings + tokio
+graph-memory       # Graph relationship tables
+ann                # HNSW approximate nearest neighbor
+reranking          # Cross-encoder reranking (candle BERT)
+temporal           # Temporal validity fields
+consolidation      # Consolidation pipeline
+activation-model   # ACT-R cognitive decay
+two-tier           # Global + project databases
+encryption         # SQLCipher encryption at rest
+keychain           # OS keychain for encryption keys
+mcp-server         # MCP server interface
+full               # Everything except encryption/mcp-server
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/engine.rs` | MemoryEngine, EngineConfig, store/search/extract |
+| `src/context/budget.rs` | AssemblyConfig, ContextBudget, ContextAssembly |
+| `src/traits/llm.rs` | LlmCallback trait |
+| `src/llm/api.rs` | ApiLlmCallback (OpenAI-compatible) |
+| `src/llm/cli.rs` | CliLlmCallback (CLI tools) |
+| `src/ingest/llm_extract.rs` | LLM fact extraction prompts + parser |
+| `src/ingest/fact_extraction.rs` | Regex fact parser (structured data) |
+| `src/ingest/chunking.rs` | Session chunking with overlap |
+| `src/search/builder.rs` | SearchBuilder, hybrid search, RRF |
+| `src/search/vector.rs` | Brute-force vector search |
+| `src/search/ann.rs` | HNSW approximate nearest neighbor |
+| `src/search/fts5.rs` | FTS5 keyword search, stop words, sanitizer |
+| `src/search/hybrid.rs` | RRF merge with dynamic k-values |
+| `src/memory/relations.rs` | GraphMemory, RelationType, traversal |
+| `src/embeddings/candle_native.rs` | all-MiniLM-L6-v2 local backend |
+| `src/embeddings/api.rs` | OpenAI-compatible embedding API |
+
+---
+
+## Original Architecture (below this line may be outdated)
 
 ## Overview
 
