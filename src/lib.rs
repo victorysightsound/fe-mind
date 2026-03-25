@@ -42,6 +42,7 @@ pub mod embeddings;
 pub mod engine;
 pub mod error;
 pub mod ingest;
+pub mod llm;
 pub mod memory;
 pub mod scoring;
 pub mod search;

@@ -31,6 +31,12 @@ local-embeddings = [
 # API embeddings — OpenAI-compatible /v1/embeddings endpoint (DeepInfra, etc.)
 api-embeddings = ["dep:ureq"]
 
+# API LLM — OpenAI-compatible /v1/chat/completions endpoint
+api-llm = ["dep:ureq"]
+
+# LLM-powered ingest (fact extraction, consolidation)
+llm-ingest = []
+
 vector-search = ["local-embeddings", "dep:tokio"]
 
 # ANN indexing for >100K scale
@@ -68,6 +74,8 @@ keychain = ["dep:keyring"]
 full = [
     "vector-search",
     "api-embeddings",
+    "api-llm",
+    "llm-ingest",
     "reranking",
     "graph-memory",
     "temporal",

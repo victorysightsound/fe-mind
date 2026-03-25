@@ -1,4 +1,4 @@
-# Task: Build LlmIngest extraction strategy: src/ingest/llm_extract.rs. Takes raw text + LlmCallback, crafts extraction prompt, calls LLM, parses response into structured ExtractedFact items (text, category, importance, entities, relationships). Feature-gated behind 'llm-ingest' flag. Extraction prompt should request: facts, decisions, preferences, entities, and relationships between entities.
+# Task: Build ApiLlmCallback: OpenAI-compatible /v1/chat/completions endpoint using ureq (sync). Takes base_url, api_key, model. Supports DeepInfra, OpenAI, Together, local vLLM. Feature-gated behind 'api-llm'. Similar pattern to ApiBackend for embeddings.
 
 ## ⚠️ SIGNS (Critical Rules)
 
