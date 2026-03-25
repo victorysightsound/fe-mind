@@ -1,4 +1,4 @@
-# Task: Review existing LlmCallback trait in src/traits/evolution.rs. Verify it has generate() method. If needed, refactor into a standalone trait in src/traits/llm.rs that both extraction and evolution can use. Ensure it supports sync and async patterns.
+# Task: Build LlmIngest extraction strategy: src/ingest/llm_extract.rs. Takes raw text + LlmCallback, crafts extraction prompt, calls LLM, parses response into structured ExtractedFact items (text, category, importance, entities, relationships). Feature-gated behind 'llm-ingest' flag. Extraction prompt should request: facts, decisions, preferences, entities, and relationships between entities.
 
 ## ⚠️ SIGNS (Critical Rules)
 
