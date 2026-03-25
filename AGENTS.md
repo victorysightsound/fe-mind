@@ -103,3 +103,11 @@ dial stats            # Statistics dashboard
 dial config set build_cmd "your build command"
 dial config set test_cmd "your test command"
 ```
+
+---
+
+## External-Facing Writing
+
+- Keep README files, architecture docs, changelogs, commit messages, PR text, and code comments in normal developer voice.
+- Do not describe implementation work in terms of agent runs, autonomous loops, model names, or internal AI workflow mechanics.
+- Mention AI, LLMs, embeddings, or memory orchestration only when they are part of the actual MindCore product surface being documented.
