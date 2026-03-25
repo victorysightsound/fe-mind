@@ -1,4 +1,4 @@
-# Task: Connect graph traversal to search pipeline: after initial vector+FTS5 search finds chunks, expand results by following graph edges from entities mentioned in top results. Pull in chunks containing related entities. Add as optional step in multi_query_search controlled by AssemblyConfig.
+# Task: Review existing LlmCallback trait in src/traits/evolution.rs. Verify it has generate() method. If needed, refactor into a standalone trait in src/traits/llm.rs that both extraction and evolution can use. Ensure it supports sync and async patterns.
 
 ## ⚠️ SIGNS (Critical Rules)
 
