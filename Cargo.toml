@@ -42,8 +42,8 @@ llm-ingest = []
 
 vector-search = ["local-embeddings", "dep:tokio"]
 
-# ANN indexing for >100K scale
-# vector-indexed = ["vector-search", "dep:sqlite-vec"]  # TBD: Rust bindings maturity
+# ANN indexing — HNSW approximate nearest neighbor via instant-distance
+ann = ["dep:instant-distance"]
 
 # Cross-encoder reranking (post-RRF refinement, uses candle BERT)
 reranking = ["local-embeddings"]
@@ -80,6 +80,7 @@ full = [
     "api-llm",
     "cli-llm",
     "llm-ingest",
+    "ann",
     "reranking",
     "graph-memory",
     "temporal",
@@ -110,6 +111,9 @@ hf-hub = { version = "0.4", optional = true }
 
 # API embeddings (OpenAI-compatible endpoint) — ureq is sync, no tokio conflicts
 ureq = { version = "2", features = ["json"], optional = true }
+
+# ANN indexing (HNSW)
+instant-distance = { version = "0.6", optional = true }
 
 # MCP server
 axum = { version = "0.7", optional = true }
