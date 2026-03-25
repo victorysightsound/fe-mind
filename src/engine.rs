@@ -15,6 +15,36 @@ use crate::storage::Database;
 use crate::storage::migrations;
 use crate::traits::{MemoryRecord, ScoringStrategy};
 
+/// Runtime feature configuration for MindCore.
+///
+/// Controls which features are active. All toggles are independent —
+/// any combination is valid. Defaults to all features enabled.
+#[derive(Debug, Clone)]
+pub struct EngineConfig {
+    /// Enable vector embedding at store time.
+    pub embedding_enabled: bool,
+    /// Enable graph edge creation and traversal.
+    pub graph_enabled: bool,
+    /// Enable content hash deduplication on store.
+    pub dedup_enabled: bool,
+    /// Assembly configuration (diversification, recency, graph depth).
+    pub assembly: crate::context::AssemblyConfig,
+    /// Vector search mode: "ann" (default), "exact" (brute-force), "off".
+    pub vector_search_mode: String,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            embedding_enabled: true,
+            graph_enabled: true,
+            dedup_enabled: true,
+            assembly: crate::context::AssemblyConfig::default(),
+            vector_search_mode: "exact".to_string(), // brute-force until ANN is implemented
+        }
+    }
+}
+
 /// The primary interface to MindCore.
 ///
 /// Generic over the consumer's memory type `T: MemoryRecord`.
@@ -36,6 +66,8 @@ pub struct MemoryEngine<T: MemoryRecord> {
     store: MemoryStore<T>,
     scoring: Arc<dyn ScoringStrategy>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
+    /// Runtime feature configuration.
+    pub config: EngineConfig,
 }
 
 impl<T: MemoryRecord> MemoryEngine<T> {
@@ -728,6 +760,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             store: MemoryStore::new(),
             scoring,
             embedding: self.embedding,
+            config: EngineConfig::default(),
         })
     }
 }

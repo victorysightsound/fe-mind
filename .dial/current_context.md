@@ -1,4 +1,4 @@
-# Task: Integrate LlmIngest into MemoryEngine: add store_with_extraction() method that takes raw text + LlmCallback, extracts facts, stores each fact as individual memory, creates graph edges (related_to, superseded_by) between extracted facts. Deduplicates against existing memories via content hash.
+# Task: Add feature toggles to MemoryEngine: each feature independently configurable via EngineConfig. Toggles: llm_extraction (on/off), graph_edges (on/off), embedding (on/off), recency_weight (0.0-1.0), diversification_limit (0=unlimited), deduplication (on/off). All accessible at runtime.
 
 ## ⚠️ SIGNS (Critical Rules)
 
