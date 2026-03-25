@@ -34,6 +34,9 @@ api-embeddings = ["dep:ureq"]
 # API LLM — OpenAI-compatible /v1/chat/completions endpoint
 api-llm = ["dep:ureq"]
 
+# CLI LLM — Claude/ChatGPT/Gemini via command-line tools
+cli-llm = []
+
 # LLM-powered ingest (fact extraction, consolidation)
 llm-ingest = []
 
@@ -75,6 +78,7 @@ full = [
     "vector-search",
     "api-embeddings",
     "api-llm",
+    "cli-llm",
     "llm-ingest",
     "reranking",
     "graph-memory",

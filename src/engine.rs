@@ -160,7 +160,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         for record in records {
             let result = self.store.store(&self.db, record)?;
             if let StoreResult::Added(id) = &result {
-                if self.embedding.as_ref().is_some_and(|b| b.is_available()) {
+                if self.config.embedding_enabled && self.embedding.as_ref().is_some_and(|b| b.is_available()) {
                     let text = record.searchable_text();
                     if !text.trim().is_empty() {
                         let hash = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
@@ -250,8 +250,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     pub fn search(&self, query: &str) -> SearchBuilder<'_, T> {
         let mut builder = SearchBuilder::new(&self.db, query)
             .with_scoring(Arc::clone(&self.scoring));
-        if let Some(ref embedding) = self.embedding {
-            builder = builder.with_embedding(Arc::clone(embedding));
+        // A7: Only attach embedding backend if vector search is not "off"
+        if self.config.vector_search_mode != "off" {
+            if let Some(ref embedding) = self.embedding {
+                builder = builder.with_embedding(Arc::clone(embedding));
+            }
         }
         builder
     }
@@ -338,7 +341,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 }
             })?;
 
-            if existing_id.is_some() {
+            if self.config.dedup_enabled && existing_id.is_some() {
                 continue; // Skip duplicate
             }
 
@@ -374,7 +377,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 Ok(conn.last_insert_rowid())
             })?;
 
-            // Compute and store embedding
+            // Compute and store embedding (A3: gated by config)
+            if self.config.embedding_enabled {
             if let Some(ref backend) = self.embedding {
                 if backend.is_available() && !fact.text.trim().is_empty() {
                     let text = truncate_for_embedding(&fact.text);
@@ -390,11 +394,13 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     }
                 }
             }
+            } // config.embedding_enabled
 
             stored_ids.push((id, fact));
         }
 
-        // Step 3: Create graph edges for relationships
+        // Step 3: Create graph edges for relationships (A4: gated by config)
+        if self.config.graph_enabled {
         for (id, fact) in &stored_ids {
             for (subject, relation, _object) in &fact.relationships {
                 // Search existing memories for same subject + relation with different value
@@ -425,6 +431,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 }
             }
         }
+        } // config.graph_enabled
 
         Ok(extraction)
     }
@@ -515,8 +522,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
         // Graph filtering: demote results that have been superseded by newer facts.
-        // If memory A has a SupersededBy edge to memory B, A is outdated — reduce its score.
-        if config.graph_depth > 0 {
+        // Only if graph is enabled (A6: EngineConfig master switch + AssemblyConfig depth)
+        if self.config.graph_enabled && config.graph_depth > 0 {
             use crate::memory::{GraphMemory, RelationType};
 
             let mut superseded_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
