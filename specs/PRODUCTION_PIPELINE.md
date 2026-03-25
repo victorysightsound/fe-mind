@@ -1,186 +1,155 @@
-# MindCore Production Pipeline — Complete Memory System
+# MindCore Production Pipeline — Complete Build Spec
 
 ## Goal
 
-Build the complete production-ready memory engine pipeline: LLM extraction
-→ individual fact storage → graph edges → hybrid search with graph filtering.
-Every feature independently toggleable for testing and configuration.
+Build the complete production-ready memory engine with every feature
+independently toggleable. Build first, test later. No live LLM testing
+until the build is complete and approved.
 
-## Why This Matters
+## Current State (2026-03-25)
 
-Previous work optimized for benchmarks by chunking raw text without LLM
-extraction. This doesn't match production usage where:
-- An LLM processes each conversation and extracts individual facts
-- Each fact becomes its own memory with its own embedding
-- Graph edges connect related and superseded facts
-- Search uses graph to filter outdated facts and expand to related ones
+### Built ✓
+- LlmCallback trait (src/traits/llm.rs)
+- ApiLlmCallback — OpenAI-compatible /v1/chat/completions via ureq
+- CliLlmCallback — Claude/ChatGPT/Gemini via CLI
+- LlmIngest extraction — prompts + parser (src/ingest/llm_extract.rs)
+- Fact extraction — regex parser for structured facts (src/ingest/fact_extraction.rs)
+- store_with_extraction() — extracts facts, stores, creates graph edges
+- EngineConfig struct — has fields but NOT wired into operations
+- AssemblyConfig — diversification, recency, graph_depth, search_limit
+- Graph infrastructure — memory_relations table, GraphMemory CRUD, traversal
+- Hybrid search — FTS5 OR-mode + vector + RRF + multi-query
+- Embedding backends — CandleNativeBackend, ApiBackend, FallbackBackend
+- Retrieval test harness — zero-cost search quality measurement
+- Extraction test harness — LLM extraction quality measurement
+- Pipeline test harness — structure only, no CLI subcommand
+- Session cache — raw dataset storage
+- Embedding cache — per chunk size
 
-Graph doesn't work at chunk level (1000-char blocks mix old+new facts).
-It only works at individual fact level. MAB Conflict Resolution proved
-this — graph expansion at chunk level hurt accuracy (50%→30%).
+### NOT Built ✗
+1. EngineConfig toggles not wired into store() — embedding always runs
+2. EngineConfig toggles not wired into store_with_extraction() — graph/dedup always run
+3. EngineConfig toggles not wired into search — graph filtering always checks depth from AssemblyConfig, not EngineConfig.graph_enabled
+4. cli-llm feature flag missing from Cargo.toml
+5. ANN indexing — not started (vector_search_mode field exists but does nothing)
+6. Pipeline test harness — no CLI subcommand, no actual implementation
+7. Extraction model not configurable — hardcoded in main.rs
+8. store_with_extraction() ExtractionResult doesn't match spec (returns llm_extract::ExtractionResult, not the spec's struct)
+9. Architecture documentation not updated
 
-## Architecture
+## Build Tasks
 
-### Ingest Flow
-```
-Raw text (conversation, document, note)
-  → LlmIngest: LLM extracts individual facts via LlmCallback trait
-    → Each fact stored as individual memory with embedding
-    → Graph edges: SupersededBy (contradictions), RelatedTo (same entity)
-    → Deduplication via content hash against existing memories
-```
+### Phase A: Wire Feature Toggles (no LLM, no API, pure code)
 
-### Search Flow
-```
-Query
-  → Multi-query: original + key-phrase variant
-  → Hybrid: FTS5 OR-mode + vector similarity + RRF fusion
-  → Graph filtering: demote superseded results, optionally expand via RelatedTo
-  → Recency weighting (configurable)
-  → Diversification (configurable per use case)
-  → Context assembly within token budget
-```
+**A1.** Wire `config.embedding_enabled` into `store()`:
+- If false, skip embedding computation after storing memory
+- FTS5 trigger still fires (text search always works)
 
-### Feature Toggles (EngineConfig)
-All independently configurable:
-- `llm_extraction`: on/off (falls back to passthrough/chunking when off)
-- `graph_edges`: on/off (skip graph creation/querying when off)
-- `embedding`: on/off (FTS5-only when off)
-- `recency_weight`: 0.0 to 1.0 (0.0 = disabled)
-- `diversification_limit`: 0 = unlimited, 1+ = max per session
-- `deduplication`: on/off
-- `vector_search_mode`: "ann" (default), "exact" (brute-force), "off"
+**A2.** Wire `config.embedding_enabled` into `store_batch()`:
+- Same as A1 but for the batch path
 
-## LlmCallback Trait
+**A3.** Wire `config.embedding_enabled` into `store_with_extraction()`:
+- If false, skip embedding for extracted facts
 
+**A4.** Wire `config.graph_enabled` into `store_with_extraction()`:
+- If false, skip graph edge creation after extraction
+
+**A5.** Wire `config.dedup_enabled` into `store()` and `store_with_extraction()`:
+- If false, skip content hash dedup check (allow duplicates)
+
+**A6.** Wire `config.graph_enabled` into `multi_query_search()`:
+- If false, skip graph filtering step even if AssemblyConfig.graph_depth > 0
+- EngineConfig.graph_enabled is the master switch
+
+**A7.** Wire `config.vector_search_mode` into hybrid search:
+- "off" → skip vector search entirely, FTS5 only
+- "exact" → current brute-force (default for now)
+- "ann" → placeholder that falls back to exact until ANN is built
+
+**A8.** Add `cli-llm` feature flag to Cargo.toml
+
+**A9.** Make extraction LLM configurable:
+- `mindcore-extract` system in recallbench should accept --extract-model flag
+- Remove hardcoded Llama model
+- Default to Haiku via CLI when no API model specified
+
+### Phase B: Fix API Contracts
+
+**B1.** Align store_with_extraction() return type with spec:
+- Return ExtractionResult with: facts_extracted, memories_stored,
+  duplicates_skipped, graph_edges_created, superseded_count
+
+**B2.** Add store_with_extraction() to handle large text splitting internally:
+- Already partially done, verify and add unit test
+
+**B3.** Consolidate AssemblyConfig fields into EngineConfig:
+- EngineConfig should hold recency_weight and diversification_limit
+  directly (not nested in assembly sub-struct)
+- Or keep AssemblyConfig but derive it from EngineConfig at search time
+
+### Phase C: ANN Indexing
+
+**C1.** Research sqlite-vec Rust bindings availability and maturity
+**C2.** Implement ANN search mode with fallback to exact
+**C3.** Add `ann` feature flag to Cargo.toml
+**C4.** Unit tests comparing ANN vs exact results
+
+### Phase D: Pipeline Test Harness Completion
+
+**D1.** Add `pipeline-test` CLI subcommand to recallbench
+**D2.** Implement modular pipeline: each step toggleable
+**D3.** Result saving with config snapshot (like retrieval test)
+
+### Phase E: Documentation
+
+**E1.** Update MINDCORE_ARCHITECTURE.md with complete pipeline
+**E2.** Update STATUS doc with final build state
+**E3.** Document all feature flags and their interactions
+
+---
+
+## GATE: Live LLM Testing
+
+After all build phases complete, STOP and get user approval before:
+- Running extraction on MAB with any LLM model
+- Running extraction on LongMemEval with any LLM model
+- Running any benchmark with LLM generation/judging
+
+The model choice for extraction must be approved by the user.
+
+---
+
+## Feature Toggles Reference
+
+### EngineConfig (runtime, per-engine)
 ```rust
-/// Trait for LLM providers — any model, any provider.
-/// Consumer implements this and passes to mindcore.
-pub trait LlmCallback: Send + Sync {
-    fn generate(&self, prompt: &str, max_tokens: usize) -> Result<String>;
+pub struct EngineConfig {
+    pub embedding_enabled: bool,     // A1-A3: skip embedding when false
+    pub graph_enabled: bool,         // A4, A6: skip graph create/query when false
+    pub dedup_enabled: bool,         // A5: skip dedup check when false
+    pub vector_search_mode: String,  // A7: "ann", "exact", "off"
+    pub assembly: AssemblyConfig,    // search-time config
 }
 ```
 
-Existing trait in src/traits/evolution.rs — refactor into standalone.
-
-### Implementations
-- **ApiLlmCallback**: OpenAI-compatible /v1/chat/completions via ureq (sync)
-  - Works with DeepInfra, OpenAI, Together, local vLLM, Ollama
-  - Feature-gated: `api-llm`
-- **CliLlmCallback**: Claude/ChatGPT/Gemini via CLI
-  - Pipes prompt to stdin, reads stdout
-  - Feature-gated: `cli-llm`
-
-## LlmIngest Extraction
-
-### Extraction Prompt
-The prompt asks the LLM to extract from raw text:
-- **Facts**: concrete statements (X is Y, X has Z)
-- **Decisions**: choices made (chose X over Y because Z)
-- **Preferences**: likes/dislikes (prefers X, dislikes Y)
-- **Entities**: named things (people, places, projects, tools)
-- **Relationships**: how entities relate (married_to, works_at, created_by)
-
-### Output Format
-Structured response parsed into ExtractedFact items:
+### AssemblyConfig (search-time, per-query)
 ```rust
-pub struct ExtractedFact {
-    pub text: String,           // The fact statement
-    pub category: String,       // fact, decision, preference, etc.
-    pub importance: u8,         // 1-10
-    pub entities: Vec<String>,  // Named entities mentioned
-    pub relationships: Vec<(String, String, String)>,  // (subject, relation, object)
+pub struct AssemblyConfig {
+    pub max_per_session: usize,  // diversification limit
+    pub recency_boost: f32,      // 0.0 = off, 0.3 = moderate
+    pub search_limit: usize,     // multi-query result limit
+    pub graph_depth: u32,        // graph traversal hops (0 = off)
 }
 ```
 
-### Graph Edge Creation
-During extraction, for each relationship triple:
-1. Search existing memories for same subject + relation
-2. If found with different object → create SupersededBy edge (old → new)
-3. If found with same subject, different relation → create RelatedTo edge
-4. Store edges in memory_relations table (already exists)
-
-## store_with_extraction() API
-
-```rust
-impl<T: MemoryRecord> MemoryEngine<T> {
-    /// Store raw text with LLM extraction.
-    /// Extracts facts, stores each as individual memory,
-    /// creates graph edges, deduplicates.
-    pub fn store_with_extraction(
-        &self,
-        raw_text: &str,
-        llm: &dyn LlmCallback,
-    ) -> Result<ExtractionResult>;
-}
-
-pub struct ExtractionResult {
-    pub facts_extracted: usize,
-    pub memories_stored: usize,
-    pub duplicates_skipped: usize,
-    pub graph_edges_created: usize,
-    pub superseded_count: usize,
-}
+### Cargo Feature Flags (compile-time)
+```toml
+local-embeddings    # CandleNativeBackend (MiniLM local)
+api-embeddings      # ApiBackend (DeepInfra embedding API)
+api-llm             # ApiLlmCallback (DeepInfra/OpenAI chat API)
+cli-llm             # CliLlmCallback (Claude/ChatGPT CLI) — MISSING, add
+llm-ingest          # LlmIngest extraction strategy
+vector-search       # local-embeddings + tokio
+graph-memory        # graph tables (always created, this gates logic)
+ann                 # ANN vector indexing — NOT BUILT YET
 ```
-
-## ANN Vector Search
-
-Three modes, configurable:
-- `"ann"` — Approximate Nearest Neighbor (default, fast at all scales)
-  - Uses sqlite-vec or HNSW index
-  - ~1-5ms regardless of database size
-- `"exact"` — Brute-force scan (for validation/debugging)
-  - Current implementation, O(n)
-  - Use to verify ANN accuracy
-- `"off"` — FTS5 keyword search only, no vector search
-
-## Test Harnesses (RecallBench)
-
-### Extraction Test
-- Feed raw text through LlmIngest
-- Check: facts extracted, entities found, relationships created
-- No search — just extraction quality
-- Zero search cost, LLM cost for extraction only
-
-### Retrieval Test (existing)
-- Search pre-stored memories
-- Check: Recall@K, MRR, Hit Rate
-- Zero LLM cost
-- Supports configurable chunk size, budget, system
-
-### Full Pipeline Test
-- Extraction → storage → graph → search → context assembly
-- Modular: can test any subset by toggling features
-- Reports both extraction metrics and retrieval metrics
-- The real-world test
-
-## Testing Plan
-
-1. **MAB Conflict Resolution with LLM extraction**: Each fact → one memory → graph edges.
-   Expected: single-hop maintains 100%, multi-hop improves from 0%.
-
-2. **LongMemEval with LLM extraction (20q sample)**: Conversations → extracted facts → search.
-   Compare to chunk-based baseline (95.3% Recall@10).
-
-3. **Feature toggle testing**: Run same questions with features on/off to measure impact of
-   each component (graph, recency, diversification, ANN).
-
-## Existing Infrastructure to Reuse
-
-- `memory_relations` table + GraphMemory CRUD + recursive CTE traversal
-- `EmbeddingBackend` trait pattern (reuse for LlmCallback)
-- `AssemblyConfig` (diversification, recency, graph_depth, search_limit)
-- Retrieval test harness with result saving
-- Session cache (raw dataset text)
-- Embedding cache system
-
-## Dependencies
-
-### New Cargo features
-- `llm-ingest` = ["dep:ureq"] (for API LLM callback, reuse existing ureq)
-- `api-llm` = ["dep:ureq"]
-- `cli-llm` = []
-- `ann` = ["dep:sqlite-vec"] (or similar)
-
-### Existing features used
-- `vector-search`, `api-embeddings`, `local-embeddings`, `graph-memory`

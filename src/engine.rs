@@ -281,7 +281,36 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         use crate::memory::{GraphMemory, RelationType};
 
         // Step 1: Extract facts via LLM
-        let extraction = llm_extract::extract_facts(raw_text, llm)?;
+        // Split large text into manageable chunks for the LLM context window
+        const MAX_EXTRACT_CHARS: usize = 6000;
+        let extraction = if raw_text.len() > MAX_EXTRACT_CHARS {
+            let mut all_facts = Vec::new();
+            let mut total_tokens = 0;
+            let mut remaining = raw_text;
+            while !remaining.is_empty() {
+                let split_at = if remaining.len() <= MAX_EXTRACT_CHARS {
+                    remaining.len()
+                } else {
+                    remaining[..MAX_EXTRACT_CHARS].rfind('\n')
+                        .map(|p| p + 1)
+                        .unwrap_or(MAX_EXTRACT_CHARS)
+                };
+                let chunk = &remaining[..split_at];
+                remaining = &remaining[split_at..];
+                match llm_extract::extract_facts(chunk, llm) {
+                    Ok(result) => {
+                        total_tokens += result.tokens_used;
+                        all_facts.extend(result.facts);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Extraction chunk failed: {e}");
+                    }
+                }
+            }
+            llm_extract::ExtractionResult { facts: all_facts, tokens_used: total_tokens }
+        } else {
+            llm_extract::extract_facts(raw_text, llm)?
+        };
 
         if extraction.facts.is_empty() {
             return Ok(extraction);

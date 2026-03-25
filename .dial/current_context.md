@@ -1,4 +1,4 @@
-# Task: Add feature toggles to MemoryEngine: each feature independently configurable via EngineConfig. Toggles: llm_extraction (on/off), graph_edges (on/off), embedding (on/off), recency_weight (0.0-1.0), diversification_limit (0=unlimited), deduplication (on/off). All accessible at runtime.
+# Task: Build full pipeline test harness in recallbench: extraction → storage → graph → search → context assembly. Modular — can test any subset. Report retrieval metrics (Recall@K) plus extraction metrics (fact coverage).
 
 ## ⚠️ SIGNS (Critical Rules)
 
