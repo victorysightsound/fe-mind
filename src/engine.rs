@@ -15,19 +15,56 @@ use crate::storage::Database;
 use crate::storage::migrations;
 use crate::traits::{MemoryRecord, ScoringStrategy};
 
+/// Result of a store_with_extraction() operation.
+#[derive(Debug, Clone)]
+pub struct StoreExtractionResult {
+    /// Number of facts the LLM extracted from the raw text.
+    pub facts_extracted: usize,
+    /// Number of new memories stored (after deduplication).
+    pub memories_stored: usize,
+    /// Number of duplicate facts skipped.
+    pub duplicates_skipped: usize,
+    /// Number of graph edges created (SupersededBy + RelatedTo).
+    pub graph_edges_created: usize,
+    /// Number of superseded (outdated) facts detected.
+    pub superseded_count: usize,
+    /// Approximate LLM tokens used for extraction.
+    pub tokens_used: usize,
+}
+
 /// Runtime feature configuration for MindCore.
 ///
-/// Controls which features are active. All toggles are independent —
-/// any combination is valid. Defaults to all features enabled.
+/// Two-level config:
+/// - **EngineConfig** controls WHAT features are active (store-time toggles).
+///   These are system-wide settings that affect all operations.
+/// - **AssemblyConfig** (nested inside) controls HOW search behaves (query-time tuning).
+///   These can vary per query or per dataset.
+///
+/// All toggles are independent — any combination is valid.
+///
+/// ## Store-time features (EngineConfig)
+/// - `embedding_enabled` — whether store()/store_batch()/store_with_extraction() compute vectors
+/// - `graph_enabled` — whether store_with_extraction() creates graph edges, and search uses them
+/// - `dedup_enabled` — whether store operations check content hash for duplicates
+/// - `vector_search_mode` — "exact" (brute-force), "ann" (approximate), or "off" (FTS5 only)
+///
+/// ## Query-time tuning (AssemblyConfig)
+/// - `max_per_session` — diversification limit (1 for multi-session, 0 for single-document)
+/// - `recency_boost` — score boost for newer content (0.0-1.0)
+/// - `search_limit` — max results from multi-query search
+/// - `graph_depth` — how many hops to traverse in graph filtering
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
     /// Enable vector embedding at store time.
+    /// When false, memories are stored with FTS5 indexing only (no vectors).
     pub embedding_enabled: bool,
-    /// Enable graph edge creation and traversal.
+    /// Enable graph edge creation (at store time) and graph filtering (at search time).
+    /// Master switch — overrides AssemblyConfig.graph_depth when false.
     pub graph_enabled: bool,
     /// Enable content hash deduplication on store.
+    /// When false, duplicate content is allowed (useful for testing).
     pub dedup_enabled: bool,
-    /// Assembly configuration (diversification, recency, graph depth).
+    /// Query-time search configuration (diversification, recency, graph depth).
     pub assembly: crate::context::AssemblyConfig,
     /// Vector search mode: "ann" (default), "exact" (brute-force), "off".
     pub vector_search_mode: String,
@@ -276,12 +313,12 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// 3. Detects contradictions and creates SupersededBy graph edges
     /// 4. Deduplicates against existing memories via content hash
     ///
-    /// Returns extraction statistics.
+    /// Returns extraction statistics including storage and graph metrics.
     pub fn store_with_extraction(
         &self,
         raw_text: &str,
         llm: &dyn crate::traits::LlmCallback,
-    ) -> Result<crate::ingest::llm_extract::ExtractionResult> {
+    ) -> Result<StoreExtractionResult> {
         use crate::ingest::llm_extract;
         use crate::memory::{GraphMemory, RelationType};
 
@@ -317,12 +354,19 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             llm_extract::extract_facts(raw_text, llm)?
         };
 
+        let facts_extracted = extraction.facts.len();
+        let tokens_used = extraction.tokens_used;
+
         if extraction.facts.is_empty() {
-            return Ok(extraction);
+            return Ok(StoreExtractionResult {
+                facts_extracted: 0, memories_stored: 0, duplicates_skipped: 0,
+                graph_edges_created: 0, superseded_count: 0, tokens_used,
+            });
         }
 
         // Step 2: Store each fact as individual memory
         let mut stored_ids: Vec<(i64, &llm_extract::ExtractedFact)> = Vec::new();
+        let mut duplicates_skipped = 0usize;
 
         for fact in &extraction.facts {
             let hash = format!("{:x}", sha2::Sha256::digest(fact.text.as_bytes()));
@@ -342,7 +386,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             })?;
 
             if self.config.dedup_enabled && existing_id.is_some() {
-                continue; // Skip duplicate
+                duplicates_skipped += 1;
+                continue;
             }
 
             // Insert the memory
@@ -400,6 +445,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
 
         // Step 3: Create graph edges for relationships (A4: gated by config)
+        let mut graph_edges_created = 0usize;
+        let mut superseded_count = 0usize;
         if self.config.graph_enabled {
         for (id, fact) in &stored_ids {
             for (subject, relation, _object) in &fact.relationships {
@@ -424,16 +471,26 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     if existing_text.to_lowercase().contains(&subject.to_lowercase())
                        && existing_text.to_lowercase().contains(&relation.replace('_', " ").to_lowercase()) {
                         // Same subject + relation → SupersededBy (older is superseded)
-                        let _ = GraphMemory::relate(
+                        if GraphMemory::relate(
                             &self.db, *existing_id, *id, &RelationType::SupersededBy,
-                        );
+                        ).is_ok() {
+                            graph_edges_created += 1;
+                            superseded_count += 1;
+                        }
                     }
                 }
             }
         }
         } // config.graph_enabled
 
-        Ok(extraction)
+        Ok(StoreExtractionResult {
+            facts_extracted,
+            memories_stored: stored_ids.len(),
+            duplicates_skipped,
+            graph_edges_created,
+            superseded_count,
+            tokens_used,
+        })
     }
 
     /// Returns (memories_with_embeddings, total_memories) for diagnostic purposes.
@@ -1008,5 +1065,58 @@ mod tests {
                 .map_err(Into::into)
         }).expect("count");
         assert_eq!(vec_count, 1, "vector should be stored when embedding enabled");
+    }
+
+    #[test]
+    fn store_with_extraction_splits_large_text() {
+        use crate::traits::LlmCallback;
+
+        // Mock LLM that returns one fact per call
+        struct CountingLlm { call_count: std::sync::atomic::AtomicUsize }
+        impl LlmCallback for CountingLlm {
+            fn generate(&self, _prompt: &str, _max_tokens: usize) -> Result<String> {
+                let n = self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(format!("fact|5|Extracted fact number {}||", n))
+            }
+            fn model_name(&self) -> &str { "mock" }
+        }
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        let llm = CountingLlm { call_count: std::sync::atomic::AtomicUsize::new(0) };
+
+        // Create text larger than MAX_EXTRACT_CHARS (6000)
+        let large_text = "Some fact statement.\n".repeat(500); // ~10000 chars
+        assert!(large_text.len() > 6000);
+
+        let result = engine.store_with_extraction(&large_text, &llm).expect("extract");
+
+        // Should have made multiple LLM calls (text was split)
+        let calls = llm.call_count.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(calls >= 2, "large text should be split into multiple LLM calls, got {calls}");
+
+        // Should have extracted facts from each chunk
+        assert!(result.facts_extracted >= 2, "should extract from multiple chunks");
+        assert!(result.memories_stored >= 2, "should store facts from multiple chunks");
+    }
+
+    #[test]
+    fn store_with_extraction_result_counts() {
+        use crate::traits::LlmCallback;
+
+        struct MockLlm;
+        impl LlmCallback for MockLlm {
+            fn generate(&self, _prompt: &str, _max_tokens: usize) -> Result<String> {
+                Ok("fact|7|The sky is blue|sky|sky>color>blue\nfact|5|Water is wet|water|".to_string())
+            }
+            fn model_name(&self) -> &str { "mock" }
+        }
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        let result = engine.store_with_extraction("Some text about nature", &MockLlm).expect("extract");
+
+        assert_eq!(result.facts_extracted, 2);
+        assert_eq!(result.memories_stored, 2);
+        assert_eq!(result.duplicates_skipped, 0);
+        assert!(result.tokens_used > 0);
     }
 }
