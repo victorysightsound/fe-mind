@@ -1,4 +1,4 @@
-# Task: Build full pipeline test harness in recallbench: extraction → storage → graph → search → context assembly. Modular — can test any subset. Report retrieval metrics (Recall@K) plus extraction metrics (fact coverage).
+# Task: A1: Wire config.embedding_enabled into store() — if false, skip embedding computation. FTS5 trigger still fires. Add unit test: store with embedding disabled, verify FTS5 search works but no vector stored.
 
 ## ⚠️ SIGNS (Critical Rules)
 

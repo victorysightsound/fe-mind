@@ -83,8 +83,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     pub fn store(&self, record: &T) -> Result<StoreResult> {
         let result = self.store.store(&self.db, record)?;
 
-        // Compute and store embedding for new records
+        // Compute and store embedding for new records (if enabled)
         if let StoreResult::Added(id) = &result {
+            if self.config.embedding_enabled {
             if let Some(ref backend) = self.embedding {
                 if backend.is_available() {
                     let text = record.searchable_text();
@@ -136,6 +137,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     }
                 }
             }
+            } // config.embedding_enabled
         }
 
         Ok(result)
@@ -945,5 +947,59 @@ mod tests {
         assert!(matches!(r1, StoreResult::Added(_)));
         assert!(matches!(r2, StoreResult::Duplicate(_)));
         assert_eq!(engine.count().expect("count"), 1);
+    }
+
+    #[test]
+    fn store_with_embedding_disabled() {
+        use crate::embeddings::NoopBackend;
+
+        let backend = NoopBackend::new(384);
+        let mut engine = MemoryEngine::<TestMem>::builder()
+            .embedding_backend(backend)
+            .build()
+            .expect("build");
+
+        // Disable embedding
+        engine.config.embedding_enabled = false;
+
+        let result = engine.store(&mem("test memory without embedding")).expect("store");
+        assert!(matches!(result, StoreResult::Added(_)));
+
+        // FTS5 should still work
+        let search = engine.search("test memory").limit(5).execute().expect("search");
+        assert!(!search.is_empty(), "FTS5 search should find the memory");
+
+        // No vector should be stored
+        let db = engine.database();
+        let vec_count: i64 = db.with_reader(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+                .map_err(Into::into)
+        }).expect("count");
+        assert_eq!(vec_count, 0, "no vectors should be stored when embedding disabled");
+    }
+
+    #[test]
+    fn store_with_embedding_enabled() {
+        use crate::embeddings::NoopBackend;
+
+        let backend = NoopBackend::new(384);
+        let engine = MemoryEngine::<TestMem>::builder()
+            .embedding_backend(backend)
+            .build()
+            .expect("build");
+
+        // Default: embedding enabled
+        assert!(engine.config.embedding_enabled);
+
+        let result = engine.store(&mem("test memory with embedding")).expect("store");
+        assert!(matches!(result, StoreResult::Added(_)));
+
+        // Vector should be stored
+        let db = engine.database();
+        let vec_count: i64 = db.with_reader(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+                .map_err(Into::into)
+        }).expect("count");
+        assert_eq!(vec_count, 1, "vector should be stored when embedding enabled");
     }
 }
