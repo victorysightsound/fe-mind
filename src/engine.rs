@@ -232,6 +232,140 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         self.store.count(&self.db)
     }
 
+    /// Store raw text with LLM extraction.
+    ///
+    /// 1. Calls the LLM to extract individual facts from raw text
+    /// 2. Stores each fact as its own memory with embedding
+    /// 3. Detects contradictions and creates SupersededBy graph edges
+    /// 4. Deduplicates against existing memories via content hash
+    ///
+    /// Returns extraction statistics.
+    pub fn store_with_extraction(
+        &self,
+        raw_text: &str,
+        llm: &dyn crate::traits::LlmCallback,
+    ) -> Result<crate::ingest::llm_extract::ExtractionResult> {
+        use crate::ingest::llm_extract;
+        use crate::memory::{GraphMemory, RelationType};
+
+        // Step 1: Extract facts via LLM
+        let extraction = llm_extract::extract_facts(raw_text, llm)?;
+
+        if extraction.facts.is_empty() {
+            return Ok(extraction);
+        }
+
+        // Step 2: Store each fact as individual memory
+        let mut stored_ids: Vec<(i64, &llm_extract::ExtractedFact)> = Vec::new();
+
+        for fact in &extraction.facts {
+            let hash = format!("{:x}", sha2::Sha256::digest(fact.text.as_bytes()));
+
+            // Dedup check
+            let existing_id: Option<i64> = self.db.with_reader(|conn| {
+                let result = conn.query_row(
+                    "SELECT id FROM memories WHERE content_hash = ?1",
+                    [&hash],
+                    |row| row.get::<_, i64>(0),
+                );
+                match result {
+                    Ok(id) => Ok(Some(id)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e.into()),
+                }
+            })?;
+
+            if existing_id.is_some() {
+                continue; // Skip duplicate
+            }
+
+            // Insert the memory
+            let importance = fact.importance as i32;
+            let category = Some(fact.category.as_str());
+            let metadata_json = if !fact.entities.is_empty() || !fact.relationships.is_empty() {
+                let meta = serde_json::json!({
+                    "entities": fact.entities,
+                    "relationships": fact.relationships,
+                });
+                Some(serde_json::to_string(&meta).unwrap_or_default())
+            } else {
+                None
+            };
+
+            let id = self.db.with_writer(|conn| {
+                conn.execute(
+                    "INSERT INTO memories (
+                        searchable_text, memory_type, importance, category,
+                        metadata_json, content_hash, created_at, record_json
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), ?7)",
+                    rusqlite::params![
+                        fact.text,
+                        "semantic",
+                        importance,
+                        category,
+                        metadata_json,
+                        hash,
+                        serde_json::json!({"text": fact.text}).to_string(),
+                    ],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })?;
+
+            // Compute and store embedding
+            if let Some(ref backend) = self.embedding {
+                if backend.is_available() && !fact.text.trim().is_empty() {
+                    let text = truncate_for_embedding(&fact.text);
+                    match backend.embed(text) {
+                        Ok(vec) if !vec.is_empty() => {
+                            let _ = crate::search::vector::VectorSearch::store_vector(
+                                &self.db, id, &vec, backend.model_name(), &hash,
+                            );
+                            self.set_embedding_status(id, "success");
+                        }
+                        Ok(_) => self.set_embedding_status(id, "failed"),
+                        Err(_) => self.set_embedding_status(id, "failed"),
+                    }
+                }
+            }
+
+            stored_ids.push((id, fact));
+        }
+
+        // Step 3: Create graph edges for relationships
+        for (id, fact) in &stored_ids {
+            for (subject, relation, _object) in &fact.relationships {
+                // Search existing memories for same subject + relation with different value
+                let search_text = format!("{} {}", subject, relation);
+                let existing = self.db.with_reader(|conn| {
+                    let mut stmt = conn.prepare(
+                        "SELECT id, searchable_text FROM memories
+                         WHERE id != ?1
+                         AND searchable_text LIKE ?2
+                         ORDER BY id ASC",
+                    )?;
+                    let pattern = format!("%{}%", subject);
+                    let results: Vec<(i64, String)> = stmt.query_map(
+                        rusqlite::params![id, pattern],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?.filter_map(|r| r.ok()).collect();
+                    Ok::<_, crate::error::MindCoreError>(results)
+                })?;
+
+                for (existing_id, existing_text) in &existing {
+                    if existing_text.to_lowercase().contains(&subject.to_lowercase())
+                       && existing_text.to_lowercase().contains(&relation.replace('_', " ").to_lowercase()) {
+                        // Same subject + relation → SupersededBy (older is superseded)
+                        let _ = GraphMemory::relate(
+                            &self.db, *existing_id, *id, &RelationType::SupersededBy,
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(extraction)
+    }
+
     /// Returns (memories_with_embeddings, total_memories) for diagnostic purposes.
     ///
     /// Counts memories where `embedding_status = 'success'` vs total count.

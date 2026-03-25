@@ -1,4 +1,4 @@
-# Task: Build ApiLlmCallback: OpenAI-compatible /v1/chat/completions endpoint using ureq (sync). Takes base_url, api_key, model. Supports DeepInfra, OpenAI, Together, local vLLM. Feature-gated behind 'api-llm'. Similar pattern to ApiBackend for embeddings.
+# Task: Integrate LlmIngest into MemoryEngine: add store_with_extraction() method that takes raw text + LlmCallback, extracts facts, stores each fact as individual memory, creates graph edges (related_to, superseded_by) between extracted facts. Deduplicates against existing memories via content hash.
 
 ## ⚠️ SIGNS (Critical Rules)
 
