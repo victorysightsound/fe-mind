@@ -13,7 +13,7 @@ session-context
 
 **femind** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
 
-**Status:** local repo/crate rename to `fe-mind` / `femind` is in progress. crates.io still has `mindcore` v0.2.0 until the renamed package is published.
+**Status:** local repo/crate rename to `fe-mind` / `femind` is complete. crates.io still has `mindcore` v0.2.0 until the renamed package is published.
 
 ---
 
