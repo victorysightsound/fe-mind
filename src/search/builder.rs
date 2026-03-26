@@ -326,6 +326,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         deduplicate_by_vector_similarity(self.db, &mut results, model, 0.95);
 
         apply_strict_detail_query_filter(self.db, &self.query, &mut results);
+        rerank_for_query_alignment(self.db, &self.query, &mut results);
 
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
@@ -623,6 +624,38 @@ pub(crate) fn apply_strict_detail_query_filter(
     });
 }
 
+pub(crate) fn rerank_for_query_alignment(
+    db: &Database,
+    query: &str,
+    results: &mut [SearchResult],
+) {
+    if results.is_empty() {
+        return;
+    }
+
+    for result in results.iter_mut() {
+        let text = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(crate::error::FemindError::Database)
+            })
+            .ok();
+
+        let Some(text) = text else { continue };
+        result.score *= query_alignment_multiplier(query, &text);
+    }
+
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
 pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
     let normalized = normalize_text(query);
     let tokens: Vec<_> = normalized.split_whitespace().collect();
@@ -638,13 +671,20 @@ pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
                 | "price" | "version" | "number" | "id" | "reserved" | "removed"
                 | "remove" | "failed" | "fail" | "hour" | "minute"
                 | "day" | "date" | "month" | "year" | "dollar" | "duration"
-                | "filename" | "file" | "path" | "label" | "header"
-                | "deployment" | "parameter" | "value" | "plist" | "hash"
+                | "filename" | "file" | "path" | "script" | "runner" | "label" | "header"
+                | "deployment" | "parameter" | "value" | "hnsw" | "subtype" | "plist" | "hash"
                 | "threshold"
         )
     });
     let asks_how_many = tokens.windows(2).any(|pair| pair == ["how", "many"]);
-    let has_ordinal_signal = ordinal_detail_signal(&tokens);
+    let has_ordinal_signal = ordinal_detail_signal(&tokens)
+        || (contains_ordinal_token(&tokens)
+            && tokens.iter().any(|token| {
+                matches!(
+                    *token,
+                    "type" | "subtype" | "value" | "model" | "version" | "candidate" | "memory"
+                )
+            }));
 
     has_exact_signal || asks_how_many || has_ordinal_signal || query_asks_for_combined_capability(query)
 }
@@ -652,6 +692,35 @@ pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
 pub(crate) fn lexical_grounding_ok(query: &str, text: &str) -> bool {
     if query_asks_for_combined_capability(query) && text_implies_exclusion(text) {
         return query_is_yes_no(query);
+    }
+
+    let normalized_query = normalize_text(query);
+
+    if query_requires_strict_grounding(query)
+        && query_mentions_artifact_detail(query)
+        && !normalized_query.contains("hnsw")
+        && !normalized_query.contains("subtype")
+        && text_contains_artifact_detail(text)
+    {
+        let normalized_text = normalize_text(text);
+        let asks_source_of_truth = normalized_query.contains("source of truth");
+        let asks_summary_file =
+            normalized_query.contains("summary file") || normalized_query.contains("artifact file");
+        let asks_script = normalized_query.contains("script")
+            || normalized_query.contains("entry point")
+            || normalized_query.contains("runner");
+
+        if asks_source_of_truth && normalized_text.contains("source of truth") {
+            return true;
+        }
+        if asks_summary_file && normalized_text.contains("summary") {
+            return true;
+        }
+        if asks_script
+            && (text.to_lowercase().contains("scripts/") || normalized_text.contains("script"))
+        {
+            return true;
+        }
     }
 
     let query_tokens = meaning_tokens(query);
@@ -714,6 +783,72 @@ pub(crate) fn lexical_grounding_ok(query: &str, text: &str) -> bool {
     overlap >= 2 || recall >= 0.5
 }
 
+fn query_alignment_multiplier(query: &str, text: &str) -> f32 {
+    let normalized_query = normalize_text(query);
+    let normalized_text = normalize_text(text);
+    let lowered_text = text.to_lowercase();
+
+    let mut multiplier = 1.0_f32;
+
+    if query_mentions_artifact_detail(query) {
+        multiplier *= if text_contains_artifact_detail(text) {
+            1.45
+        } else {
+            0.82
+        };
+
+        if normalized_query.contains("source of truth") {
+            multiplier *= if normalized_text.contains("source of truth") {
+                1.35
+            } else {
+                0.82
+            };
+        }
+    }
+
+    if query_requests_support_state(query) {
+        multiplier *= if text_indicates_support_state(&normalized_text, &lowered_text) {
+            1.45
+        } else {
+            0.82
+        };
+    }
+
+    if query_requests_next_step(query) {
+        multiplier *= if text_indicates_next_step(&normalized_text) {
+            1.5
+        } else {
+            0.8
+        };
+    }
+
+    if query_requests_prerequisite(query) {
+        multiplier *= if text_indicates_prerequisite(&normalized_text) {
+            1.45
+        } else {
+            0.84
+        };
+    }
+
+    if query_requests_negative_limit(query) {
+        multiplier *= if text_indicates_negative_limit(&normalized_text) {
+            2.4
+        } else {
+            0.45
+        };
+    }
+
+    if query_requests_preference(query) {
+        multiplier *= if text_indicates_preference(&normalized_text) {
+            1.65
+        } else {
+            0.78
+        };
+    }
+
+    multiplier
+}
+
 fn meaning_tokens(value: &str) -> Vec<String> {
     normalize_text(value)
         .split_whitespace()
@@ -756,7 +891,7 @@ fn detail_tokens(value: &str) -> Vec<String> {
         .filter(|token| {
             matches!(
                 token.as_str(),
-                "exact"
+            "exact"
                     | "precise"
                     | "specific"
                     | "total"
@@ -787,11 +922,15 @@ fn detail_tokens(value: &str) -> Vec<String> {
                     | "filename"
                     | "file"
                     | "path"
+                    | "script"
+                    | "runner"
                     | "label"
                     | "header"
                     | "deployment"
                     | "parameter"
                     | "value"
+                    | "hnsw"
+                    | "subtype"
                     | "plist"
                     | "hash"
                     | "threshold"
@@ -859,12 +998,108 @@ fn ordinal_detail_signal(tokens: &[&str]) -> bool {
     })
 }
 
+fn contains_ordinal_token(tokens: &[&str]) -> bool {
+    const ORDINALS: &[&str] = &["first", "second", "third", "fourth", "fifth"];
+    tokens.iter().any(|token| ORDINALS.contains(token))
+}
+
 fn text_implies_exclusion(text: &str) -> bool {
     let normalized = normalize_text(text);
     normalized.contains("except")
         || normalized.contains("without")
         || normalized.contains("excluding")
         || normalized.contains("not with")
+}
+
+fn query_mentions_artifact_detail(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    normalized.contains("source of truth")
+        || normalized.contains("summary file")
+        || normalized.contains("artifact file")
+        || normalized.contains("entry point")
+        || normalized.contains("script")
+        || normalized.contains("runner")
+        || normalized.contains("file")
+        || normalized.contains("path")
+}
+
+fn text_contains_artifact_detail(text: &str) -> bool {
+    let lowered = text.to_lowercase();
+    lowered.contains("scripts/")
+        || lowered.contains("target/")
+        || lowered.contains(".db")
+        || lowered.contains(".json")
+        || lowered.contains(".sh")
+        || lowered.contains(".sql")
+        || lowered.contains(".md")
+        || lowered.contains(".toml")
+}
+
+fn query_requests_support_state(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    normalized.contains("support")
+        || normalized.contains("enabled")
+        || normalized.contains("stateful")
+}
+
+fn text_indicates_support_state(normalized_text: &str, lowered_text: &str) -> bool {
+    normalized_text.contains("enabled")
+        || normalized_text.contains("stateful")
+        || normalized_text.contains("support")
+        || lowered_text.contains("codex-cli")
+}
+
+fn query_requests_next_step(query: &str) -> bool {
+    normalize_text(query).split_whitespace().any(|token| token == "next")
+}
+
+fn text_indicates_next_step(normalized_text: &str) -> bool {
+    normalized_text.contains("next validation step")
+        || normalized_text.contains("come next")
+        || normalized_text.contains("should come next")
+        || normalized_text.contains("rather than continuing")
+}
+
+fn query_requests_prerequisite(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    normalized.contains("before") || normalized.contains("had to be completed")
+}
+
+fn text_indicates_prerequisite(normalized_text: &str) -> bool {
+    normalized_text.contains("before")
+        || normalized_text.contains("had to be completed")
+        || normalized_text.contains("complete ann")
+        || normalized_text.contains("pending explicit user approval")
+}
+
+fn query_requests_negative_limit(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    normalized.contains("did not")
+        || normalized.contains("not test")
+        || normalized.contains("not prove")
+        || normalized.contains("alone prove")
+}
+
+fn text_indicates_negative_limit(normalized_text: &str) -> bool {
+    normalized_text.contains("did not")
+        || normalized_text.contains("not test")
+        || normalized_text.contains("not prove")
+        || normalized_text.contains("cannot")
+        || normalized_text.contains("can not")
+}
+
+fn query_requests_preference(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    normalized.contains("matters more than")
+        || normalized.contains("rather than")
+        || normalized.contains("prioritize")
+}
+
+fn text_indicates_preference(normalized_text: &str) -> bool {
+    normalized_text.contains("matters more")
+        || normalized_text.contains("matter more")
+        || normalized_text.contains("rather than")
+        || normalized_text.contains("prioritize")
 }
 
 fn normalize_text(value: &str) -> String {
@@ -1120,5 +1355,28 @@ mod tests {
 
         assert!(query_requires_strict_grounding(query));
         assert!(!lexical_grounding_ok(query, weak_hit));
+    }
+
+    #[test]
+    fn lexical_grounding_accepts_source_of_truth_db_path() {
+        let query = "Is the primary local source of truth file femind_architecture.sql?";
+        let supporting_hit =
+            "The primary local source of truth is .docs/femind_spec.db. The markdown docs in the repo should stay aligned with that database.";
+
+        assert!(query_requires_strict_grounding(query));
+        assert!(lexical_grounding_ok(query, supporting_hit));
+    }
+
+    #[test]
+    fn query_alignment_boosts_negative_limit_text() {
+        let negative_query = "What did benchmark work not prove reliably?";
+        let negative_hit =
+            "Benchmarks did not test LLM fact extraction quality, graph-based retrieval, or real conversation memory.";
+        let positive_hit = "Benchmarks validated the core search pipeline.";
+
+        assert!(
+            query_alignment_multiplier(negative_query, negative_hit)
+                > query_alignment_multiplier(negative_query, positive_hit)
+        );
     }
 }

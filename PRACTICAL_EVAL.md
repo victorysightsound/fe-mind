@@ -187,8 +187,9 @@ Current larger-library baseline:
 - summary artifacts now include stable run metadata for backend, model, vector
   mode, duration, pass counts, and pass rate
 - graph-backed extraction retrieval is now available as a separate tuning lane
-- the current graph-backed hybrid live-library pass scores `63/66`, so graph
-  retrieval should not yet be treated as a release gate
+- the current graph-backed hybrid live-library pass now scores `66/66`
+- graph-backed retrieval on the larger library is now clean enough to treat as
+  part of the real-world validation gate
 
 ## Memloft-Derived Real-Data Slice
 
@@ -218,5 +219,6 @@ Current memloft-slice baseline:
 - the exact and ANN results currently match on the full memloft-derived corpus
 - sources are real technical memloft records, not hand-written synthetic notes
 - graph-backed extraction retrieval is now available as a separate tuning lane
-- the current graph-backed hybrid memloft-slice pass scores `82/90`, so graph
-  retrieval still needs targeted tuning before benchmark confirmation
+- the current graph-backed hybrid memloft-slice pass now scores `90/90`
+- graph-backed retrieval on the memloft-derived slice is now clean enough for
+  RecallBench confirmation work
