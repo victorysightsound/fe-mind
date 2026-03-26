@@ -9,7 +9,7 @@ use crate::embeddings::EmbeddingBackend;
 use crate::error::{FemindError, Result};
 use crate::memory::store::StoreResult;
 use crate::memory::MemoryStore;
-use crate::scoring::CompositeScorer;
+use crate::scoring::{CompositeScorer, ImportanceScorer, MemoryTypeScorer, RecencyScorer};
 use crate::search::builder::SearchBuilder;
 use crate::storage::migrations;
 use crate::storage::Database;
@@ -902,7 +902,8 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
 
     /// Set the scoring strategy for post-search ranking.
     ///
-    /// If not set, uses a no-op scorer (raw retrieval scores only).
+    /// If not set, uses the default composite scorer (recency, importance,
+    /// and cognitive memory type).
     pub fn scoring(mut self, strategy: impl ScoringStrategy + 'static) -> Self {
         self.scoring = Some(Arc::new(strategy));
         self
@@ -985,7 +986,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
 
         let scoring = self
             .scoring
-            .unwrap_or_else(|| Arc::new(CompositeScorer::empty()));
+            .unwrap_or_else(|| Arc::new(default_composite_scorer()));
 
         Ok(MemoryEngine {
             db,
@@ -998,6 +999,14 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             config: self.config,
         })
     }
+}
+
+fn default_composite_scorer() -> CompositeScorer {
+    CompositeScorer::new(vec![
+        Box::new(RecencyScorer::default_half_life()),
+        Box::new(ImportanceScorer::default()),
+        Box::new(MemoryTypeScorer::default()),
+    ])
 }
 
 /// Truncate text to fit within the embedding model's context window.
@@ -1196,6 +1205,37 @@ mod tests {
 
         let results = engine.search("authentication").execute().expect("search");
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn default_scorer_prefers_more_recent_fact() {
+        use chrono::Duration;
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        let old = TestMem {
+            id: None,
+            text: "The repo is still named mindcore.".into(),
+            created_at: Utc::now() - Duration::days(20),
+        };
+        let new = TestMem {
+            id: None,
+            text: "The repo is now fe-mind.".into(),
+            created_at: Utc::now(),
+        };
+
+        let StoreResult::Added(old_id) = engine.store(&old).expect("store old") else {
+            panic!("expected Added");
+        };
+        let StoreResult::Added(new_id) = engine.store(&new).expect("store new") else {
+            panic!("expected Added");
+        };
+
+        let results = engine.search("repo").execute().expect("search");
+        assert_eq!(results.first().map(|r| r.memory_id), Some(new_id));
+        assert!(
+            results.iter().any(|r| r.memory_id == old_id),
+            "stale fact should still be retrievable, just not top-ranked"
+        );
     }
 
     #[test]
