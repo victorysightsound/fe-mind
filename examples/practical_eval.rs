@@ -152,6 +152,31 @@ mod app {
         }
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum RetrievalIngest {
+        Records,
+        Extraction,
+    }
+
+    impl RetrievalIngest {
+        fn from_str(value: &str) -> Result<Self, String> {
+            match value {
+                "records" => Ok(Self::Records),
+                "extraction" => Ok(Self::Extraction),
+                other => Err(format!(
+                    "unknown retrieval ingest '{other}', expected records | extraction"
+                )),
+            }
+        }
+
+        fn name(self) -> &'static str {
+            match self {
+                Self::Records => "records",
+                Self::Extraction => "extraction",
+            }
+        }
+    }
+
     #[derive(Debug)]
     struct Config {
         scenarios_path: PathBuf,
@@ -159,6 +184,7 @@ mod app {
         summary_path: Option<PathBuf>,
         mode: EvalMode,
         vector_mode: VectorSearchMode,
+        graph_depth: u32,
         top_k: usize,
         base_url: String,
         api_key_env: String,
@@ -166,6 +192,7 @@ mod app {
         embedding_model: String,
         extraction_backend: ExtractionBackend,
         extraction_model: String,
+        retrieval_ingest: RetrievalIngest,
     }
 
     impl Config {
@@ -175,6 +202,10 @@ mod app {
             let mut summary_path = None;
             let mut mode = EvalMode::All;
             let mut vector_mode = VectorSearchMode::Exact;
+            let mut graph_depth = env::var("FEMIND_GRAPH_DEPTH")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
             let mut top_k = 3usize;
             let mut base_url = DEFAULT_BASE_URL.to_string();
             let mut api_key_env =
@@ -189,6 +220,10 @@ mod app {
             let mut extraction_backend = extraction_backend;
             let mut extraction_model = env::var("FEMIND_EXTRACT_MODEL")
                 .unwrap_or_else(|_| extraction_backend.default_model().to_string());
+            let mut retrieval_ingest = RetrievalIngest::from_str(
+                &env::var("FEMIND_RETRIEVAL_INGEST")
+                    .unwrap_or_else(|_| "records".to_string()),
+            )?;
 
             let mut args = env::args().skip(1);
             while let Some(arg) = args.next() {
@@ -224,6 +259,13 @@ mod app {
                             }
                         };
                     }
+                    "--graph-depth" => {
+                        graph_depth = args
+                            .next()
+                            .ok_or("--graph-depth requires a value")?
+                            .parse()
+                            .map_err(|_| "--graph-depth must be an integer".to_string())?;
+                    }
                     "--top-k" => {
                         top_k = args
                             .next()
@@ -256,6 +298,11 @@ mod app {
                         extraction_model =
                             args.next().ok_or("--extraction-model requires a value")?;
                     }
+                    "--retrieval-ingest" => {
+                        retrieval_ingest = RetrievalIngest::from_str(
+                            &args.next().ok_or("--retrieval-ingest requires a value")?,
+                        )?;
+                    }
                     "--help" | "-h" => {
                         print_help();
                         std::process::exit(0);
@@ -270,6 +317,7 @@ mod app {
                 summary_path,
                 mode,
                 vector_mode,
+                graph_depth,
                 top_k,
                 base_url,
                 api_key_env,
@@ -277,6 +325,7 @@ mod app {
                 embedding_model,
                 extraction_backend,
                 extraction_model,
+                retrieval_ingest,
             })
         }
     }
@@ -313,10 +362,12 @@ mod app {
         scenario_count: usize,
         mode: String,
         vector_mode: String,
+        graph_depth: u32,
         top_k: usize,
         embedding_model: String,
         extract_backend: String,
         extraction_model: String,
+        retrieval_ingest: String,
         duration_ms: u128,
     }
 
@@ -344,9 +395,11 @@ mod app {
         println!("scenarios: {}", scenarios.len());
         println!("mode: {}", mode_name(config.mode));
         println!("vector_mode: {}", config.vector_mode);
+        println!("graph_depth: {}", config.graph_depth);
         println!("embedding_model: {}", embedder.model_name());
         println!("extract_backend: {}", config.extraction_backend.name());
         println!("extraction_model: {}", extractor.model_name());
+        println!("retrieval_ingest: {}", config.retrieval_ingest.name());
         println!();
 
         let mut reports = Vec::new();
@@ -387,10 +440,12 @@ mod app {
                 scenario_count: scenarios.len(),
                 mode: mode_name(config.mode).to_string(),
                 vector_mode: config.vector_mode.to_string(),
+                graph_depth: config.graph_depth,
                 top_k: config.top_k,
                 embedding_model: embedder.model_name().to_string(),
                 extract_backend: config.extraction_backend.name().to_string(),
                 extraction_model: extractor.model_name().to_string(),
+                retrieval_ingest: config.retrieval_ingest.name().to_string(),
                 duration_ms,
             },
             total_checks,
@@ -440,18 +495,13 @@ mod app {
         };
 
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
-            let records: Vec<EvalMemory> = scenario
-                .records
-                .iter()
-                .map(to_eval_memory)
-                .collect::<Result<Vec<_>, _>>()?;
-            let _ = engine.store_batch(&records)?;
+            seed_retrieval_corpus(&engine, scenario, config, extractor)?;
         }
 
         let mut retrieval = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.retrieval_checks {
-                let observed = top_hits(&engine, &check.query, config.top_k)?;
+                let observed = top_hits(&engine, &check.query, config.top_k, config.graph_depth)?;
                 let combined = observed
                     .iter()
                     .map(|hit| hit.text.as_str())
@@ -503,7 +553,7 @@ mod app {
         let mut abstention = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.abstention_checks {
-                let observed = top_hits(&engine, &check.query, config.top_k)?;
+                let observed = top_hits(&engine, &check.query, config.top_k, config.graph_depth)?;
                 let passed = check.expected_behavior == "abstain" && observed.is_empty();
                 abstention.push(CheckReport {
                     query: check.query.clone(),
@@ -561,29 +611,78 @@ mod app {
         engine: &MemoryEngine<EvalMemory>,
         query: &str,
         top_k: usize,
+        graph_depth: u32,
     ) -> Result<Vec<ObservedHit>, Box<dyn std::error::Error>> {
-        let results = engine
-            .search(query)
-            .mode(SearchMode::Auto)
-            .limit(top_k)
-            .execute()?;
-
         let mut hits = Vec::new();
-        for result in results {
-            let text = engine.database().with_reader(|conn| {
-                conn.query_row(
-                    "SELECT searchable_text FROM memories WHERE id = ?1",
-                    [result.memory_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .map_err(Into::into)
-            })?;
-            hits.push(ObservedHit {
-                text,
-                score: result.score,
-            });
+        if graph_depth > 0 {
+            let assembly_config = femind::context::AssemblyConfig {
+                graph_depth,
+                max_per_session: 0,
+                ..femind::context::AssemblyConfig::default()
+            };
+            let assembly = engine.assemble_context_with_config(
+                query,
+                &femind::context::ContextBudget::new(4096),
+                &assembly_config,
+            )?;
+            for item in assembly.items.into_iter().take(top_k) {
+                hits.push(ObservedHit {
+                    text: item.content,
+                    score: item.relevance_score,
+                });
+            }
+        } else {
+            let results = engine
+                .search(query)
+                .mode(SearchMode::Auto)
+                .limit(top_k)
+                .execute()?;
+
+            for result in results {
+                let text = engine.database().with_reader(|conn| {
+                    conn.query_row(
+                        "SELECT searchable_text FROM memories WHERE id = ?1",
+                        [result.memory_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .map_err(Into::into)
+                })?;
+                hits.push(ObservedHit {
+                    text,
+                    score: result.score,
+                });
+            }
         }
         Ok(hits)
+    }
+
+    fn seed_retrieval_corpus(
+        engine: &MemoryEngine<EvalMemory>,
+        scenario: &Scenario,
+        config: &Config,
+        extractor: &dyn LlmCallback,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match config.retrieval_ingest {
+            RetrievalIngest::Records => {
+                let records: Vec<EvalMemory> = scenario
+                    .records
+                    .iter()
+                    .map(to_eval_memory)
+                    .collect::<Result<Vec<_>, _>>()?;
+                let _ = engine.store_batch(&records)?;
+            }
+            RetrievalIngest::Extraction => {
+                let raw_text = scenario
+                    .records
+                    .iter()
+                    .map(|r| format!("[{}] {}", r.source, r.text))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let _ = engine.store_with_extraction(&raw_text, extractor)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn all_memory_texts(
@@ -790,13 +889,15 @@ mod app {
              \t--summary <path>           Write JSON summary to a file\n\
              \t--mode <retrieval|extraction|all>\n\
              \t--vector-mode <off|exact|ann>\n\
+             \t--graph-depth <n>          Graph expansion depth (default: 0)\n\
              \t--top-k <n>                Number of retrieved records to inspect (default: 3)\n\
              \t--base-url <url>           OpenAI-compatible API base URL\n\
              \t--api-key-env <name>       Environment variable to read before using --key-cmd\n\
              \t--key-cmd <cmd>            Shell command that prints the API key\n\
              \t--embedding-model <model>  Embedding model name\n\
              \t--extract-backend <kind>   Extraction backend: api | codex-cli\n\
-             \t--extraction-model <model> Extraction model name\n"
+             \t--extraction-model <model> Extraction model name\n\
+             \t--retrieval-ingest <kind>  Retrieval ingest path: records | extraction\n"
         );
     }
 

@@ -101,8 +101,10 @@ Default behavior:
 
 - `FEMIND_EVAL_MODE=retrieval`
 - `FEMIND_VECTOR_MODE=exact`
+- `FEMIND_GRAPH_DEPTH=0`
 - `FEMIND_EXTRACT_BACKEND=api`
 - `FEMIND_EXTRACT_MODEL=openai/gpt-oss-120b`
+- `FEMIND_RETRIEVAL_INGEST=records`
 - summary output at `target/practical-eval/retrieval-exact.json`
 - runtime key resolution through macOS Keychain unless overridden with `FEMIND_EVAL_KEY_CMD`
 
@@ -118,6 +120,16 @@ cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
 
 The example uses a runtime key command and does not require secrets to be
 written into source files or shell history.
+
+Graph-focused follow-up validation can be enabled explicitly:
+
+```bash
+FEMIND_GRAPH_DEPTH=2 FEMIND_RETRIEVAL_INGEST=extraction scripts/run-live-library.sh
+FEMIND_GRAPH_DEPTH=2 FEMIND_RETRIEVAL_INGEST=extraction scripts/run-memloft-slice.sh
+```
+
+That path exists to test extraction-backed graph retrieval directly rather than
+the simpler seeded-record retrieval path.
 
 Extraction backend options:
 
@@ -173,6 +185,9 @@ Current larger-library baseline:
 - the exact and ANN results currently match on the full larger corpus
 - summary artifacts now include stable run metadata for backend, model, vector
   mode, duration, pass counts, and pass rate
+- graph-backed extraction retrieval is now available as a separate tuning lane
+- the first graph-backed live-library pass currently scores `59/66`, so graph
+  retrieval should not yet be treated as a release gate
 
 ## Memloft-Derived Real-Data Slice
 
@@ -201,3 +216,6 @@ Current memloft-slice baseline:
 - `all` + `ann` currently passes `90/90`
 - the exact and ANN results currently match on the full memloft-derived corpus
 - sources are real technical memloft records, not hand-written synthetic notes
+- graph-backed extraction retrieval is now available as a separate tuning lane
+- the first graph-backed memloft-slice pass currently scores `75/90`, so graph
+  retrieval still needs targeted tuning before benchmark confirmation

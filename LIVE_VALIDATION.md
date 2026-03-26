@@ -67,8 +67,10 @@ Default standard path:
 
 - `retrieval` mode
 - `exact` vector mode
+- `graph_depth=0`
 - `api` extraction backend
 - `openai/gpt-oss-120b` extraction model
+- `retrieval_ingest=records`
 - DeepInfra key resolution through Keychain
 - summary output at `target/practical-eval/retrieval-exact.json`
 
@@ -107,6 +109,7 @@ Goals:
 - track quality and latency over time with stable summary metadata
 - validate provider defaults on material that is larger than the curated
   practical sample but still easy to inspect by hand
+- keep graph-specific validation separate from the simpler seeded-record path
 
 ## Output Expectations
 
@@ -138,5 +141,10 @@ As of 2026-03-26:
 - the memloft-derived real-data slice under `eval/memloft-slice/` is the current highest-value follow-up validation layer before benchmark work
 - the memloft-derived real-data slice now covers 18 scenarios and 90 checks
 - the memloft-derived real-data slice currently passes `90/90` in both `all` + `exact` and `all` + `ann`
+- explicit graph-backed extraction retrieval is now available through
+  `FEMIND_GRAPH_DEPTH=2` and `FEMIND_RETRIEVAL_INGEST=extraction`
+- the first graph-backed run scores are `59/66` on the larger live library and
+  `75/90` on the memloft-derived slice, so graph-expanded retrieval still needs
+  targeted tuning before benchmark confirmation
 - the standard local live-validation path is `scripts/run-practical-eval.sh`
 - practical real-world eval design is defined in `PRACTICAL_EVAL.md`
