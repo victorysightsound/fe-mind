@@ -24,6 +24,7 @@ after the practical eval set is directionally strong.
 2. Real LLM-assisted extraction through the configured CLI or API callback
 3. End-to-end retrieval quality on a small approved sample before any large run
 4. Failure behavior when the provider is unavailable or misconfigured
+5. Provider parity checks between the OpenAI-compatible API path and local CLI callbacks
 
 ## What This Validation Does Not Cover
 
@@ -64,6 +65,7 @@ Default standard path:
 
 - `retrieval` mode
 - `exact` vector mode
+- `api` extraction backend
 - DeepInfra key resolution through Keychain
 - summary output at `target/practical-eval/retrieval-exact.json`
 
@@ -104,7 +106,9 @@ As of 2026-03-26:
 - local non-LLM verification is complete
 - ANN/exact/off runtime behavior is implemented and tested
 - extraction-only practical validation is directionally correct
+- extraction-only practical validation with Codex CLI `gpt-5.4-mini` passes `4/4`
 - retrieval-only practical validation in `exact` mode passes `9/9`
+- retrieval-only practical validation in `ann` mode passes `9/9`
 - broader live-usage validation from actual project docs passes `11/11`
 - the standard local live-validation path is `scripts/run-practical-eval.sh`
 - practical real-world eval design is defined in `PRACTICAL_EVAL.md`

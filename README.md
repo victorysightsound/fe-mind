@@ -23,7 +23,9 @@ The local crate and repo are now `femind` / `fe-mind`. The package rename is com
 The practical live-validation path is now established and repeatable:
 
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` is directionally correct
+- extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - retrieval-only practical eval in `exact` mode currently passes `9/9`
+- retrieval-only practical eval in `ann` mode currently passes `9/9`
 - broader live-usage sample built from actual project docs currently passes `11/11`
 - standard local runner: `scripts/run-practical-eval.sh`
 

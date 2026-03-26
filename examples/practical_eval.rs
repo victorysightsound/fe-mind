@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-#[cfg(all(feature = "api-embeddings", feature = "api-llm"))]
+#[cfg(all(feature = "api-embeddings", any(feature = "api-llm", feature = "cli-llm")))]
 mod app {
     use std::env;
     use std::fs;
@@ -9,7 +9,10 @@ mod app {
     use chrono::{DateTime, Utc};
     use femind::embeddings::{ApiBackend, EmbeddingBackend};
     use femind::engine::{EngineConfig, MemoryEngine, VectorSearchMode};
+    #[cfg(feature = "api-llm")]
     use femind::llm::ApiLlmCallback;
+    #[cfg(feature = "cli-llm")]
+    use femind::llm::CliLlmCallback;
     use femind::search::SearchMode;
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType};
     use serde::{Deserialize, Serialize};
@@ -18,7 +21,8 @@ mod app {
     const DEFAULT_BASE_URL: &str = "https://api.deepinfra.com/v1/openai";
     const DEFAULT_KEY_CMD: &str = "op read 'op://Personal/Deep Infra/credential' 2>/dev/null";
     const DEFAULT_EMBED_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
-    const DEFAULT_EXTRACT_MODEL: &str = "openai/gpt-oss-120b";
+    const DEFAULT_API_EXTRACT_MODEL: &str = "openai/gpt-oss-120b";
+    const DEFAULT_CODEX_EXTRACT_MODEL: &str = "gpt-5.4-mini";
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct EvalMemory {
@@ -115,6 +119,38 @@ mod app {
         }
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ExtractionBackend {
+        Api,
+        CodexCli,
+    }
+
+    impl ExtractionBackend {
+        fn from_str(value: &str) -> Result<Self, String> {
+            match value {
+                "api" => Ok(Self::Api),
+                "codex-cli" => Ok(Self::CodexCli),
+                other => Err(format!(
+                    "unknown extract backend '{other}', expected api | codex-cli"
+                )),
+            }
+        }
+
+        fn default_model(self) -> &'static str {
+            match self {
+                Self::Api => DEFAULT_API_EXTRACT_MODEL,
+                Self::CodexCli => DEFAULT_CODEX_EXTRACT_MODEL,
+            }
+        }
+
+        fn name(self) -> &'static str {
+            match self {
+                Self::Api => "api",
+                Self::CodexCli => "codex-cli",
+            }
+        }
+    }
+
     #[derive(Debug)]
     struct Config {
         scenarios_path: PathBuf,
@@ -127,6 +163,7 @@ mod app {
         api_key_env: String,
         key_cmd: String,
         embedding_model: String,
+        extraction_backend: ExtractionBackend,
         extraction_model: String,
     }
 
@@ -145,8 +182,12 @@ mod app {
                 .unwrap_or_else(|_| DEFAULT_KEY_CMD.to_string());
             let mut embedding_model = env::var("FEMIND_EMBED_MODEL")
                 .unwrap_or_else(|_| DEFAULT_EMBED_MODEL.to_string());
+            let extraction_backend = ExtractionBackend::from_str(
+                &env::var("FEMIND_EXTRACT_BACKEND").unwrap_or_else(|_| "api".to_string()),
+            )?;
+            let mut extraction_backend = extraction_backend;
             let mut extraction_model = env::var("FEMIND_EXTRACT_MODEL")
-                .unwrap_or_else(|_| DEFAULT_EXTRACT_MODEL.to_string());
+                .unwrap_or_else(|_| extraction_backend.default_model().to_string());
 
             let mut args = env::args().skip(1);
             while let Some(arg) = args.next() {
@@ -202,6 +243,14 @@ mod app {
                         embedding_model =
                             args.next().ok_or("--embedding-model requires a value")?;
                     }
+                    "--extract-backend" => {
+                        extraction_backend = ExtractionBackend::from_str(
+                            &args.next().ok_or("--extract-backend requires a value")?,
+                        )?;
+                        if env::var_os("FEMIND_EXTRACT_MODEL").is_none() {
+                            extraction_model = extraction_backend.default_model().to_string();
+                        }
+                    }
                     "--extraction-model" => {
                         extraction_model =
                             args.next().ok_or("--extraction-model requires a value")?;
@@ -225,6 +274,7 @@ mod app {
                 api_key_env,
                 key_cmd,
                 embedding_model,
+                extraction_backend,
                 extraction_model,
             })
         }
@@ -262,7 +312,7 @@ mod app {
         let api_key = resolve_api_key(&config)?;
         let embedder =
             ApiBackend::new(&config.base_url, api_key.clone(), &config.embedding_model, 384);
-        let extractor = ApiLlmCallback::new(&config.base_url, api_key, &config.extraction_model);
+        let extractor = build_extractor(&config, api_key);
 
         println!("femind practical evaluation");
         println!("==========================");
@@ -270,6 +320,7 @@ mod app {
         println!("mode: {}", mode_name(config.mode));
         println!("vector_mode: {}", config.vector_mode);
         println!("embedding_model: {}", embedder.model_name());
+        println!("extract_backend: {}", config.extraction_backend.name());
         println!("extraction_model: {}", extractor.model_name());
         println!();
 
@@ -282,7 +333,7 @@ mod app {
             println!("goal: {}", scenario.goal);
 
             let scenario_db = scenario_db_path(&config, &scenario.id)?;
-            let report = run_scenario(scenario, &scenario_db, &config, &extractor)?;
+            let report = run_scenario(scenario, &scenario_db, &config, extractor.as_ref())?;
 
             let scenario_passed = report
                 .retrieval
@@ -318,7 +369,7 @@ mod app {
         scenario: &Scenario,
         db_path: &Path,
         config: &Config,
-        extractor: &ApiLlmCallback,
+        extractor: &dyn LlmCallback,
     ) -> Result<ScenarioReport, Box<dyn std::error::Error>> {
         if db_path.exists() {
             fs::remove_file(db_path)?;
@@ -417,6 +468,38 @@ mod app {
             extraction,
             abstention,
         })
+    }
+
+    fn build_extractor(config: &Config, api_key: String) -> Box<dyn LlmCallback> {
+        match config.extraction_backend {
+            ExtractionBackend::Api => {
+                #[cfg(feature = "api-llm")]
+                {
+                    Box::new(ApiLlmCallback::new(
+                        &config.base_url,
+                        api_key,
+                        &config.extraction_model,
+                    ))
+                }
+                #[cfg(not(feature = "api-llm"))]
+                {
+                    let _ = api_key;
+                    panic!("api extraction backend requires api-llm feature");
+                }
+            }
+            ExtractionBackend::CodexCli => {
+                #[cfg(feature = "cli-llm")]
+                {
+                    let _ = api_key;
+                    Box::new(CliLlmCallback::codex(&config.extraction_model))
+                }
+                #[cfg(not(feature = "cli-llm"))]
+                {
+                    let _ = api_key;
+                    panic!("codex-cli extraction backend requires cli-llm feature");
+                }
+            }
+        }
     }
 
     fn top_hits(
@@ -641,6 +724,7 @@ mod app {
              \t--api-key-env <name>       Environment variable to read before using --key-cmd\n\
              \t--key-cmd <cmd>            Shell command that prints the API key\n\
              \t--embedding-model <model>  Embedding model name\n\
+             \t--extract-backend <kind>   Extraction backend: api | codex-cli\n\
              \t--extraction-model <model> Extraction model name\n"
         );
     }
@@ -675,16 +759,19 @@ mod app {
     }
 }
 
-#[cfg(all(feature = "api-embeddings", feature = "api-llm"))]
+#[cfg(all(feature = "api-embeddings", any(feature = "api-llm", feature = "cli-llm")))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     app::run()
 }
 
-#[cfg(not(all(feature = "api-embeddings", feature = "api-llm")))]
+#[cfg(not(all(
+    feature = "api-embeddings",
+    any(feature = "api-llm", feature = "cli-llm")
+)))]
 fn main() {
     eprintln!(
-        "This example requires features: api-embeddings and api-llm.\n\
-         Example: cargo run --example practical_eval --features api-embeddings,api-llm,ann -- --help"
+        "This example requires features: api-embeddings and one extraction backend (api-llm or cli-llm).\n\
+         Example: cargo run --example practical_eval --features api-embeddings,cli-llm,ann -- --help"
     );
     std::process::exit(1);
 }
