@@ -640,10 +640,14 @@ fn query_requires_strict_grounding(query: &str) -> bool {
     });
     let asks_how_many = tokens.windows(2).any(|pair| pair == ["how", "many"]);
 
-    has_exact_signal || asks_how_many
+    has_exact_signal || asks_how_many || query_asks_for_combined_capability(query)
 }
 
 fn lexical_grounding_ok(query: &str, text: &str) -> bool {
+    if query_asks_for_combined_capability(query) && text_implies_exclusion(text) {
+        return false;
+    }
+
     let query_tokens = meaning_tokens(query);
     let text_tokens = meaning_tokens(text);
 
@@ -656,7 +660,16 @@ fn lexical_grounding_ok(query: &str, text: &str) -> bool {
         .filter(|token| text_tokens.contains(*token))
         .count();
 
+    let detail_overlap = detail_tokens(query)
+        .into_iter()
+        .filter(|token| text_tokens.contains(token))
+        .count();
     let recall = overlap as f32 / query_tokens.len() as f32;
+
+    if query_requires_strict_grounding(query) && !detail_tokens(query).is_empty() && detail_overlap == 0 {
+        return false;
+    }
+
     overlap >= 2 || recall >= 0.5
 }
 
@@ -694,6 +707,44 @@ fn canonical_token(token: &str) -> Option<String> {
     } else {
         Some(stemmed.to_string())
     }
+}
+
+fn detail_tokens(value: &str) -> Vec<String> {
+    meaning_tokens(value)
+        .into_iter()
+        .filter(|token| {
+            matches!(
+                token.as_str(),
+                "exact"
+                    | "precise"
+                    | "specific"
+                    | "total"
+                    | "cost"
+                    | "token"
+                    | "price"
+                    | "version"
+                    | "number"
+                    | "id"
+                    | "publish"
+                    | "published"
+                    | "release"
+            )
+        })
+        .collect()
+}
+
+fn query_asks_for_combined_capability(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    let tokens: Vec<_> = normalized.split_whitespace().collect();
+    tokens.contains(&"together") || tokens.contains(&"both")
+}
+
+fn text_implies_exclusion(text: &str) -> bool {
+    let normalized = normalize_text(text);
+    normalized.contains("except")
+        || normalized.contains("without")
+        || normalized.contains("excluding")
+        || normalized.contains("not with")
 }
 
 fn normalize_text(value: &str) -> String {
@@ -871,5 +922,21 @@ mod tests {
 
         assert!(!lexical_grounding_ok(query, weak_hit));
         assert!(lexical_grounding_ok(query, grounded_hit));
+    }
+
+    #[test]
+    fn lexical_grounding_rejects_exact_version_without_version_detail() {
+        let query = "What exact crates.io version has already been published for femind?";
+        let weak_hit = "The local crate and repo are now femind / fe-mind. The package rename is complete locally, and publication work is the remaining external packaging step.";
+
+        assert!(!lexical_grounding_ok(query, weak_hit));
+    }
+
+    #[test]
+    fn lexical_grounding_rejects_combination_query_when_text_says_except() {
+        let query = "Which feature flag enables SQLCipher encryption and MCP server together?";
+        let weak_hit = "Compile-time feature flags include api-embeddings for the DeepInfra embedding API, api-llm for the chat completions API, ann for HNSW approximate nearest neighbor, and full for everything except encryption and mcp-server.";
+
+        assert!(!lexical_grounding_ok(query, weak_hit));
     }
 }

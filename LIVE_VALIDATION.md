@@ -105,5 +105,6 @@ As of 2026-03-26:
 - ANN/exact/off runtime behavior is implemented and tested
 - extraction-only practical validation is directionally correct
 - retrieval-only practical validation in `exact` mode passes `9/9`
+- broader live-usage validation from actual project docs passes `11/11`
 - the standard local live-validation path is `scripts/run-practical-eval.sh`
 - practical real-world eval design is defined in `PRACTICAL_EVAL.md`

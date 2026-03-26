@@ -24,6 +24,7 @@ The practical live-validation path is now established and repeatable:
 
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` is directionally correct
 - retrieval-only practical eval in `exact` mode currently passes `9/9`
+- broader live-usage sample built from actual project docs currently passes `11/11`
 - standard local runner: `scripts/run-practical-eval.sh`
 
 The next remaining work is broader live usage validation and release packaging. See:

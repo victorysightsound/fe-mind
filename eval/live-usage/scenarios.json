@@ -1,0 +1,109 @@
+[
+  {
+    "id": "release-status-from-readme",
+    "title": "Readme status and release work",
+    "category": "real-world-status",
+    "goal": "Retrieve current release status from actual project status text.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "The local crate and repo are now femind / fe-mind. The package rename is complete locally, and publication work is the remaining external packaging step. Non-LLM verification is currently green."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "procedural",
+        "text": "The practical live-validation path is now established and repeatable. Extraction-only practical eval with DeepInfra openai/gpt-oss-120b is directionally correct, retrieval-only practical eval in exact mode currently passes 9/9, and the standard local runner is scripts/run-practical-eval.sh."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What release work is still remaining for femind?",
+        "expected_answer": "Publication work is still the remaining external packaging step."
+      },
+      {
+        "query": "What is the standard local live-validation runner?",
+        "expected_answer": "The standard local live-validation runner is scripts/run-practical-eval.sh."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact crates.io version has already been published for femind?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "architecture-modes-and-flags",
+    "title": "Architecture search modes from actual docs",
+    "category": "real-world-architecture",
+    "goal": "Retrieve runtime mode behavior and feature-flag meaning from actual architecture text.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "ARCHITECTURE.md",
+        "memory_type": "semantic",
+        "text": "Vector search modes: exact uses brute-force cosine similarity by default, ann uses HNSW via instant-distance with a shared in-memory index that rebuilds when stored vectors change, and off uses FTS5 keyword search only."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "ARCHITECTURE.md",
+        "memory_type": "procedural",
+        "text": "Compile-time feature flags include api-embeddings for the DeepInfra embedding API, api-llm for the chat completions API, ann for HNSW approximate nearest neighbor, and full for everything except encryption and mcp-server."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What does ann mode use in femind?",
+        "expected_answer": "ann mode uses HNSW via instant-distance with a shared in-memory index."
+      },
+      {
+        "query": "What happens when vector search mode is off?",
+        "expected_answer": "off uses FTS5 keyword search only."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Which feature flag enables SQLCipher encryption and MCP server together?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "decision-based-extraction",
+    "title": "Decision extraction from actual project decision text",
+    "category": "real-world-extraction",
+    "goal": "Extract durable facts from actual decision records, not synthetic notes.",
+    "records": [
+      {
+        "timestamp": "2026-03-18T00:00:00Z",
+        "source": "DECISIONS.md",
+        "memory_type": "semantic",
+        "text": "Decision 017: Use all-MiniLM-L6-v2 as the default embedding model on all targets. Switched from granite-small-r2 because granite does not compile to WASM, MiniLM is three times faster on CPU, MiniLM is available on DeepInfra and other API providers for fast batch embedding, and the small MTEB gap is negligible when combined with hybrid search."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the default embedding model for femind?",
+        "expected_answer": "all-MiniLM-L6-v2 is the default embedding model."
+      },
+      {
+        "query": "Why was granite-small-r2 replaced?",
+        "expected_answer": "It was replaced because granite does not compile to WASM and MiniLM is faster and available on DeepInfra."
+      }
+    ],
+    "extraction_checks": [
+      {
+        "expected_fact": "all-MiniLM-L6-v2 is the default embedding model for all targets."
+      },
+      {
+        "expected_fact": "MiniLM was chosen because granite does not compile to WASM."
+      },
+      {
+        "expected_fact": "MiniLM is available on DeepInfra for fast batch embedding."
+      }
+    ]
+  }
+]

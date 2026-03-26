@@ -117,6 +117,8 @@ Current validated baseline:
 - extraction-only practical eval is directionally correct with DeepInfra `openai/gpt-oss-120b`
 - retrieval-only practical eval with `vector_mode=exact` currently passes `9/9`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
+- broader live-usage sample from actual project docs currently passes `11/11`
+- live-usage summary artifact: `target/practical-eval/live-usage-exact.json`
 
 This exact-mode practical run is the standard local regression check before
 trying wider live usage samples or ANN comparisons.
