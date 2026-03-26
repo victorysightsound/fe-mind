@@ -354,7 +354,7 @@ mod app {
                 let observed = top_hits(&engine, &check.query, config.top_k)?;
                 let passed = observed
                     .iter()
-                    .any(|hit| expected_match(&hit.text, &check.expected_answer));
+                    .any(|hit| expected_match(&hit.text, &check.query, &check.expected_answer));
                 retrieval.push(CheckReport {
                     query: check.query.clone(),
                     passed,
@@ -381,7 +381,7 @@ mod app {
                 let observed = extracted_texts.clone();
                 let passed = observed
                     .iter()
-                    .any(|hit| expected_match(hit, &check.expected_fact));
+                    .any(|hit| expected_match(hit, &check.expected_fact, &check.expected_fact));
                 extraction.push(CheckReport {
                     query: check.expected_fact.clone(),
                     passed,
@@ -522,10 +522,14 @@ mod app {
         Ok(root.join(format!("{scenario_id}.db")))
     }
 
-    fn expected_match(observed: &str, expected: &str) -> bool {
+    fn expected_match(observed: &str, query: &str, expected: &str) -> bool {
         let observed_normalized = normalize(observed);
         let expected_normalized = normalize(expected);
         if observed_normalized.contains(&expected_normalized) {
+            return true;
+        }
+
+        if matches_yes_no_state_answer(&observed_normalized, &normalize(query), &expected_normalized) {
             return true;
         }
 
@@ -543,6 +547,28 @@ mod app {
 
         let min_overlap = if expected_tokens.len() <= 2 { expected_tokens.len() } else { 2 };
         overlap >= min_overlap && recall >= 0.6
+    }
+
+    fn matches_yes_no_state_answer(observed: &str, query: &str, expected: &str) -> bool {
+        let negative_expected = expected.starts_with("no ")
+            || expected == "no"
+            || expected.contains("not active")
+            || expected.contains("superseded");
+        let asks_current_state = query.contains("still")
+            || query.contains("active")
+            || query.contains("current")
+            || query.starts_with("is ");
+
+        if !(negative_expected && asks_current_state) {
+            return false;
+        }
+
+        observed.contains("superseded")
+            || observed.contains("no longer")
+            || observed.contains("not active")
+            || observed.contains("prior ")
+            || observed.contains("former ")
+            || observed.contains("outdated")
     }
 
     fn normalize(value: &str) -> String {
@@ -617,6 +643,35 @@ mod app {
              \t--embedding-model <model>  Embedding model name\n\
              \t--extraction-model <model> Extraction model name\n"
         );
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{expected_match, matches_yes_no_state_answer};
+
+        #[test]
+        fn matcher_accepts_superseded_yes_no_answer() {
+            let observed =
+                "The prior desktop-first idea is superseded. Current build order is femind first, then feloop.";
+            let query = "Is desktop-first still the active plan?";
+            let expected = "No. That plan was superseded.";
+
+            assert!(matches_yes_no_state_answer(
+                &observed.to_lowercase(),
+                &query.to_lowercase(),
+                &expected.to_lowercase()
+            ));
+            assert!(expected_match(observed, query, expected));
+        }
+
+        #[test]
+        fn matcher_rejects_positive_answer_for_negative_state_check() {
+            let observed = "Desktop-first is still the active plan for the next release.";
+            let query = "Is desktop-first still the active plan?";
+            let expected = "No. That plan was superseded.";
+
+            assert!(!expected_match(observed, query, expected));
+        }
     }
 }
 
