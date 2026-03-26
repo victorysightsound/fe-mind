@@ -122,6 +122,7 @@ mod app {
         vector_mode: VectorSearchMode,
         top_k: usize,
         base_url: String,
+        api_key_env: String,
         key_cmd: String,
         embedding_model: String,
         extraction_model: String,
@@ -136,6 +137,8 @@ mod app {
             let mut vector_mode = VectorSearchMode::Exact;
             let mut top_k = 3usize;
             let mut base_url = DEFAULT_BASE_URL.to_string();
+            let mut api_key_env =
+                env::var("FEMIND_API_KEY_ENV").unwrap_or_else(|_| "FEMIND_API_KEY".to_string());
             let mut key_cmd = env::var("FEMIND_DEEPINFRA_KEY_CMD")
                 .unwrap_or_else(|_| DEFAULT_KEY_CMD.to_string());
             let mut embedding_model = env::var("FEMIND_EMBED_MODEL")
@@ -187,6 +190,9 @@ mod app {
                     "--base-url" => {
                         base_url = args.next().ok_or("--base-url requires a value")?;
                     }
+                    "--api-key-env" => {
+                        api_key_env = args.next().ok_or("--api-key-env requires a value")?;
+                    }
                     "--key-cmd" => {
                         key_cmd = args.next().ok_or("--key-cmd requires a value")?;
                     }
@@ -214,6 +220,7 @@ mod app {
                 vector_mode,
                 top_k,
                 base_url,
+                api_key_env,
                 key_cmd,
                 embedding_model,
                 extraction_model,
@@ -244,15 +251,10 @@ mod app {
         let config = Config::from_args().map_err(|e| format!("argument error: {e}"))?;
         let scenarios = load_scenarios(&config.scenarios_path)?;
 
-        let embedder = ApiBackend::with_key_cmd(
-            &config.base_url,
-            &config.key_cmd,
-            &config.embedding_model,
-            384,
-        )?;
-
-        let extractor =
-            ApiLlmCallback::with_key_cmd(&config.base_url, &config.key_cmd, &config.extraction_model)?;
+        let api_key = resolve_api_key(&config)?;
+        let embedder =
+            ApiBackend::new(&config.base_url, api_key.clone(), &config.embedding_model, 384);
+        let extractor = ApiLlmCallback::new(&config.base_url, api_key, &config.extraction_model);
 
         println!("femind practical evaluation");
         println!("==========================");
@@ -316,12 +318,12 @@ mod app {
 
         let mut engine = MemoryEngine::<EvalMemory>::builder()
             .database(db_path.to_string_lossy().into_owned())
-            .embedding_backend(ApiBackend::with_key_cmd(
+            .embedding_backend(ApiBackend::new(
                 &config.base_url,
-                &config.key_cmd,
+                resolve_api_key(config)?,
                 &config.embedding_model,
                 384,
-            )?)
+            ))
             .build()?;
         engine.config = EngineConfig {
             vector_search_mode: config.vector_mode,
@@ -417,9 +419,15 @@ mod app {
 
         let mut hits = Vec::new();
         for result in results {
-            if let Some(record) = engine.get(result.memory_id)? {
-                hits.push(record.text);
-            }
+            let text = engine.database().with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(Into::into)
+            })?;
+            hits.push(text);
         }
         Ok(hits)
     }
@@ -436,6 +444,29 @@ mod app {
     fn load_scenarios(path: &Path) -> Result<Vec<Scenario>, Box<dyn std::error::Error>> {
         let raw = fs::read_to_string(path)?;
         Ok(serde_json::from_str(&raw)?)
+    }
+
+    fn resolve_api_key(config: &Config) -> Result<String, Box<dyn std::error::Error>> {
+        if let Ok(value) = env::var(&config.api_key_env) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+
+        let output = std::process::Command::new("sh")
+            .args(["-c", &config.key_cmd])
+            .output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("key_cmd error: {stderr}").into());
+        }
+
+        let api_key = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if api_key.is_empty() {
+            return Err("key_cmd returned empty key".into());
+        }
+        Ok(api_key)
     }
 
     fn scenario_db_path(config: &Config, scenario_id: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -487,6 +518,7 @@ mod app {
              \t--vector-mode <off|exact|ann>\n\
              \t--top-k <n>                Number of retrieved records to inspect (default: 3)\n\
              \t--base-url <url>           OpenAI-compatible API base URL\n\
+             \t--api-key-env <name>       Environment variable to read before using --key-cmd\n\
              \t--key-cmd <cmd>            Shell command that prints the API key\n\
              \t--embedding-model <model>  Embedding model name\n\
              \t--extraction-model <model> Extraction model name\n"
