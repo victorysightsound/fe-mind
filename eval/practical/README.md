@@ -37,14 +37,22 @@ Each scenario includes:
 
 ## Repeatable Runner
 
-The curated set is wired to the `practical_eval` example:
+The curated set is wired to the `practical_eval` example.
+
+Standard local run:
+
+```bash
+scripts/run-practical-eval.sh
+```
+
+Equivalent direct command:
 
 ```bash
 cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
   --scenarios eval/practical/scenarios.json \
-  --mode all \
+  --mode retrieval \
   --vector-mode exact \
-  --summary target/practical-eval/summary.json
+  --summary target/practical-eval/retrieval-exact.json
 ```
 
 Useful variants:
@@ -66,6 +74,11 @@ cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
 ## Scope
 
 This is the primary real-world validation set for `femind`.
+
+Current local baseline:
+
+- retrieval-only `exact` mode is the standard regression path
+- latest fully green summary: `target/practical-eval/retrieval-exact.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary
 comparison or regression tools after this set is behaving well.

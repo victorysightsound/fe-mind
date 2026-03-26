@@ -87,12 +87,36 @@ set is directionally strong, repeatable, and free of obvious category failures.
 The primary live-validation entry point is:
 
 ```bash
+scripts/run-practical-eval.sh
+```
+
+Default behavior:
+
+- `FEMIND_EVAL_MODE=retrieval`
+- `FEMIND_VECTOR_MODE=exact`
+- summary output at `target/practical-eval/retrieval-exact.json`
+- runtime key resolution through macOS Keychain unless overridden with `FEMIND_EVAL_KEY_CMD`
+
+Equivalent direct command:
+
+```bash
 cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
   --scenarios eval/practical/scenarios.json \
-  --mode all \
+  --mode retrieval \
   --vector-mode exact \
-  --summary target/practical-eval/summary.json
+  --summary target/practical-eval/retrieval-exact.json
 ```
 
 The example uses a runtime key command and does not require secrets to be
 written into source files or shell history.
+
+## Current Practical Baseline
+
+Current validated baseline:
+
+- extraction-only practical eval is directionally correct with DeepInfra `openai/gpt-oss-120b`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `9/9`
+- summary artifact: `target/practical-eval/retrieval-exact.json`
+
+This exact-mode practical run is the standard local regression check before
+trying wider live usage samples or ANN comparisons.

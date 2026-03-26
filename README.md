@@ -20,7 +20,13 @@ The local crate and repo are now `femind` / `fe-mind`. The package rename is com
 - `cargo test --features full`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 
-The remaining approval-gated work is live CLI/API LLM validation. See:
+The practical live-validation path is now established and repeatable:
+
+- extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` is directionally correct
+- retrieval-only practical eval in `exact` mode currently passes `9/9`
+- standard local runner: `scripts/run-practical-eval.sh`
+
+The next remaining work is broader live usage validation and release packaging. See:
 
 - `ARCHITECTURE.md` — full crate structure and API design
 - `RESEARCH.md` — research, landscape analysis, and specification

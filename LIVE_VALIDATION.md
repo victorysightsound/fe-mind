@@ -57,12 +57,15 @@ Goals:
 Repeatable command surface:
 
 ```bash
-cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
-  --scenarios eval/practical/scenarios.json \
-  --mode all \
-  --vector-mode exact \
-  --summary target/practical-eval/summary.json
+scripts/run-practical-eval.sh
 ```
+
+Default standard path:
+
+- `retrieval` mode
+- `exact` vector mode
+- DeepInfra key resolution through Keychain
+- summary output at `target/practical-eval/retrieval-exact.json`
 
 ## Phase 3: Provider Comparison
 
@@ -96,9 +99,11 @@ For each approved live run, record:
 
 ## Current State
 
-As of 2026-03-25:
+As of 2026-03-26:
 
 - local non-LLM verification is complete
 - ANN/exact/off runtime behavior is implemented and tested
-- live CLI/API validation has not been run yet
+- extraction-only practical validation is directionally correct
+- retrieval-only practical validation in `exact` mode passes `9/9`
+- the standard local live-validation path is `scripts/run-practical-eval.sh`
 - practical real-world eval design is defined in `PRACTICAL_EVAL.md`
