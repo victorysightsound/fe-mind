@@ -124,12 +124,13 @@ written into source files or shell history.
 Graph-focused follow-up validation can be enabled explicitly:
 
 ```bash
-FEMIND_GRAPH_DEPTH=2 FEMIND_RETRIEVAL_INGEST=extraction scripts/run-live-library.sh
-FEMIND_GRAPH_DEPTH=2 FEMIND_RETRIEVAL_INGEST=extraction scripts/run-memloft-slice.sh
+FEMIND_GRAPH_DEPTH=2 FEMIND_RETRIEVAL_INGEST=hybrid scripts/run-live-library.sh
+FEMIND_GRAPH_DEPTH=2 FEMIND_RETRIEVAL_INGEST=hybrid scripts/run-memloft-slice.sh
 ```
 
 That path exists to test extraction-backed graph retrieval directly rather than
-the simpler seeded-record retrieval path.
+the simpler seeded-record retrieval path while still preserving exact raw
+details alongside extracted facts.
 
 Extraction backend options:
 
@@ -186,7 +187,7 @@ Current larger-library baseline:
 - summary artifacts now include stable run metadata for backend, model, vector
   mode, duration, pass counts, and pass rate
 - graph-backed extraction retrieval is now available as a separate tuning lane
-- the current graph-backed live-library pass scores `62/66`, so graph
+- the current graph-backed hybrid live-library pass scores `63/66`, so graph
   retrieval should not yet be treated as a release gate
 
 ## Memloft-Derived Real-Data Slice
@@ -217,5 +218,5 @@ Current memloft-slice baseline:
 - the exact and ANN results currently match on the full memloft-derived corpus
 - sources are real technical memloft records, not hand-written synthetic notes
 - graph-backed extraction retrieval is now available as a separate tuning lane
-- the current graph-backed memloft-slice pass scores `82/90`, so graph
+- the current graph-backed hybrid memloft-slice pass scores `82/90`, so graph
   retrieval still needs targeted tuning before benchmark confirmation

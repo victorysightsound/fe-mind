@@ -597,7 +597,7 @@ fn deduplicate_by_vector_similarity(
     });
 }
 
-fn apply_strict_detail_query_filter(
+pub(crate) fn apply_strict_detail_query_filter(
     db: &Database,
     query: &str,
     results: &mut Vec<SearchResult>,
@@ -623,7 +623,7 @@ fn apply_strict_detail_query_filter(
     });
 }
 
-fn query_requires_strict_grounding(query: &str) -> bool {
+pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
     let normalized = normalize_text(query);
     let tokens: Vec<_> = normalized.split_whitespace().collect();
 
@@ -649,7 +649,7 @@ fn query_requires_strict_grounding(query: &str) -> bool {
     has_exact_signal || asks_how_many || has_ordinal_signal || query_asks_for_combined_capability(query)
 }
 
-fn lexical_grounding_ok(query: &str, text: &str) -> bool {
+pub(crate) fn lexical_grounding_ok(query: &str, text: &str) -> bool {
     if query_asks_for_combined_capability(query) && text_implies_exclusion(text) {
         return query_is_yes_no(query);
     }

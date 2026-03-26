@@ -777,6 +777,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             }
         }
 
+        crate::search::builder::apply_strict_detail_query_filter(&self.db, query, &mut merged);
+
         // Diversification: limit chunks per session (0 = unlimited)
         let max_per = config.max_per_session;
         let diversified: Vec<_> = if max_per == 0 {

@@ -156,6 +156,7 @@ mod app {
     enum RetrievalIngest {
         Records,
         Extraction,
+        Hybrid,
     }
 
     impl RetrievalIngest {
@@ -163,8 +164,9 @@ mod app {
             match value {
                 "records" => Ok(Self::Records),
                 "extraction" => Ok(Self::Extraction),
+                "hybrid" => Ok(Self::Hybrid),
                 other => Err(format!(
-                    "unknown retrieval ingest '{other}', expected records | extraction"
+                    "unknown retrieval ingest '{other}', expected records | extraction | hybrid"
                 )),
             }
         }
@@ -173,6 +175,7 @@ mod app {
             match self {
                 Self::Records => "records",
                 Self::Extraction => "extraction",
+                Self::Hybrid => "hybrid",
             }
         }
     }
@@ -680,6 +683,22 @@ mod app {
                     .join("\n");
                 let _ = engine.store_with_extraction(&raw_text, extractor)?;
             }
+            RetrievalIngest::Hybrid => {
+                let records: Vec<EvalMemory> = scenario
+                    .records
+                    .iter()
+                    .map(to_eval_memory)
+                    .collect::<Result<Vec<_>, _>>()?;
+                let _ = engine.store_batch(&records)?;
+
+                let raw_text = scenario
+                    .records
+                    .iter()
+                    .map(|r| format!("[{}] {}", r.source, r.text))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let _ = engine.store_with_extraction(&raw_text, extractor)?;
+            }
         }
 
         Ok(())
@@ -941,7 +960,7 @@ mod app {
              \t--embedding-model <model>  Embedding model name\n\
              \t--extract-backend <kind>   Extraction backend: api | codex-cli\n\
              \t--extraction-model <model> Extraction model name\n\
-             \t--retrieval-ingest <kind>  Retrieval ingest path: records | extraction\n"
+             \t--retrieval-ingest <kind>  Retrieval ingest path: records | extraction | hybrid\n"
         );
     }
 

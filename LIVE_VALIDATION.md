@@ -142,8 +142,8 @@ As of 2026-03-26:
 - the memloft-derived real-data slice now covers 18 scenarios and 90 checks
 - the memloft-derived real-data slice currently passes `90/90` in both `all` + `exact` and `all` + `ann`
 - explicit graph-backed extraction retrieval is now available through
-  `FEMIND_GRAPH_DEPTH=2` and `FEMIND_RETRIEVAL_INGEST=extraction`
-- the current graph-backed run scores are `62/66` on the larger live library and
+  `FEMIND_GRAPH_DEPTH=2` and `FEMIND_RETRIEVAL_INGEST=hybrid`
+- the current graph-backed run scores are `63/66` on the larger live library and
   `82/90` on the memloft-derived slice, so graph-expanded retrieval still needs
   targeted tuning before benchmark confirmation
 - the standard local live-validation path is `scripts/run-practical-eval.sh`
