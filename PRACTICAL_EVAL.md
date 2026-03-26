@@ -95,6 +95,7 @@ Default behavior:
 - `FEMIND_EVAL_MODE=retrieval`
 - `FEMIND_VECTOR_MODE=exact`
 - `FEMIND_EXTRACT_BACKEND=api`
+- `FEMIND_EXTRACT_MODEL=openai/gpt-oss-120b`
 - summary output at `target/practical-eval/retrieval-exact.json`
 - runtime key resolution through macOS Keychain unless overridden with `FEMIND_EVAL_KEY_CMD`
 
@@ -114,22 +115,25 @@ written into source files or shell history.
 Extraction backend options:
 
 - `api`
-  Uses the OpenAI-compatible API callback. Current baseline model:
+  Uses the OpenAI-compatible API callback. Recommended default:
   `openai/gpt-oss-120b`
 - `codex-cli`
-  Uses the local Codex CLI callback. Current smoke-test model:
+  Uses the local Codex CLI callback. Recommended default:
   `gpt-5.4-mini`
+  Lower-cost fallback:
+  `gpt-5.1-codex-mini`
 
 ## Current Practical Baseline
 
 Current validated baseline:
 
-- extraction-only practical eval is directionally correct with DeepInfra `openai/gpt-oss-120b`
+- extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
+- extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
 - retrieval-only practical eval with `vector_mode=exact` currently passes `9/9`
 - retrieval-only practical eval with `vector_mode=ann` currently passes `9/9`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
-- broader live-usage sample from actual project docs currently passes `11/11`
+- broader live-usage sample from actual project docs currently passes `11/11` for all four tested extraction models
 - live-usage summary artifact: `target/practical-eval/live-usage-exact.json`
 
 This exact-mode practical run is the standard local regression check before
