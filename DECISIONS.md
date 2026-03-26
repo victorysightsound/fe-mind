@@ -206,8 +206,8 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - Three specific additions drive the score from 88-93% to 93-96%: fact extraction at ingest, time-aware query expansion, exhaustive retrieval mode
 
 **Consequences:**
-- `femind-bench/` workspace member with per-benchmark runners
-- Evaluation uses GPT-4o judge (LongMemEval standard)
+- Benchmark development lives in the standalone RecallBench project
+- Evaluation uses a standards-aligned judge configuration for benchmark parity
 - Score targets guide feature prioritization
 
 ---

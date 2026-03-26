@@ -99,7 +99,7 @@ pub enum SearchMode {
 
 ### Benchmark Harness
 
-Should be a separate workspace member (`femind-bench/`), not shipped in the library crate. Benchmark data is large (115K-1.5M tokens) and evaluation requires an LLM judge (GPT-4o).
+Should live in a separate benchmark application, not in the library crate. Benchmark data is large (115K-1.5M tokens) and evaluation requires an LLM judge (GPT-4o). RecallBench now fills that role for femind and other memory systems.
 
 ### Decision Needed
 
@@ -322,7 +322,7 @@ femind plans `all-MiniLM-L6-v2` (384-dim). OMEGA uses `bge-small-en-v1.5` (also 
 | Reflection operation | Synthesize higher-order insights | Medium — needs LlmCallback |
 | Beliefs memory type | Richer cognitive model | Low — enum variant |
 | WASM support | Browser deployment | Medium — conditional compilation |
-| Benchmark harness (femind-bench) | Validation and marketing | Medium — separate crate |
+| Benchmark harness (RecallBench) | Validation and marketing | Medium — separate application |
 | fastembed-rs backend | 25+ models, reranking, SPLADE | Medium — new backend impl |
 
 ---
