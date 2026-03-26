@@ -1,0 +1,177 @@
+[
+  {
+    "id": "current-architecture-decision",
+    "title": "Current architecture wins over superseded planning",
+    "category": "current-vs-superseded",
+    "goal": "Prefer the active architecture decision over earlier drafts.",
+    "records": [
+      {
+        "timestamp": "2026-03-10T09:00:00Z",
+        "source": "meeting-note",
+        "text": "Initial thought: build the desktop shell before the memory engine so the UI can guide the API shape."
+      },
+      {
+        "timestamp": "2026-03-12T15:30:00Z",
+        "source": "decision-note",
+        "text": "Decision: build the memory engine first. Desktop work stays downstream until the core retrieval and extraction behavior is stable."
+      },
+      {
+        "timestamp": "2026-03-13T10:00:00Z",
+        "source": "planning-note",
+        "text": "The prior desktop-first idea is superseded. Current build order is femind first, then feloop."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What should be built before desktop work?",
+        "expected_answer": "The memory engine should be built first."
+      },
+      {
+        "query": "Is desktop-first still the active plan?",
+        "expected_answer": "No. That plan was superseded."
+      }
+    ]
+  },
+  {
+    "id": "preference-change-over-time",
+    "title": "Preference updates should replace stale preference answers",
+    "category": "preferences-and-decisions",
+    "goal": "Surface the current preference and retain change history.",
+    "records": [
+      {
+        "timestamp": "2026-02-01T08:00:00Z",
+        "source": "user-note",
+        "text": "For quick experiments, prefer local embeddings because they keep everything offline."
+      },
+      {
+        "timestamp": "2026-03-20T08:00:00Z",
+        "source": "user-note",
+        "text": "Update: for benchmark and evaluation workflows, prefer DeepInfra MiniLM embeddings because they are much faster and cheap enough."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What embedding path is preferred for evaluation workflows?",
+        "expected_answer": "DeepInfra MiniLM embeddings are preferred for evaluation workflows."
+      },
+      {
+        "query": "What was the earlier preference before that update?",
+        "expected_answer": "The earlier preference was local embeddings for quick offline experiments."
+      }
+    ]
+  },
+  {
+    "id": "messy-meeting-extraction",
+    "title": "Messy meeting notes should still produce usable extracted facts",
+    "category": "messy-source-extraction",
+    "goal": "Extract decisions, blockers, and follow-up items from rough notes.",
+    "records": [
+      {
+        "timestamp": "2026-03-22T14:00:00Z",
+        "source": "meeting-note",
+        "text": "Wed sync notes. ANN looked good after rebuild fix. Still need live provider test. Keep DeepInfra for embeddings, try gpt-oss-120b first for extraction. Don't do large benchmark runs yet. Need to confirm stale facts lose to current facts before calling this production."
+      }
+    ],
+    "extraction_checks": [
+      {
+        "expected_fact": "ANN behavior improved after the rebuild fix."
+      },
+      {
+        "expected_fact": "DeepInfra should be used for embeddings."
+      },
+      {
+        "expected_fact": "gpt-oss-120b should be tried first for extraction."
+      },
+      {
+        "expected_fact": "Large benchmark runs should not happen yet."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What extraction model should be tried first?",
+        "expected_answer": "gpt-oss-120b should be tried first."
+      }
+    ]
+  },
+  {
+    "id": "temporal-current-state",
+    "title": "Temporal questions should resolve to the current state",
+    "category": "temporal-and-recency",
+    "goal": "Answer current-state questions correctly when the same field changed over time.",
+    "records": [
+      {
+        "timestamp": "2026-03-01T09:00:00Z",
+        "source": "status-note",
+        "text": "The repo is still named mindcore and has not been moved into the suite yet."
+      },
+      {
+        "timestamp": "2026-03-25T18:00:00Z",
+        "source": "status-note",
+        "text": "The repo is now fe-mind and the crate name is femind."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the current repo name?",
+        "expected_answer": "The current repo name is fe-mind."
+      },
+      {
+        "query": "What was the earlier repo name?",
+        "expected_answer": "The earlier repo name was mindcore."
+      }
+    ]
+  },
+  {
+    "id": "distractor-noise",
+    "title": "Correct answer should survive similar distractor text",
+    "category": "distractor-resistance",
+    "goal": "Retrieve the right deployment detail even with similar noisy records nearby.",
+    "records": [
+      {
+        "timestamp": "2026-03-15T11:00:00Z",
+        "source": "ops-note",
+        "text": "DeepInfra API key auth was verified for femind validation."
+      },
+      {
+        "timestamp": "2026-03-15T11:05:00Z",
+        "source": "ops-note",
+        "text": "OpenRouter key remains available for unrelated experiments."
+      },
+      {
+        "timestamp": "2026-03-15T11:10:00Z",
+        "source": "ops-note",
+        "text": "Anthropic CLI auth is configured locally but should not be used for the first DeepInfra validation pass."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "Which provider auth was verified for the first femind validation pass?",
+        "expected_answer": "DeepInfra auth was verified for the first femind validation pass."
+      }
+    ]
+  },
+  {
+    "id": "abstention-missing-info",
+    "title": "System should abstain when the answer is not present",
+    "category": "abstention",
+    "goal": "Avoid fabrication when the source records never contained the answer.",
+    "records": [
+      {
+        "timestamp": "2026-03-18T12:00:00Z",
+        "source": "project-note",
+        "text": "Need to compare extraction quality between gpt-oss-120b and Nemotron after the smoke test."
+      },
+      {
+        "timestamp": "2026-03-18T12:05:00Z",
+        "source": "project-note",
+        "text": "Do not run large benchmark sweeps before the practical eval set looks good."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What was the exact total token cost of the last Nemotron run?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  }
+]

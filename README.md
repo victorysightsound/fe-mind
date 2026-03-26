@@ -25,4 +25,6 @@ The remaining approval-gated work is live CLI/API LLM validation. See:
 - `ARCHITECTURE.md` — full crate structure and API design
 - `RESEARCH.md` — research, landscape analysis, and specification
 - `DECISIONS.md` — architectural decisions log
+- `PRACTICAL_EVAL.md` — real-world validation plan and practical eval categories
+- `eval/practical/` — curated practical validation scenarios
 - `research/` — competitive landscape analysis

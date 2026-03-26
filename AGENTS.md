@@ -24,8 +24,10 @@ session-context
 | `ARCHITECTURE.md` | Full crate structure and API design |
 | `RESEARCH.md` | Landscape analysis, academic foundations, specification |
 | `DECISIONS.md` | Architectural decisions log |
+| `PRACTICAL_EVAL.md` | Real-world validation strategy and release criteria |
 | `.docs/femind_spec.db` | Authoritative repo-local architecture and implementation database |
 | `research/` | Competitive landscape research |
+| `eval/practical/` | Curated real-world validation scenarios |
 
 ---
 
@@ -85,6 +87,7 @@ task done <id>
 - Work from the current specs and task list; keep changes scoped and validate them before committing.
 - Prefer local compile, lint, and non-network test paths first.
 - Do not run real CLI/API LLM validation or benchmark paths without explicit user approval.
+- Treat `eval/practical/` as the primary live-validation target before larger benchmark work.
 
 ---
 

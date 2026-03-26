@@ -6,6 +6,10 @@ This document defines the first approval-gated live validation pass for `femind`
 It is intentionally limited to real CLI/API model calls and benchmark paths that
 were not exercised during the local non-LLM stabilization pass.
 
+The practical validation set in `eval/practical/` is the primary real-world
+check for this phase. Benchmark datasets are secondary and should only be used
+after the practical eval set is directionally strong.
+
 ## Preconditions
 
 - Local rename to `fe-mind` / `femind` is complete
@@ -42,7 +46,7 @@ Goals:
 
 ## Phase 2: Small Real Sample
 
-Use a very small approved sample set.
+Use a very small approved sample set from `eval/practical/scenarios.json`.
 
 Goals:
 
@@ -87,3 +91,4 @@ As of 2026-03-25:
 - local non-LLM verification is complete
 - ANN/exact/off runtime behavior is implemented and tested
 - live CLI/API validation has not been run yet
+- practical real-world eval design is defined in `PRACTICAL_EVAL.md`
