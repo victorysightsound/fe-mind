@@ -13,12 +13,7 @@ pub trait ScoringStrategy: Send + Sync {
     /// - `base_score`: the raw retrieval score (from FTS5, vector, or RRF)
     ///
     /// Returns a multiplier applied to the base score.
-    fn score_multiplier(
-        &self,
-        record: &MemoryMeta,
-        query: &str,
-        base_score: f32,
-    ) -> f32;
+    fn score_multiplier(&self, record: &MemoryMeta, query: &str, base_score: f32) -> f32;
 }
 
 /// A scored search result containing the memory record and score breakdown.

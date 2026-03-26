@@ -1,16 +1,23 @@
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::useless_format
+)]
+
 //! Full pipeline end-to-end tests.
 //!
 //! Exercises: store → embed → search hybrid → score → context assembly → graph → activation → prune
 
 use chrono::{DateTime, Duration, Utc};
-use mindcore::context::ContextBudget;
-use mindcore::engine::MemoryEngine;
-use mindcore::memory::activation;
-use mindcore::memory::pruning::{self, PruningPolicy};
-use mindcore::memory::store::StoreResult;
-use mindcore::memory::{GraphMemory, RelationType};
-use mindcore::scoring::{CompositeScorer, ImportanceScorer, RecencyScorer};
-use mindcore::traits::{MemoryRecord, MemoryType};
+use femind::context::ContextBudget;
+use femind::engine::MemoryEngine;
+use femind::memory::activation;
+use femind::memory::pruning::{self, PruningPolicy};
+use femind::memory::store::StoreResult;
+use femind::memory::{GraphMemory, RelationType};
+use femind::scoring::{CompositeScorer, ImportanceScorer, RecencyScorer};
+use femind::traits::{MemoryRecord, MemoryType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,18 +31,34 @@ struct Mem {
 }
 
 impl MemoryRecord for Mem {
-    fn id(&self) -> Option<i64> { self.id }
-    fn searchable_text(&self) -> String { self.text.clone() }
-    fn memory_type(&self) -> MemoryType { self.mem_type }
-    fn importance(&self) -> u8 { self.importance }
-    fn created_at(&self) -> DateTime<Utc> { self.created_at }
-    fn category(&self) -> Option<&str> { self.category.as_deref() }
+    fn id(&self) -> Option<i64> {
+        self.id
+    }
+    fn searchable_text(&self) -> String {
+        self.text.clone()
+    }
+    fn memory_type(&self) -> MemoryType {
+        self.mem_type
+    }
+    fn importance(&self) -> u8 {
+        self.importance
+    }
+    fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+    fn category(&self) -> Option<&str> {
+        self.category.as_deref()
+    }
 }
 
 fn mem(text: &str, imp: u8, mt: MemoryType, cat: Option<&str>) -> Mem {
     Mem {
-        id: None, text: text.into(), importance: imp, mem_type: mt,
-        category: cat.map(String::from), created_at: Utc::now(),
+        id: None,
+        text: text.into(),
+        importance: imp,
+        mem_type: mt,
+        category: cat.map(String::from),
+        created_at: Utc::now(),
     }
 }
 
@@ -54,22 +77,33 @@ fn full_pipeline_100_memories() {
 
     // Store 100 diverse memories
     let categories = ["error", "decision", "pattern", "note"];
-    let types = [MemoryType::Episodic, MemoryType::Semantic, MemoryType::Procedural];
+    let types = [
+        MemoryType::Episodic,
+        MemoryType::Semantic,
+        MemoryType::Procedural,
+    ];
 
     for i in 0..100 {
         let cat = categories[i % categories.len()];
         let mt = types[i % types.len()];
         let imp = ((i % 10) + 1) as u8;
-        engine.store(&mem(
-            &format!("memory {i}: authentication JWT error handling pattern in production system"),
-            imp, mt, Some(cat),
-        )).expect("store");
+        engine
+            .store(&mem(
+                &format!(
+                    "memory {i}: authentication JWT error handling pattern in production system"
+                ),
+                imp,
+                mt,
+                Some(cat),
+            ))
+            .expect("store");
     }
 
     assert_eq!(engine.count().expect("count"), 100);
 
     // Search with scoring
-    let results = engine.search("authentication JWT")
+    let results = engine
+        .search("authentication JWT")
         .limit(10)
         .execute()
         .expect("search");
@@ -81,7 +115,8 @@ fn full_pipeline_100_memories() {
     }
 
     // Context assembly
-    let assembly = engine.assemble_context("JWT error", &ContextBudget::new(2000))
+    let assembly = engine
+        .assemble_context("JWT error", &ContextBudget::new(2000))
         .expect("assemble");
     assert!(!assembly.items.is_empty());
     assert!(assembly.total_tokens <= 2000);
@@ -95,17 +130,41 @@ fn full_pipeline_100_memories() {
 fn graph_relationships_via_engine() {
     let engine = MemoryEngine::<Mem>::builder().build().expect("build");
 
-    let StoreResult::Added(error_id) = engine.store(&mem(
-        "error: JWT token expired during auth flow", 7, MemoryType::Procedural, Some("error")
-    )).expect("store") else { panic!() };
+    let StoreResult::Added(error_id) = engine
+        .store(&mem(
+            "error: JWT token expired during auth flow",
+            7,
+            MemoryType::Procedural,
+            Some("error"),
+        ))
+        .expect("store")
+    else {
+        panic!()
+    };
 
-    let StoreResult::Added(fix_id) = engine.store(&mem(
-        "fix: implement token refresh before expiry", 8, MemoryType::Procedural, Some("fix")
-    )).expect("store") else { panic!() };
+    let StoreResult::Added(fix_id) = engine
+        .store(&mem(
+            "fix: implement token refresh before expiry",
+            8,
+            MemoryType::Procedural,
+            Some("fix"),
+        ))
+        .expect("store")
+    else {
+        panic!()
+    };
 
-    let StoreResult::Added(cause_id) = engine.store(&mem(
-        "root cause: clock drift between auth server and app", 9, MemoryType::Semantic, Some("cause")
-    )).expect("store") else { panic!() };
+    let StoreResult::Added(cause_id) = engine
+        .store(&mem(
+            "root cause: clock drift between auth server and app",
+            9,
+            MemoryType::Semantic,
+            Some("cause"),
+        ))
+        .expect("store")
+    else {
+        panic!()
+    };
 
     // Create relationship chain: error → solved_by → fix, error → caused_by → cause
     let db = engine.database();
@@ -126,9 +185,17 @@ fn graph_relationships_via_engine() {
 fn activation_model_via_engine() {
     let engine = MemoryEngine::<Mem>::builder().build().expect("build");
 
-    let StoreResult::Added(id) = engine.store(&mem(
-        "activation test memory", 5, MemoryType::Semantic, None
-    )).expect("store") else { panic!() };
+    let StoreResult::Added(id) = engine
+        .store(&mem(
+            "activation test memory",
+            5,
+            MemoryType::Semantic,
+            None,
+        ))
+        .expect("store")
+    else {
+        panic!()
+    };
 
     let db = engine.database();
 
@@ -142,7 +209,10 @@ fn activation_model_via_engine() {
 
     // Activation should increase
     let a5 = activation::compute_activation(db, id).expect("activation");
-    assert!(a5 > a0, "activation should increase with accesses: {a0} → {a5}");
+    assert!(
+        a5 > a0,
+        "activation should increase with accesses: {a0} → {a5}"
+    );
 
     // Update cache
     let cached = activation::update_activation_cache(db, id).expect("cache");
@@ -157,22 +227,35 @@ fn pruning_selective() {
 
     // Old episodic (should be pruned)
     let old_ep = Mem {
-        id: None, text: "old debug session log".into(), importance: 3,
-        mem_type: MemoryType::Episodic, category: Some("log".into()),
+        id: None,
+        text: "old debug session log".into(),
+        importance: 3,
+        mem_type: MemoryType::Episodic,
+        category: Some("log".into()),
         created_at: Utc::now() - Duration::days(60),
     };
     engine.store(&old_ep).expect("store");
 
     // Old semantic (should NOT be pruned — wrong type)
     let old_sem = Mem {
-        id: None, text: "project uses PostgreSQL".into(), importance: 7,
-        mem_type: MemoryType::Semantic, category: Some("fact".into()),
+        id: None,
+        text: "project uses PostgreSQL".into(),
+        importance: 7,
+        mem_type: MemoryType::Semantic,
+        category: Some("fact".into()),
         created_at: Utc::now() - Duration::days(90),
     };
     engine.store(&old_sem).expect("store");
 
     // Recent episodic (should NOT be pruned — too new)
-    engine.store(&mem("recent debug session", 3, MemoryType::Episodic, Some("log"))).expect("store");
+    engine
+        .store(&mem(
+            "recent debug session",
+            3,
+            MemoryType::Episodic,
+            Some("log"),
+        ))
+        .expect("store");
 
     // Set low activation on old memories
     db.with_writer(|conn| {
@@ -181,8 +264,15 @@ fn pruning_selective() {
     }).expect("set activation");
 
     let report = pruning::prune(db, &PruningPolicy::default()).expect("prune");
-    assert_eq!(report.pruned, 1, "should prune only the old episodic memory");
-    assert_eq!(engine.count().expect("count"), 2, "semantic and recent should survive");
+    assert_eq!(
+        report.pruned, 1,
+        "should prune only the old episodic memory"
+    );
+    assert_eq!(
+        engine.count().expect("count"),
+        2,
+        "semantic and recent should survive"
+    );
 }
 
 /// Test two-tier database via engine.
@@ -199,7 +289,9 @@ fn two_tier_via_engine() {
         .expect("build");
 
     // Store in project database
-    engine.store(&mem("project-specific fact", 5, MemoryType::Semantic, None)).expect("store");
+    engine
+        .store(&mem("project-specific fact", 5, MemoryType::Semantic, None))
+        .expect("store");
 
     // Store in global database directly
     let gdb = engine.global_database().expect("global db");
@@ -210,7 +302,8 @@ fn two_tier_via_engine() {
             [],
         )?;
         Ok(())
-    }).expect("global insert");
+    })
+    .expect("global insert");
 
     // Both databases accessible
     assert_eq!(engine.count().expect("count"), 1); // project db only
@@ -223,13 +316,30 @@ fn dedup_at_scale() {
 
     // Store 50 unique memories
     for i in 0..50 {
-        engine.store(&mem(&format!("unique memory {i}"), 5, MemoryType::Semantic, None)).expect("store");
+        engine
+            .store(&mem(
+                &format!("unique memory {i}"),
+                5,
+                MemoryType::Semantic,
+                None,
+            ))
+            .expect("store");
     }
 
     // Try to store all 50 again — should all be duplicates
     for i in 0..50 {
-        let result = engine.store(&mem(&format!("unique memory {i}"), 5, MemoryType::Semantic, None)).expect("store");
-        assert!(matches!(result, StoreResult::Duplicate(_)), "memory {i} should be a duplicate");
+        let result = engine
+            .store(&mem(
+                &format!("unique memory {i}"),
+                5,
+                MemoryType::Semantic,
+                None,
+            ))
+            .expect("store");
+        assert!(
+            matches!(result, StoreResult::Duplicate(_)),
+            "memory {i} should be a duplicate"
+        );
     }
 
     assert_eq!(engine.count().expect("count"), 50);
@@ -241,7 +351,7 @@ fn dedup_at_scale() {
 /// the entire embedding-at-store + hybrid-search path executes without errors.
 #[test]
 fn full_pipeline_with_noop_embedding() {
-    use mindcore::embeddings::NoopBackend;
+    use femind::embeddings::NoopBackend;
 
     let backend = NoopBackend::new(384);
     let engine = MemoryEngine::<Mem>::builder()
@@ -279,33 +389,49 @@ fn full_pipeline_with_noop_embedding() {
     ];
 
     for (i, text) in topics.iter().enumerate() {
-        let mt = [MemoryType::Semantic, MemoryType::Procedural, MemoryType::Episodic][i % 3];
+        let mt = [
+            MemoryType::Semantic,
+            MemoryType::Procedural,
+            MemoryType::Episodic,
+        ][i % 3];
         let result = engine.store(&mem(text, 5, mt, None)).expect("store");
-        assert!(matches!(result, StoreResult::Added(_)), "memory {i} should be added");
+        assert!(
+            matches!(result, StoreResult::Added(_)),
+            "memory {i} should be added"
+        );
     }
 
     assert_eq!(engine.count().expect("count"), 25);
 
     // Verify embedding_status was set (NoopBackend always succeeds)
     let db = engine.database();
-    let success_count: i64 = db.with_reader(|conn| {
-        conn.query_row(
-            "SELECT COUNT(*) FROM memories WHERE embedding_status = 'success'",
-            [],
-            |row| row.get(0),
-        ).map_err(Into::into)
-    }).expect("count query");
-    assert_eq!(success_count, 25, "all memories should have embedding_status='success'");
+    let success_count: i64 = db
+        .with_reader(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM memories WHERE embedding_status = 'success'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+        .expect("count query");
+    assert_eq!(
+        success_count, 25,
+        "all memories should have embedding_status='success'"
+    );
 
     // Verify vectors were stored
-    let vector_count: i64 = db.with_reader(|conn| {
-        conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
-            .map_err(Into::into)
-    }).expect("vector count");
+    let vector_count: i64 = db
+        .with_reader(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+                .map_err(Into::into)
+        })
+        .expect("vector count");
     assert_eq!(vector_count, 25, "all memories should have stored vectors");
 
     // Search with Auto mode (should use hybrid since embedding backend is configured)
-    let results = engine.search("authentication JWT token")
+    let results = engine
+        .search("authentication JWT token")
         .limit(10)
         .execute()
         .expect("search");
@@ -315,31 +441,40 @@ fn full_pipeline_with_noop_embedding() {
     assert!(results[0].score > 0.0);
 
     // Context assembly
-    let assembly = engine.assemble_context("database query timeout", &ContextBudget::new(4000))
+    let assembly = engine
+        .assemble_context("database query timeout", &ContextBudget::new(4000))
         .expect("assemble");
-    assert!(!assembly.items.is_empty(), "context should contain relevant memories");
+    assert!(
+        !assembly.items.is_empty(),
+        "context should contain relevant memories"
+    );
     assert!(assembly.total_tokens <= 4000);
 
     // Search for a topic that requires keyword matching
-    let results = engine.search("Redis caching TTL")
+    let results = engine
+        .search("Redis caching TTL")
         .limit(5)
         .execute()
         .expect("search");
     assert!(!results.is_empty(), "should find Redis-related memory");
 
     // Search with memory type filter
-    let results = engine.search("authentication")
+    let results = engine
+        .search("authentication")
         .memory_type(MemoryType::Semantic)
         .limit(10)
         .execute()
         .expect("search");
-    assert!(!results.is_empty(), "should find semantic memories about auth");
+    assert!(
+        !results.is_empty(),
+        "should find semantic memories about auth"
+    );
 }
 
 /// Test store_batch with NoopBackend.
 #[test]
 fn store_batch_with_noop_embedding() {
-    use mindcore::embeddings::NoopBackend;
+    use femind::embeddings::NoopBackend;
 
     let backend = NoopBackend::new(384);
     let engine = MemoryEngine::<Mem>::builder()
@@ -347,12 +482,16 @@ fn store_batch_with_noop_embedding() {
         .build()
         .expect("build");
 
-    let records: Vec<Mem> = (0..30).map(|i| {
-        mem(
-            &format!("batch memory {i}: topic about engineering and systems"),
-            5, MemoryType::Semantic, None,
-        )
-    }).collect();
+    let records: Vec<Mem> = (0..30)
+        .map(|i| {
+            mem(
+                &format!("batch memory {i}: topic about engineering and systems"),
+                5,
+                MemoryType::Semantic,
+                None,
+            )
+        })
+        .collect();
 
     let results = engine.store_batch(&records).expect("batch store");
     assert_eq!(results.len(), 30);
@@ -360,14 +499,17 @@ fn store_batch_with_noop_embedding() {
 
     // Verify all embeddings stored
     let db = engine.database();
-    let vector_count: i64 = db.with_reader(|conn| {
-        conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
-            .map_err(Into::into)
-    }).expect("vector count");
+    let vector_count: i64 = db
+        .with_reader(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+                .map_err(Into::into)
+        })
+        .expect("vector count");
     assert_eq!(vector_count, 30);
 
     // Search works after batch store
-    let results = engine.search("engineering systems")
+    let results = engine
+        .search("engineering systems")
         .limit(5)
         .execute()
         .expect("search");

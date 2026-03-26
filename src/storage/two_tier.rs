@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use crate::error::{MindCoreError, Result};
-use crate::storage::Database;
+use crate::error::{FemindError, Result};
 use crate::storage::migrations;
+use crate::storage::Database;
 
 /// Two-tier memory database manager.
 ///
@@ -23,10 +23,7 @@ impl TwoTierManager {
     ///
     /// - `global_path`: path to the global database (typically `~/.mindcore/global.db`)
     /// - `project_path`: path to the project database (typically `./.mindcore/memory.db`)
-    pub fn open(
-        global_path: impl AsRef<Path>,
-        project_path: impl AsRef<Path>,
-    ) -> Result<Self> {
+    pub fn open(global_path: impl AsRef<Path>, project_path: impl AsRef<Path>) -> Result<Self> {
         let global_path = global_path.as_ref();
         let project_path = project_path.as_ref();
 
@@ -35,7 +32,7 @@ impl TwoTierManager {
             if let Some(parent) = path.parent() {
                 if !parent.as_os_str().is_empty() {
                     std::fs::create_dir_all(parent).map_err(|e| {
-                        MindCoreError::Migration(format!(
+                        FemindError::Migration(format!(
                             "failed to create directory {}: {e}",
                             parent.display()
                         ))
@@ -106,31 +103,43 @@ mod tests {
         assert!(project.exists());
 
         // Both databases should be usable
-        manager.global().with_writer(|conn| {
-            conn.execute(
-                "INSERT INTO memories (searchable_text, memory_type, content_hash, record_json)
+        manager
+            .global()
+            .with_writer(|conn| {
+                conn.execute(
+                    "INSERT INTO memories (searchable_text, memory_type, content_hash, record_json)
                  VALUES ('global memory', 'semantic', 'gh', '{}')",
-                [],
-            )?;
-            Ok(())
-        }).expect("global insert");
+                    [],
+                )?;
+                Ok(())
+            })
+            .expect("global insert");
 
-        manager.project().with_writer(|conn| {
-            conn.execute(
-                "INSERT INTO memories (searchable_text, memory_type, content_hash, record_json)
+        manager
+            .project()
+            .with_writer(|conn| {
+                conn.execute(
+                    "INSERT INTO memories (searchable_text, memory_type, content_hash, record_json)
                  VALUES ('project memory', 'semantic', 'ph', '{}')",
-                [],
-            )?;
-            Ok(())
-        }).expect("project insert");
+                    [],
+                )?;
+                Ok(())
+            })
+            .expect("project insert");
 
         // Verify isolation
-        let global_count: i64 = manager.global().with_reader(|conn| {
-            Ok(conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?)
-        }).expect("count");
-        let project_count: i64 = manager.project().with_reader(|conn| {
-            Ok(conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?)
-        }).expect("count");
+        let global_count: i64 = manager
+            .global()
+            .with_reader(|conn| {
+                Ok(conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?)
+            })
+            .expect("count");
+        let project_count: i64 = manager
+            .project()
+            .with_reader(|conn| {
+                Ok(conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?)
+            })
+            .expect("count");
 
         assert_eq!(global_count, 1);
         assert_eq!(project_count, 1);

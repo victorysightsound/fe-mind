@@ -48,7 +48,14 @@ impl FtsSearch {
         min_tier: Option<i32>,
     ) -> Result<Vec<FtsResult>> {
         let sanitized = sanitize_fts5_query(query);
-        Self::execute_fts(db, &sanitized, limit, category_filter, memory_type_filter, min_tier)
+        Self::execute_fts(
+            db,
+            &sanitized,
+            limit,
+            category_filter,
+            memory_type_filter,
+            min_tier,
+        )
     }
 
     /// Search using OR mode with stop-word removal — returns partial matches ranked by BM25.
@@ -69,7 +76,14 @@ impl FtsSearch {
         let sanitized = sanitize_fts5_query(query);
         let stripped = strip_stop_words(&sanitized);
         let or_query = to_or_query(&stripped);
-        Self::execute_fts(db, &or_query, limit, category_filter, memory_type_filter, min_tier)
+        Self::execute_fts(
+            db,
+            &or_query,
+            limit,
+            category_filter,
+            memory_type_filter,
+            min_tier,
+        )
     }
 
     /// Execute the FTS5 query against the database.
@@ -100,7 +114,13 @@ impl FtsSearch {
 
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt.query_map(
-                params![fts_query, category_filter, memory_type_filter, min_tier, limit as i64],
+                params![
+                    fts_query,
+                    category_filter,
+                    memory_type_filter,
+                    min_tier,
+                    limit as i64
+                ],
                 |row| {
                     Ok(FtsResult {
                         memory_id: row.get(0)?,
@@ -138,7 +158,9 @@ fn sanitize_fts5_query(query: &str) -> String {
     let mut result = String::with_capacity(query.len());
     for ch in query.chars() {
         match ch {
-            '*' | '"' | '(' | ')' | ':' | '^' | '{' | '}' | '+' | '~' | '?' | ',' | '.' | '!' | ';' | '\'' | '/' | '\\' | '[' | ']' | '<' | '>' | '&' | '#' | '@' | '=' | '$' | '%' | '`' | '|' => {
+            '*' | '"' | '(' | ')' | ':' | '^' | '{' | '}' | '+' | '~' | '?' | ',' | '.' | '!'
+            | ';' | '\'' | '/' | '\\' | '[' | ']' | '<' | '>' | '&' | '#' | '@' | '=' | '$'
+            | '%' | '`' | '|' => {
                 result.push(' ');
             }
             '-' => {
@@ -175,29 +197,22 @@ fn to_or_query(sanitized: &str) -> String {
 /// carry meaning in questions like "What did I find?" or "Where did I go?"
 const STOP_WORDS: &[&str] = &[
     // Articles
-    "a", "an", "the",
-    // Copulas & auxiliaries
-    "is", "are", "was", "were", "am", "be", "been", "being",
-    "do", "did", "does",
-    "have", "has", "had",
-    // Modals
+    "a", "an", "the", // Copulas & auxiliaries
+    "is", "are", "was", "were", "am", "be", "been", "being", "do", "did", "does", "have", "has",
+    "had", // Modals
     "will", "would", "could", "should", "can", "may", "might", "shall", "must",
     // Pronouns
-    "i", "me", "my", "mine", "we", "us", "our", "ours",
-    "you", "your", "yours", "he", "him", "his", "she", "her", "hers",
-    "it", "its", "they", "them", "their", "theirs",
+    "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours", "he", "him", "his",
+    "she", "her", "hers", "it", "its", "they", "them", "their", "theirs",
     // Demonstratives
-    "this", "that", "these", "those",
-    // Conjunctions
+    "this", "that", "these", "those", // Conjunctions
     "and", "or", "but", "nor", "so", "if", "then", "than",
     // Question words (removed from FTS5 queries, but kept for embedding)
-    "how", "what", "when", "where", "which", "who", "whom", "why",
-    // Prepositions
-    "in", "on", "at", "to", "for", "of", "with", "from", "by", "about", "into",
-    "up", "out", "off", "over", "under", "between", "through", "during", "before", "after",
+    "how", "what", "when", "where", "which", "who", "whom", "why", // Prepositions
+    "in", "on", "at", "to", "for", "of", "with", "from", "by", "about", "into", "up", "out", "off",
+    "over", "under", "between", "through", "during", "before", "after",
     // Adverbs / degree words
-    "not", "no", "very", "just", "also", "too", "only",
-    "there", "here", "as",
+    "not", "no", "very", "just", "also", "too", "only", "there", "here", "as",
 ];
 
 /// Remove stop words from a query, keeping only content-bearing terms.
@@ -235,18 +250,30 @@ mod tests {
     }
 
     impl MemoryRecord for TestMem {
-        fn id(&self) -> Option<i64> { self.id }
-        fn searchable_text(&self) -> String { self.text.clone() }
+        fn id(&self) -> Option<i64> {
+            self.id
+        }
+        fn searchable_text(&self) -> String {
+            self.text.clone()
+        }
         fn memory_type(&self) -> MemoryType {
             MemoryType::from_str(&self.mem_type).unwrap_or(MemoryType::Episodic)
         }
-        fn created_at(&self) -> chrono::DateTime<Utc> { self.created_at }
-        fn category(&self) -> Option<&str> { self.category.as_deref() }
+        fn created_at(&self) -> chrono::DateTime<Utc> {
+            self.created_at
+        }
+        fn category(&self) -> Option<&str> {
+            self.category.as_deref()
+        }
     }
 
     fn setup() -> Database {
         let db = Database::open_in_memory().expect("open failed");
-        db.with_writer(|conn| { migrations::migrate(conn)?; Ok(()) }).expect("migrate failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate failed");
         db
     }
 
@@ -265,12 +292,22 @@ mod tests {
     #[test]
     fn basic_keyword_search() {
         let db = setup();
-        insert(&db, "authentication failed with JWT token", None, "procedural");
+        insert(
+            &db,
+            "authentication failed with JWT token",
+            None,
+            "procedural",
+        );
         insert(&db, "database connection timeout error", None, "episodic");
-        insert(&db, "build succeeded after fixing imports", None, "episodic");
+        insert(
+            &db,
+            "build succeeded after fixing imports",
+            None,
+            "episodic",
+        );
 
-        let results = FtsSearch::search(&db, "authentication", 10, None, None)
-            .expect("search failed");
+        let results =
+            FtsSearch::search(&db, "authentication", 10, None, None).expect("search failed");
         assert_eq!(results.len(), 1);
         assert!(results[0].score > 0.0);
     }
@@ -282,8 +319,8 @@ mod tests {
         insert(&db, "the user authenticated successfully", None, "semantic");
 
         // "authenticate" should match both via Porter stemming
-        let results = FtsSearch::search(&db, "authenticate", 10, None, None)
-            .expect("search failed");
+        let results =
+            FtsSearch::search(&db, "authenticate", 10, None, None).expect("search failed");
         assert_eq!(results.len(), 2, "Porter stemming should match inflections");
     }
 
@@ -304,8 +341,7 @@ mod tests {
         let db = setup();
         insert(&db, "authentication failed", None, "semantic");
 
-        let results = FtsSearch::search(&db, "xyzzyplugh", 10, None, None)
-            .expect("search failed");
+        let results = FtsSearch::search(&db, "xyzzyplugh", 10, None, None).expect("search failed");
         assert!(results.is_empty());
     }
 
@@ -313,14 +349,19 @@ mod tests {
     fn category_filter() {
         let db = setup();
         insert(&db, "auth error in login", Some("error"), "procedural");
-        insert(&db, "auth flow redesign decision", Some("decision"), "semantic");
+        insert(
+            &db,
+            "auth flow redesign decision",
+            Some("decision"),
+            "semantic",
+        );
 
-        let results = FtsSearch::search(&db, "auth", 10, Some("error"), None)
-            .expect("search failed");
+        let results =
+            FtsSearch::search(&db, "auth", 10, Some("error"), None).expect("search failed");
         assert_eq!(results.len(), 1);
 
-        let results = FtsSearch::search(&db, "auth", 10, Some("decision"), None)
-            .expect("search failed");
+        let results =
+            FtsSearch::search(&db, "auth", 10, Some("decision"), None).expect("search failed");
         assert_eq!(results.len(), 1);
     }
 
@@ -330,8 +371,8 @@ mod tests {
         insert(&db, "build failed with error", None, "episodic");
         insert(&db, "build failures are caused by deps", None, "semantic");
 
-        let results = FtsSearch::search(&db, "build", 10, None, Some("episodic"))
-            .expect("search failed");
+        let results =
+            FtsSearch::search(&db, "build", 10, None, Some("episodic")).expect("search failed");
         assert_eq!(results.len(), 1);
     }
 
@@ -339,11 +380,15 @@ mod tests {
     fn limit_respected() {
         let db = setup();
         for i in 0..20 {
-            insert(&db, &format!("memory about testing item {i}"), None, "semantic");
+            insert(
+                &db,
+                &format!("memory about testing item {i}"),
+                None,
+                "semantic",
+            );
         }
 
-        let results = FtsSearch::search(&db, "testing", 5, None, None)
-            .expect("search failed");
+        let results = FtsSearch::search(&db, "testing", 5, None, None).expect("search failed");
         assert_eq!(results.len(), 5);
     }
 
@@ -351,12 +396,16 @@ mod tests {
     fn results_ranked_by_bm25() {
         let db = setup();
         // More relevant: term appears multiple times
-        insert(&db, "error error error in authentication", None, "procedural");
+        insert(
+            &db,
+            "error error error in authentication",
+            None,
+            "procedural",
+        );
         // Less relevant: term appears once
         insert(&db, "minor error in logging", None, "episodic");
 
-        let results = FtsSearch::search(&db, "error", 10, None, None)
-            .expect("search failed");
+        let results = FtsSearch::search(&db, "error", 10, None, None).expect("search failed");
         assert_eq!(results.len(), 2);
         // First result should have higher score (more relevant)
         assert!(results[0].score >= results[1].score);
@@ -369,17 +418,31 @@ mod tests {
             insert(&db, &format!("test memory number {i}"), None, "semantic");
         }
 
-        let results = FtsSearch::search_overfetch(&db, "test", 5, 3)
-            .expect("search failed");
+        let results = FtsSearch::search_overfetch(&db, "test", 5, 3).expect("search failed");
         assert_eq!(results.len(), 15); // 5 * 3
     }
 
     #[test]
     fn hyphenated_queries_dont_error() {
         let db = setup();
-        insert(&db, "I participated in faith related activities", None, "episodic");
-        insert(&db, "The well known scientist published a paper", None, "semantic");
-        insert(&db, "The self driving car navigated the highway", None, "procedural");
+        insert(
+            &db,
+            "I participated in faith related activities",
+            None,
+            "episodic",
+        );
+        insert(
+            &db,
+            "The well known scientist published a paper",
+            None,
+            "semantic",
+        );
+        insert(
+            &db,
+            "The self driving car navigated the highway",
+            None,
+            "procedural",
+        );
 
         // These hyphenated queries previously caused "no such column" errors
         // because FTS5 interprets "word-other" as a column filter.
@@ -393,12 +456,16 @@ mod tests {
 
         for query in &queries {
             let result = FtsSearch::search(&db, query, 10, None, None);
-            assert!(result.is_ok(), "Query '{query}' should not error: {:?}", result.err());
+            assert!(
+                result.is_ok(),
+                "Query '{query}' should not error: {:?}",
+                result.err()
+            );
         }
 
         // Verify "faith related" still matches after hyphen→space conversion
-        let results = FtsSearch::search(&db, "faith-related", 10, None, None)
-            .expect("search failed");
+        let results =
+            FtsSearch::search(&db, "faith-related", 10, None, None).expect("search failed");
         assert!(!results.is_empty(), "should find 'faith related' content");
     }
 
@@ -435,7 +502,11 @@ mod tests {
 
         for query in &queries {
             let result = FtsSearch::search(&db, query, 10, None, None);
-            assert!(result.is_ok(), "Query '{query}' should not error: {:?}", result.err());
+            assert!(
+                result.is_ok(),
+                "Query '{query}' should not error: {:?}",
+                result.err()
+            );
         }
     }
 
@@ -453,15 +524,30 @@ mod tests {
     #[test]
     fn stop_word_removal() {
         // Content verbs/nouns are preserved — only function words stripped
-        assert_eq!(strip_stop_words("How many days did I spend participating in activities"), "many days spend participating activities");
-        assert_eq!(strip_stop_words("What is my favorite color"), "favorite color");
+        assert_eq!(
+            strip_stop_words("How many days did I spend participating in activities"),
+            "many days spend participating activities"
+        );
+        assert_eq!(
+            strip_stop_words("What is my favorite color"),
+            "favorite color"
+        );
         assert_eq!(strip_stop_words("the cat sat on the mat"), "cat sat mat");
-        assert_eq!(strip_stop_words("Where did I go last weekend"), "go last weekend");
-        assert_eq!(strip_stop_words("What food do I like to eat"), "food like eat");
+        assert_eq!(
+            strip_stop_words("Where did I go last weekend"),
+            "go last weekend"
+        );
+        assert_eq!(
+            strip_stop_words("What food do I like to eat"),
+            "food like eat"
+        );
         // All stop words → return original
         assert_eq!(strip_stop_words("the is a"), "the is a");
         assert_eq!(strip_stop_words(""), "");
-        assert_eq!(strip_stop_words("authentication JWT token error"), "authentication JWT token error");
+        assert_eq!(
+            strip_stop_words("authentication JWT token error"),
+            "authentication JWT token error"
+        );
     }
 
     #[test]
@@ -475,25 +561,50 @@ mod tests {
     #[test]
     fn or_mode_returns_partial_matches() {
         let db = setup();
-        insert(&db, "authentication failed with JWT token", None, "procedural");
+        insert(
+            &db,
+            "authentication failed with JWT token",
+            None,
+            "procedural",
+        );
         insert(&db, "database connection timeout error", None, "episodic");
-        insert(&db, "build succeeded after fixing imports", None, "episodic");
+        insert(
+            &db,
+            "build succeeded after fixing imports",
+            None,
+            "episodic",
+        );
 
         // AND mode: long query with many terms returns nothing
         let and_results = FtsSearch::search(
-            &db, "How many days did I spend fixing authentication errors", 10, None, None,
-        ).expect("search");
+            &db,
+            "How many days did I spend fixing authentication errors",
+            10,
+            None,
+            None,
+        )
+        .expect("search");
 
         // OR mode: same query returns partial matches
         let or_results = FtsSearch::search_or_mode(
-            &db, "How many days did I spend fixing authentication errors", 10, None, None, None,
-        ).expect("search");
+            &db,
+            "How many days did I spend fixing authentication errors",
+            10,
+            None,
+            None,
+            None,
+        )
+        .expect("search");
 
         assert!(
             or_results.len() > and_results.len(),
             "OR mode should find more results than AND: OR={}, AND={}",
-            or_results.len(), and_results.len()
+            or_results.len(),
+            and_results.len()
         );
-        assert!(!or_results.is_empty(), "OR mode should find partial matches");
+        assert!(
+            !or_results.is_empty(),
+            "OR mode should find partial matches"
+        );
     }
 }

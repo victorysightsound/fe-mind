@@ -3,14 +3,14 @@
 //! Consumers implement this trait to provide LLM capabilities to mindcore.
 //! Used for fact extraction, consolidation, evolution, and query decomposition.
 //!
-//! MindCore defines the prompts and logic; consumers provide the transport.
+//! femind defines the prompts and logic; consumers provide the transport.
 
 use crate::error::Result;
 
 /// Callback trait for LLM text generation.
 ///
 /// Any LLM provider can implement this — local models, API endpoints, CLI tools.
-/// MindCore calls `generate()` with a crafted prompt and expects a text response.
+/// femind calls `generate()` with a crafted prompt and expects a text response.
 ///
 /// # Implementations
 /// - `ApiLlmCallback` — OpenAI-compatible API (DeepInfra, OpenAI, Together, Ollama)
@@ -18,7 +18,7 @@ use crate::error::Result;
 ///
 /// # Example
 /// ```ignore
-/// use mindcore::traits::LlmCallback;
+/// use femind::traits::LlmCallback;
 ///
 /// struct MyLlm;
 /// impl LlmCallback for MyLlm {
@@ -58,7 +58,9 @@ mod tests {
 
     impl MockLlm {
         fn new(response: &str) -> Self {
-            Self { response: response.to_string() }
+            Self {
+                response: response.to_string(),
+            }
         }
     }
 

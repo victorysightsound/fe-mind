@@ -9,11 +9,7 @@ pub trait RerankerBackend: Send + Sync {
     /// Rerank candidates by query-document relevance.
     ///
     /// Returns the same candidates with updated scores.
-    fn rerank(
-        &self,
-        query: &str,
-        candidates: Vec<ScoredResult>,
-    ) -> Result<Vec<ScoredResult>>;
+    fn rerank(&self, query: &str, candidates: Vec<ScoredResult>) -> Result<Vec<ScoredResult>>;
 }
 
 #[cfg(test)]

@@ -144,9 +144,11 @@ impl ContextAssembly {
     pub fn assemble(mut candidates: Vec<ContextItem>, budget: &ContextBudget) -> Self {
         // Sort: primary by priority (lower = first), secondary by relevance (higher = first)
         candidates.sort_by(|a, b| {
-            a.priority
-                .cmp(&b.priority)
-                .then(b.relevance_score.partial_cmp(&a.relevance_score).unwrap_or(std::cmp::Ordering::Equal))
+            a.priority.cmp(&b.priority).then(
+                b.relevance_score
+                    .partial_cmp(&a.relevance_score)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
         });
 
         let mut items = Vec::new();
@@ -334,7 +336,7 @@ mod tests {
         let budget = ContextBudget::new(50);
         let candidates = vec![
             item(1, "small", 0, 20, 1.0),
-            item(2, "too big", 10, 100, 0.9), // doesn't fit
+            item(2, "too big", 10, 100, 0.9),   // doesn't fit
             item(3, "also small", 25, 20, 0.5), // fits after skipping big
         ];
 

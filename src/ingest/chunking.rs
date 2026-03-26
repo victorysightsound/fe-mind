@@ -1,9 +1,9 @@
-/// Session-aware chunking for conversation turns.
-///
-/// Concatenates consecutive turns into larger chunks (~500-1000 chars) to:
-/// 1. Reduce embedding count (fewer, higher-quality vectors)
-/// 2. Give each embedding more semantic context
-/// 3. Filter noise turns ("Thanks!", "Ok", etc.)
+//! Session-aware chunking for conversation turns.
+//!
+//! Concatenates consecutive turns into larger chunks (~500-1000 chars) to:
+//! 1. Reduce embedding count (fewer, higher-quality vectors)
+//! 2. Give each embedding more semantic context
+//! 3. Filter noise turns ("Thanks!", "Ok", etc.)
 
 /// A chunk of concatenated conversation turns.
 #[derive(Debug, Clone)]
@@ -68,7 +68,8 @@ pub fn chunk_session<'a>(
                 } else {
                     // Try to split at a newline near the target
                     let search_range = &remaining[..target_chars.min(remaining.len())];
-                    search_range.rfind('\n')
+                    search_range
+                        .rfind('\n')
                         .map(|p| p + 1)
                         .or_else(|| search_range.rfind(' ').map(|p| p + 1))
                         .unwrap_or(target_chars.min(remaining.len()))
@@ -100,7 +101,8 @@ pub fn chunk_session<'a>(
                 overlap_start += 1;
             }
             // Find a word boundary for clean overlap
-            let overlap_pos = current_text[overlap_start..].find(' ')
+            let overlap_pos = current_text[overlap_start..]
+                .find(' ')
                 .map(|p| overlap_start + p + 1)
                 .unwrap_or(overlap_start);
             let overlap = current_text[overlap_pos..].to_string();
@@ -130,20 +132,21 @@ mod tests {
 
     #[test]
     fn basic_chunking() {
-        let turns = vec![
+        let turns = [
             ("User", "What is the weather like today in San Francisco?"),
-            ("Assistant", "The weather in San Francisco today is partly cloudy with temperatures around 62°F."),
-            ("User", "Thanks"),  // short, will be filtered
+            (
+                "Assistant",
+                "The weather in San Francisco today is partly cloudy with temperatures around 62°F.",
+            ),
+            ("User", "Thanks"), // short, will be filtered
             ("User", "What about tomorrow?"),
-            ("Assistant", "Tomorrow is expected to be sunny with highs near 68°F and light winds."),
+            (
+                "Assistant",
+                "Tomorrow is expected to be sunny with highs near 68°F and light winds.",
+            ),
         ];
 
-        let chunks = chunk_session(
-            turns.iter().map(|(r, c)| (*r, *c)),
-            "2024/01/15",
-            500,
-            10,
-        );
+        let chunks = chunk_session(turns.iter().map(|(r, c)| (*r, *c)), "2024/01/15", 500, 10);
 
         // "Thanks" should be filtered (< 10 chars)
         let total_turns: usize = chunks.iter().map(|c| c.turn_count).sum();
@@ -162,39 +165,39 @@ mod tests {
             .map(|_| ("User", "This is a moderately long turn that contains enough text to be meaningful for embedding purposes and search quality."))
             .collect();
 
-        let chunks = chunk_session(
-            turns.iter().map(|(r, c)| (*r, *c)),
-            "2024/03/01",
-            300,
-            10,
-        );
+        let chunks = chunk_session(turns.iter().map(|(r, c)| (*r, *c)), "2024/03/01", 300, 10);
 
         assert!(chunks.len() > 1, "should split into multiple chunks");
         // Each chunk (minus date prefix) should be around target size
         for chunk in &chunks {
             // Allow some overflow since we don't split mid-turn
-            assert!(chunk.text.len() < 600, "chunk too large: {} chars", chunk.text.len());
+            assert!(
+                chunk.text.len() < 600,
+                "chunk too large: {} chars",
+                chunk.text.len()
+            );
         }
     }
 
     #[test]
     fn filters_short_turns() {
-        let turns = vec![
+        let turns = [
             ("User", "Ok"),
             ("Assistant", "Sure"),
             ("User", "Hmm"),
-            ("User", "What is the capital of France and why is it important?"),
+            (
+                "User",
+                "What is the capital of France and why is it important?",
+            ),
         ];
 
-        let chunks = chunk_session(
-            turns.iter().map(|(r, c)| (*r, *c)),
-            "",
-            500,
-            10,
-        );
+        let chunks = chunk_session(turns.iter().map(|(r, c)| (*r, *c)), "", 500, 10);
 
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].turn_count, 1, "only one turn should survive filtering");
+        assert_eq!(
+            chunks[0].turn_count, 1,
+            "only one turn should survive filtering"
+        );
         assert!(chunks[0].text.contains("capital of France"));
     }
 
@@ -207,13 +210,8 @@ mod tests {
 
     #[test]
     fn empty_date() {
-        let turns = vec![("User", "This is a test message with enough content")];
-        let chunks = chunk_session(
-            turns.iter().map(|(r, c)| (*r, *c)),
-            "",
-            500,
-            10,
-        );
+        let turns = [("User", "This is a test message with enough content")];
+        let chunks = chunk_session(turns.iter().map(|(r, c)| (*r, *c)), "", 500, 10);
         assert_eq!(chunks.len(), 1);
         assert!(!chunks[0].text.contains("[Session from"));
     }

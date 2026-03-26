@@ -43,7 +43,11 @@ mod tests {
     struct NoopEvolution;
 
     impl EvolutionStrategy for NoopEvolution {
-        fn evolve(&self, _new: &MemoryMeta, _similar: &[ScoredResult]) -> Result<Vec<EvolutionAction>> {
+        fn evolve(
+            &self,
+            _new: &MemoryMeta,
+            _similar: &[ScoredResult],
+        ) -> Result<Vec<EvolutionAction>> {
             Ok(vec![EvolutionAction::Noop])
         }
     }

@@ -212,7 +212,9 @@ mod tests {
 
         // FTS5 search with Porter stemming
         let results: Vec<String> = conn
-            .prepare("SELECT searchable_text FROM memories_fts WHERE memories_fts MATCH 'authenticate'")
+            .prepare(
+                "SELECT searchable_text FROM memories_fts WHERE memories_fts MATCH 'authenticate'",
+            )
             .expect("prepare failed")
             .query_map([], |row| row.get(0))
             .expect("query failed")

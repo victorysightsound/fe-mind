@@ -1,8 +1,8 @@
-# MindCore: Universal Memory Engine Architecture
+# femind: Universal Memory Engine Architecture
 
-**Version:** 0.3.0-dev
+**Version:** 0.2.0
 **Updated:** 2026-03-25
-**Status:** Production pipeline built, pre-release
+**Status:** local repo/crate rename to `fe-mind` / `femind` is complete in this workspace. crates.io remains on `mindcore` v0.2.0 until the renamed package is published.
 
 ---
 
@@ -79,8 +79,10 @@ Method: `engine.assemble_context(query, budget)` or `engine.assemble_context_wit
 | Mode | Feature | Implementation |
 |------|---------|---------------|
 | `"exact"` | — | Brute-force cosine similarity (default) |
-| `"ann"` | `ann` | HNSW via instant-distance (built, not yet wired into hybrid path) |
+| `"ann"` | `ann` | HNSW via instant-distance with a shared in-memory index that rebuilds when stored vectors change |
 | `"off"` | — | FTS5 keyword search only |
+
+Current stabilization note: non-LLM verification now confirms `vector_search_mode` selects real runtime behavior for `exact`, `ann`, and `off`. The remaining approval-gated work is live CLI/API LLM validation, not search-mode implementation.
 
 ### Compile-Time Feature Flags
 
@@ -117,8 +119,8 @@ full               # Everything except encryption/mcp-server
 | `src/ingest/fact_extraction.rs` | Regex fact parser (structured data) |
 | `src/ingest/chunking.rs` | Session chunking with overlap |
 | `src/search/builder.rs` | SearchBuilder, hybrid search, RRF |
-| `src/search/vector.rs` | Brute-force vector search |
-| `src/search/ann.rs` | HNSW approximate nearest neighbor |
+| `src/search/vector.rs` | Brute-force vector search + vector-count diagnostics |
+| `src/search/ann.rs` | HNSW approximate nearest neighbor with invalidation/rebuild support |
 | `src/search/fts5.rs` | FTS5 keyword search, stop words, sanitizer |
 | `src/search/hybrid.rs` | RRF merge with dynamic k-values |
 | `src/memory/relations.rs` | GraphMemory, RelationType, traversal |
@@ -127,17 +129,17 @@ full               # Everything except encryption/mcp-server
 
 ---
 
-## Original Architecture (below this line may be outdated)
+## Original Architecture (historical notes below this line may still refer to the old `mindcore` name)
 
 ## Overview
 
-**MindCore** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications. It handles persistent storage, keyword search (FTS5), vector search (candle), hybrid retrieval (RRF), graph relationships, memory consolidation, cognitive decay modeling, and token-budget-aware context assembly.
+**femind** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications. It handles persistent storage, keyword search (FTS5), vector search (candle), hybrid retrieval (RRF), graph relationships, memory consolidation, cognitive decay modeling, and token-budget-aware context assembly.
 
 ### Design Principles
 
-1. **Library, not framework** — projects call into MindCore, they are not structured around it
+1. **Library, not framework** — projects call into femind, they are not structured around it
 2. **Feature-gated everything** — heavy dependencies behind compile-time flags, zero cost when unused
-3. **Opinionated about mechanics, unopinionated about schema** — MindCore handles how to store/search/decay; the consumer defines what a "memory" is
+3. **Opinionated about mechanics, unopinionated about schema** — femind handles how to store/search/decay; the consumer defines what a "memory" is
 4. **Local-first** — SQLite-backed, single-file databases, no cloud dependency
 5. **Pure Rust where possible** — candle over ort, SQLite over Postgres
 6. **Proven patterns only** — every component is backed by published research or established open-source practice
@@ -160,7 +162,7 @@ mindcore/
 ├── src/
 │   ├── lib.rs                 # Public API re-exports
 │   ├── engine.rs              # MemoryEngine<T> — primary interface
-│   ├── error.rs               # MindCoreError enum, Result type
+│   ├── error.rs               # FemindError enum, Result type
 │   │
 │   ├── traits/
 │   │   ├── mod.rs
@@ -182,7 +184,7 @@ mindcore/
 │   │   ├── mod.rs
 │   │   ├── builder.rs         # Fluent SearchBuilder API
 │   │   ├── fts5.rs            # FTS5 keyword search, Porter stemming, stop-words
-│   │   ├── vector.rs          # Brute-force dot product (+ optional sqlite-vec ANN)
+│   │   ├── vector.rs          # Brute-force cosine similarity search
 │   │   ├── hybrid.rs          # Reciprocal Rank Fusion merge
 │   │   └── query_expand.rs    # Time-aware query expansion (temporal expressions → date ranges)
 │   │
@@ -249,8 +251,8 @@ local-embeddings = [
 ]
 vector-search = ["local-embeddings", "dep:tokio"]
 
-# ANN indexing for >100K scale (planned, not yet enabled)
-# vector-indexed = ["vector-search", "dep:sqlite-vec"]
+# ANN indexing for >100K scale
+ann = ["dep:instant-distance"]
 
 # Cross-encoder reranking (post-RRF refinement, uses candle BERT)
 reranking = ["local-embeddings"]
@@ -301,7 +303,7 @@ full = [
 fts5 (default, always on)
   └── vector-search
        ├── local-embeddings (candle — pure Rust, native + WASM)
-       ├── vector-indexed (sqlite-vec, optional ANN for >100K)
+       ├── vector-indexed (optional ANN / HNSW path for >100K)
        └── reranking (cross-encoder via candle BERT, post-RRF)
 
 graph-memory (independent, SQLite-only)
@@ -362,7 +364,7 @@ pub enum MemoryType {
 }
 
 /// Consumers implement this for their memory types.
-/// MindCore handles storage, indexing, search, and decay.
+/// femind handles storage, indexing, search, and decay.
 pub trait MemoryRecord: Send + Sync + Serialize + DeserializeOwned + 'static {
     /// Unique identifier
     fn id(&self) -> Option<i64>;
@@ -643,7 +645,7 @@ impl RerankerBackend for CandleReranker {
 }
 ```
 
-**Reranking is optional and applied after RRF merge, before final scoring.** For MindCore's scale (<100K memories, search returns top 20-50 candidates), reranking adds ~50-100ms per query. Whether this is worthwhile depends on the consumer — it's behind the `reranking` feature flag.
+**Reranking is optional and applied after RRF merge, before final scoring.** For femind's scale (<100K memories, search returns top 20-50 candidates), reranking adds ~50-100ms per query. Whether this is worthwhile depends on the consumer — it's behind the `reranking` feature flag.
 
 ### ScoringStrategy
 
@@ -716,7 +718,7 @@ pub enum ConsolidationAction {
 
 ```rust
 /// Consumer-provided LLM access for all LLM-assisted operations.
-/// MindCore never calls an LLM directly — the consumer controls model,
+/// femind never calls an LLM directly — the consumer controls model,
 /// cost, and retry behavior.
 pub trait LlmCallback: Send + Sync {
     /// Given a prompt, return the LLM's response.
@@ -818,11 +820,11 @@ pub struct PruningPolicy {
 
 ### Error Types
 
-All fallible MindCore operations return `mindcore::Result<T>`, backed by a unified error enum:
+All fallible femind operations return `femind::Result<T>`, backed by a unified error enum:
 
 ```rust
 #[derive(Debug, thiserror::Error)]
-pub enum MindCoreError {
+pub enum FemindError {
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
     #[error("embedding error: {0}")]
@@ -843,7 +845,7 @@ pub enum MindCoreError {
     LlmCallback(String),
 }
 
-pub type Result<T> = std::result::Result<T, MindCoreError>;
+pub type Result<T> = std::result::Result<T, FemindError>;
 ```
 
 `ModelMismatch` is returned when an operation explicitly requires vector similarity but the stored vectors were produced by a different model than the current backend. In normal search flow this does not surface as an error — the engine silently falls back to FTS5. It is only raised when the caller explicitly requests `SearchMode::Vector` and no compatible vectors exist.
@@ -1011,7 +1013,7 @@ Both databases share the same schema. The engine queries both and merges results
 
 ### Schema Migrations
 
-MindCore uses a simple version-based migration system. The database stores its schema version in a `mindcore_meta` table:
+femind uses a simple version-based migration system. The database stores its schema version in a `mindcore_meta` table:
 
 ```sql
 CREATE TABLE IF NOT EXISTS mindcore_meta (
@@ -1348,7 +1350,7 @@ fn compute_activation(&self, memory_id: i64) -> Result<f32> {
 
 The ACT-R activation model replaces several ad-hoc mechanisms commonly found in agent memory systems:
 
-| Previous Approach | MindCore Equivalent |
+| Previous Approach | femind Equivalent |
 |-------------------|-------------------|
 | Manual trust/confidence scores | Activation + `ValidatedBy` relations |
 | Tier-based multipliers (working/long-term/archive) | Activation naturally creates tiers |
@@ -1360,7 +1362,7 @@ One model replaces five separate mechanisms.
 
 ### Access Log Maintenance
 
-The `memory_access_log` table grows with every search retrieval. Without maintenance, it becomes an unbounded append-only log. MindCore uses two strategies to keep it manageable:
+The `memory_access_log` table grows with every search retrieval. Without maintenance, it becomes an unbounded append-only log. femind uses two strategies to keep it manageable:
 
 **Compaction:** Accesses older than 90 days are aggregated into summary records. A periodic maintenance pass replaces individual access rows with a single summary row per memory:
 
@@ -1772,7 +1774,7 @@ sha2 = "0.10"         # Content hashing
 tracing = "0.1"       # Structured logging
 ```
 
-**Note:** MindCore requires **Rust 1.85+** (edition 2024).
+**Note:** femind requires **Rust 1.85+** (edition 2024).
 
 ### Feature-Gated
 
@@ -1803,7 +1805,7 @@ keyring = { version = "3", optional = true }
 
 ## Summary
 
-MindCore is a **composable, feature-gated memory engine** that unifies proven patterns from published research and the 2025-2026 agent memory landscape into a single Rust crate. It provides:
+femind is a **composable, feature-gated memory engine** that unifies proven patterns from published research and the 2025-2026 agent memory landscape into a single Rust crate. It provides:
 
 **Core (always on):**
 - **FTS5 keyword search** with Porter stemming and BM25 ranking

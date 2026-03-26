@@ -5,7 +5,7 @@
 //!
 //! Feature-gated behind `llm-ingest`.
 
-use crate::error::{MindCoreError, Result};
+use crate::error::Result;
 use crate::traits::LlmCallback;
 
 /// A fact extracted by the LLM from raw text.
@@ -36,12 +36,12 @@ pub struct ExtractionResult {
 ///
 /// Crafts a structured extraction prompt, calls the LLM, parses the response.
 /// Handles malformed LLM output gracefully — extracts what it can.
-pub fn extract_facts(
-    text: &str,
-    llm: &dyn LlmCallback,
-) -> Result<ExtractionResult> {
+pub fn extract_facts(text: &str, llm: &dyn LlmCallback) -> Result<ExtractionResult> {
     if text.trim().is_empty() {
-        return Ok(ExtractionResult { facts: Vec::new(), tokens_used: 0 });
+        return Ok(ExtractionResult {
+            facts: Vec::new(),
+            tokens_used: 0,
+        });
     }
 
     let prompt = build_extraction_prompt(text);
@@ -110,17 +110,22 @@ fn parse_extraction_response(response: &str) -> Vec<ExtractedFact> {
         }
 
         let category = parts[0].trim().to_lowercase();
-        let importance: u8 = parts[1].trim().parse().unwrap_or(5).min(10).max(1);
+        let importance: u8 = parts[1].trim().parse().unwrap_or(5).clamp(1, 10);
         let text = parts[2].trim().to_string();
 
         let entities = if parts.len() > 3 && !parts[3].trim().is_empty() {
-            parts[3].split(',').map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect()
+            parts[3]
+                .split(',')
+                .map(|e| e.trim().to_string())
+                .filter(|e| !e.is_empty())
+                .collect()
         } else {
             Vec::new()
         };
 
         let relationships = if parts.len() > 4 && !parts[4].trim().is_empty() {
-            parts[4].split(';')
+            parts[4]
+                .split(';')
                 .filter_map(|r| {
                     let triple: Vec<&str> = r.split('>').collect();
                     if triple.len() == 3 {
@@ -141,7 +146,9 @@ fn parse_extraction_response(response: &str) -> Vec<ExtractedFact> {
         if !text.is_empty() {
             facts.push(ExtractedFact {
                 text,
-                category: if ["fact", "decision", "preference", "note", "lesson"].contains(&category.as_str()) {
+                category: if ["fact", "decision", "preference", "note", "lesson"]
+                    .contains(&category.as_str())
+                {
                     category
                 } else {
                     "fact".to_string()
@@ -181,7 +188,10 @@ mod tests {
         assert_eq!(facts[0].text, "User likes sushi");
         assert_eq!(facts[0].entities, vec!["User", "sushi"]);
         assert_eq!(facts[0].relationships.len(), 1);
-        assert_eq!(facts[0].relationships[0], ("User".into(), "likes".into(), "sushi".into()));
+        assert_eq!(
+            facts[0].relationships[0],
+            ("User".into(), "likes".into(), "sushi".into())
+        );
 
         assert_eq!(facts[1].category, "decision");
         assert_eq!(facts[1].importance, 8);
@@ -210,7 +220,7 @@ mod tests {
         let response = "fact|15|Too high||\nfact|0|Too low||";
         let facts = parse_extraction_response(response);
         assert_eq!(facts[0].importance, 10); // clamped to max
-        assert_eq!(facts[1].importance, 1);  // clamped to min
+        assert_eq!(facts[1].importance, 1); // clamped to min
     }
 
     #[test]
@@ -218,7 +228,10 @@ mod tests {
         struct MockLlm;
         impl LlmCallback for MockLlm {
             fn generate(&self, _prompt: &str, _max_tokens: usize) -> Result<String> {
-                Ok("fact|7|User's favorite color is blue|User|User>favorite_color>blue".to_string())
+                Ok(
+                    "fact|7|User's favorite color is blue|User|User>favorite_color>blue"
+                        .to_string(),
+                )
             }
         }
 

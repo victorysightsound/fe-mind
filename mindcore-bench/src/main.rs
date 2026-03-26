@@ -17,7 +17,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 #[derive(Parser)]
 #[command(name = "mindcore-bench")]
-#[command(about = "LongMemEval benchmark harness for MindCore")]
+#[command(about = "LongMemEval benchmark harness for femind")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -172,7 +172,11 @@ async fn main() -> Result<()> {
                 "Running LongMemEval benchmark: {} questions, budget={budget} tokens",
                 remaining.len()
             );
-            let verify_status = if no_verify { "off" } else { "on (multi-session, temporal, knowledge-update)" };
+            let verify_status = if no_verify {
+                "off"
+            } else {
+                "on (multi-session, temporal, knowledge-update)"
+            };
             println!("Generation: {model} | Judge: {judge_model} | Verify: {verify_status}");
             println!("Using Claude Code CLI (subscription, no API tokens)\n");
 

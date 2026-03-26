@@ -1,4 +1,4 @@
-# Project: MindCore
+# Project: femind
 
 ## On Entry (MANDATORY)
 
@@ -11,9 +11,9 @@ session-context
 
 ## Project Overview
 
-**MindCore** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
+**femind** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
 
-**Status:** v0.1.0 published on crates.io.
+**Status:** local repo/crate rename to `fe-mind` / `femind` is in progress. crates.io still has `mindcore` v0.2.0 until the renamed package is published.
 
 ---
 
@@ -21,10 +21,22 @@ session-context
 
 | File | Purpose |
 |------|---------|
-| `MINDCORE_ARCHITECTURE.md` | Full crate structure and API design |
-| `MINDCORE_RESEARCH.md` | Landscape analysis, academic foundations, specification |
+| `ARCHITECTURE.md` | Full crate structure and API design |
+| `RESEARCH.md` | Landscape analysis, academic foundations, specification |
 | `DECISIONS.md` | Architectural decisions log |
+| `.docs/femind_spec.db` | Authoritative repo-local architecture and DIAL planning database |
 | `research/` | Competitive landscape research |
+
+---
+
+## Documentation Database
+
+Primary local source of truth:
+```bash
+sqlite3 .docs/femind_spec.db "SELECT section_id, title FROM sections ORDER BY sort_order;"
+```
+
+The Markdown docs in this repo should stay aligned with `.docs/femind_spec.db`.
 
 ---
 
@@ -42,7 +54,7 @@ session-context
 
 ## Design Principles
 
-1. **Library, not framework** — projects call into MindCore
+1. **Library, not framework** — projects call into femind
 2. **Feature-gated everything** — heavy deps behind compile-time flags
 3. **Local-first** — SQLite-backed, no cloud dependency
 4. **Pure Rust where possible** — candle over ort
@@ -68,41 +80,11 @@ task done <id>
 
 ---
 
-## DIAL — Autonomous Development Loop
+## Development Workflow
 
-This project uses **DIAL** (Deterministic Iterative Agent Loop) for autonomous development.
-
-### Get Full Instructions
-
-```bash
-sqlite3 ~/projects/dial/dial_guide.db "SELECT content FROM sections WHERE section_id LIKE '2.%' ORDER BY sort_order;"
-```
-
-### Quick Reference
-
-```bash
-dial status           # Current state
-dial task list        # Show pending tasks
-dial task next        # Show next task
-dial iterate          # Start next task, get context
-dial validate         # Run tests, commit on success
-dial learn "text" -c category  # Record a learning
-dial stats            # Statistics dashboard
-```
-
-### The DIAL Loop
-
-1. `dial iterate` → Get task + context
-2. Implement (one task only, no placeholders, search before creating)
-3. `dial validate` → Test and commit
-4. On success: next task. On failure: retry (max 3).
-
-### Configuration
-
-```bash
-dial config set build_cmd "your build command"
-dial config set test_cmd "your test command"
-```
+- Work from the current specs and task list; keep changes scoped and validate them before committing.
+- Prefer local compile, lint, and non-network test paths first.
+- Do not run real CLI/API LLM validation or benchmark paths without explicit user approval.
 
 ---
 
@@ -110,4 +92,4 @@ dial config set test_cmd "your test command"
 
 - Keep README files, architecture docs, changelogs, commit messages, PR text, and code comments in normal developer voice.
 - Do not describe implementation work in terms of agent runs, autonomous loops, model names, or internal AI workflow mechanics.
-- Mention AI, LLMs, embeddings, or memory orchestration only when they are part of the actual MindCore product surface being documented.
+- Mention AI, LLMs, embeddings, or memory orchestration only when they are part of the actual femind product surface being documented.

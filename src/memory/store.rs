@@ -2,7 +2,7 @@ use rusqlite::params;
 use sha2::{Digest, Sha256};
 use std::marker::PhantomData;
 
-use crate::error::{MindCoreError, Result};
+use crate::error::{FemindError, Result};
 use crate::storage::Database;
 use crate::traits::{MemoryRecord, MemoryType};
 
@@ -154,7 +154,7 @@ impl<T: MemoryRecord> MemoryStore<T> {
             )?;
 
             if rows == 0 {
-                return Err(MindCoreError::Database(rusqlite::Error::QueryReturnedNoRows));
+                return Err(FemindError::Database(rusqlite::Error::QueryReturnedNoRows));
             }
             Ok(())
         })
@@ -263,7 +263,10 @@ mod tests {
 
         let retrieved = store.get(&db, id).expect("get failed");
         assert!(retrieved.is_some());
-        assert_eq!(retrieved.as_ref().map(|r| r.text.as_str()), Some("hello world"));
+        assert_eq!(
+            retrieved.as_ref().map(|r| r.text.as_str()),
+            Some("hello world")
+        );
     }
 
     #[test]

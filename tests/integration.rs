@@ -1,13 +1,20 @@
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::useless_format
+)]
+
 //! Integration tests for Phase 1: Foundation
 //!
 //! Tests the complete workflow: engine creation → store → search → context
 //! using the public API surface that consumers will use.
 
 use chrono::{DateTime, Utc};
-use mindcore::engine::MemoryEngine;
-use mindcore::memory::store::StoreResult;
-use mindcore::search::SearchMode;
-use mindcore::traits::{MemoryRecord, MemoryType};
+use femind::engine::MemoryEngine;
+use femind::memory::store::StoreResult;
+use femind::search::SearchMode;
+use femind::traits::{MemoryRecord, MemoryType};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -61,7 +68,10 @@ fn engine_in_memory_lifecycle() {
 
     // Store
     let r = engine
-        .store(&learning("JWT authentication fails when token expires", "error"))
+        .store(&learning(
+            "JWT authentication fails when token expires",
+            "error",
+        ))
         .unwrap();
     assert!(matches!(r, StoreResult::Added(_)));
 
@@ -69,7 +79,9 @@ fn engine_in_memory_lifecycle() {
     assert_eq!(engine.count().unwrap(), 1);
 
     // Get
-    let StoreResult::Added(id) = r else { unreachable!() };
+    let StoreResult::Added(id) = r else {
+        unreachable!()
+    };
     let mem = engine.get(id).unwrap().unwrap();
     assert!(mem.description.contains("JWT"));
 
@@ -162,7 +174,10 @@ fn fts5_basic_search() {
         .store(&learning("database connection pool exhausted", "error"))
         .unwrap();
     engine
-        .store(&learning("cargo build succeeded after adding feature flag", "build"))
+        .store(&learning(
+            "cargo build succeeded after adding feature flag",
+            "build",
+        ))
         .unwrap();
 
     let results = engine.search("authentication").execute().unwrap();
@@ -180,7 +195,10 @@ fn fts5_porter_stemming() {
     let engine = MemoryEngine::<Learning>::builder().build().unwrap();
 
     engine
-        .store(&learning("the authentication system was redesigned", "decision"))
+        .store(&learning(
+            "the authentication system was redesigned",
+            "decision",
+        ))
         .unwrap();
     engine
         .store(&learning("user failed to authenticate via OAuth", "error"))
@@ -194,9 +212,7 @@ fn fts5_porter_stemming() {
 #[test]
 fn fts5_no_results() {
     let engine = MemoryEngine::<Learning>::builder().build().unwrap();
-    engine
-        .store(&learning("hello world", "test"))
-        .unwrap();
+    engine.store(&learning("hello world", "test")).unwrap();
 
     let results = engine.search("nonexistent_term_xyz").execute().unwrap();
     assert!(results.is_empty());
@@ -208,7 +224,10 @@ fn search_with_limit() {
 
     for i in 0..20 {
         engine
-            .store(&learning(&format!("test memory about searching item {i}"), "test"))
+            .store(&learning(
+                &format!("test memory about searching item {i}"),
+                "test",
+            ))
             .unwrap();
     }
 
@@ -227,11 +246,7 @@ fn search_with_category_filter() {
         .store(&learning("auth decision: use OAuth2", "decision"))
         .unwrap();
 
-    let results = engine
-        .search("auth")
-        .category("error")
-        .execute()
-        .unwrap();
+    let results = engine.search("auth").category("error").execute().unwrap();
     assert_eq!(results.len(), 1);
 }
 

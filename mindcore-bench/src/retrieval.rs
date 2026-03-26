@@ -19,10 +19,7 @@ pub struct RetrievedContext {
 /// For the oracle dataset, we include all evidence sessions directly
 /// since they're the minimal set needed to answer the question.
 /// Pass `context_budget = 0` for unlimited (recommended for oracle).
-pub fn process_question(
-    question: &Question,
-    context_budget: usize,
-) -> Result<RetrievedContext> {
+pub fn process_question(question: &Question, context_budget: usize) -> Result<RetrievedContext> {
     let mut context_parts = Vec::new();
     let mut total_chars = 0;
     let budget_chars = if context_budget == 0 {

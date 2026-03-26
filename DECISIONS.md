@@ -1,8 +1,8 @@
-# MindCore Decisions
+# femind Decisions
 
-This document records key architectural and design decisions for MindCore.
+This document records key architectural and design decisions for femind.
 
-Decisions 001-007 originated during initial research (2026-03-16) and were carried forward when MindCore became its own project.
+Decisions 001-007 originated during initial research (2026-03-16) and were carried forward when the project was still named `mindcore`. Historical entries keep that older name when it is part of the original decision record.
 
 ---
 
@@ -23,7 +23,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 **Consequences:**
 - New standalone crate: `mindcore`
 - Any Rust project can depend on mindcore for persistent agent memory
-- See `MINDCORE_ARCHITECTURE.md` for full specification
+- See `ARCHITECTURE.md` for full specification
 
 ---
 
@@ -477,7 +477,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Date:** 2026-03-19
 
-**Decision:** Define a structured `MindCoreError` enum using `thiserror` with variants for each failure domain, enabling consumers to match on specific error conditions.
+**Decision:** Define a structured `FemindError` enum using `thiserror` with variants for each failure domain, enabling consumers to match on specific error conditions.
 
 **Context:** Library crates need structured errors so consumers can handle failures appropriately (retry on transient DB errors, surface model-not-found to users, etc.). A single `anyhow::Error` or `Box<dyn Error>` prevents pattern matching.
 
@@ -485,7 +485,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - Consumers need to distinguish database errors from embedding errors from serialization errors
 - `thiserror` provides zero-cost error types with `Display` and `From` implementations
 - Each feature-gated module contributes its own error variants
-- `MindCoreError::ModelMismatch` enables clear messaging when vector search falls back to FTS5
+- `FemindError::ModelMismatch` enables clear messaging when vector search falls back to FTS5
 
 **Consequences:**
 - `mindcore::Result<T>` type alias used throughout the public API

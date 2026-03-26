@@ -33,6 +33,8 @@ mod inner {
     pub struct AnnIndex {
         /// HNSW map: maps points to memory IDs
         index: Mutex<Option<HnswMap<VecPoint, i64>>>,
+        /// Model currently represented by the index.
+        model_name: Mutex<Option<String>>,
         /// Number of vectors in the index
         count: std::sync::atomic::AtomicUsize,
     }
@@ -41,6 +43,7 @@ mod inner {
         pub fn new() -> Self {
             Self {
                 index: Mutex::new(None),
+                model_name: Mutex::new(None),
                 count: std::sync::atomic::AtomicUsize::new(0),
             }
         }
@@ -51,18 +54,19 @@ mod inner {
                 let mut stmt = conn.prepare(
                     "SELECT memory_id, embedding FROM memory_vectors WHERE model_name = ?1",
                 )?;
-                let rows: Vec<(i64, Vec<u8>)> = stmt.query_map(
-                    [model_name],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )?.filter_map(|r| r.ok()).collect();
-                Ok::<_, crate::error::MindCoreError>(rows)
+                let rows: Vec<(i64, Vec<u8>)> = stmt
+                    .query_map([model_name], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                Ok::<_, crate::error::FemindError>(rows)
             })?;
 
             if vectors.is_empty() {
                 return Ok(0);
             }
 
-            let points: Vec<VecPoint> = vectors.iter()
+            let points: Vec<VecPoint> = vectors
+                .iter()
                 .map(|(_, blob)| VecPoint(bytes_to_vec(blob)))
                 .collect();
             let values: Vec<i64> = vectors.iter().map(|(id, _)| *id).collect();
@@ -70,11 +74,18 @@ mod inner {
             let hnsw = Builder::default().build(points, values);
 
             let vec_count = vectors.len();
-            let mut guard = self.index.lock().map_err(|e| {
-                crate::error::MindCoreError::Embedding(format!("index lock: {e}"))
-            })?;
+            let mut guard = self
+                .index
+                .lock()
+                .map_err(|e| crate::error::FemindError::Embedding(format!("index lock: {e}")))?;
             *guard = Some(hnsw);
-            self.count.store(vec_count, std::sync::atomic::Ordering::Relaxed);
+            let mut model_guard = self
+                .model_name
+                .lock()
+                .map_err(|e| crate::error::FemindError::Embedding(format!("model lock: {e}")))?;
+            *model_guard = Some(model_name.to_string());
+            self.count
+                .store(vec_count, std::sync::atomic::Ordering::Relaxed);
 
             tracing::debug!("ANN index built with {vec_count} vectors");
             Ok(vec_count)
@@ -83,14 +94,11 @@ mod inner {
         /// Search the HNSW index for nearest neighbors.
         ///
         /// Returns results in the same format as VectorSearch::search().
-        pub fn search(
-            &self,
-            query_vector: &[f32],
-            limit: usize,
-        ) -> Result<Vec<FtsResult>> {
-            let guard = self.index.lock().map_err(|e| {
-                crate::error::MindCoreError::Embedding(format!("index lock: {e}"))
-            })?;
+        pub fn search(&self, query_vector: &[f32], limit: usize) -> Result<Vec<FtsResult>> {
+            let guard = self
+                .index
+                .lock()
+                .map_err(|e| crate::error::FemindError::Embedding(format!("index lock: {e}")))?;
 
             let Some(ref hnsw) = *guard else {
                 return Ok(Vec::new()); // Index not built
@@ -98,7 +106,8 @@ mod inner {
 
             let query = VecPoint(query_vector.to_vec());
             let mut search = Search::default();
-            let results: Vec<_> = hnsw.search(&query, &mut search)
+            let results: Vec<_> = hnsw
+                .search(&query, &mut search)
                 .take(limit)
                 .map(|item| {
                     let similarity = 1.0 - item.distance;
@@ -114,16 +123,50 @@ mod inner {
 
         /// Whether the index has been built.
         pub fn is_built(&self) -> bool {
-            self.index.lock()
+            self.index
+                .lock()
                 .map(|guard| guard.is_some())
                 .unwrap_or(false)
         }
 
         /// Number of vectors in the index.
         pub fn len(&self) -> usize {
-            self.index.lock()
-                .map(|guard| guard.as_ref().map(|_| self.count.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0))
+            self.index
+                .lock()
+                .map(|guard| {
+                    guard
+                        .as_ref()
+                        .map(|_| self.count.load(std::sync::atomic::Ordering::Relaxed))
+                        .unwrap_or(0)
+                })
                 .unwrap_or(0)
+        }
+
+        /// Whether the index is empty.
+        pub fn is_empty(&self) -> bool {
+            self.len() == 0
+        }
+
+        /// Model currently loaded into the index.
+        pub fn model_name(&self) -> Option<String> {
+            self.model_name.lock().ok().and_then(|guard| guard.clone())
+        }
+
+        /// Drop the current index so it is rebuilt on the next ANN query.
+        pub fn invalidate(&self) {
+            if let Ok(mut guard) = self.index.lock() {
+                *guard = None;
+            }
+            if let Ok(mut guard) = self.model_name.lock() {
+                *guard = None;
+            }
+            self.count.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    impl Default for AnnIndex {
+        fn default() -> Self {
+            Self::new()
         }
     }
 }
@@ -136,11 +179,15 @@ pub use inner::AnnIndex;
 mod tests {
     use super::*;
     use crate::embeddings::pooling::{normalize_l2, vec_to_bytes};
-    use crate::storage::{Database, migrations};
+    use crate::storage::{migrations, Database};
 
     fn setup() -> Database {
         let db = Database::open_in_memory().expect("open");
-        db.with_writer(|conn| { migrations::migrate(conn)?; Ok(()) }).expect("migrate");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
 
         // Insert test memories
         for i in 1..=5 {
@@ -155,7 +202,7 @@ mod tests {
         }
 
         // Insert vectors
-        let vectors = vec![
+        let vectors = [
             normalize_l2(&[1.0, 0.0, 0.0, 0.0]),
             normalize_l2(&[0.9, 0.1, 0.0, 0.0]),
             normalize_l2(&[0.0, 1.0, 0.0, 0.0]),

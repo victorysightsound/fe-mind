@@ -37,8 +37,14 @@ impl ScoringStrategy for CategoryScorer {
 
         // Keyword hints that suggest a category
         let category_hints: &[(&str, &[&str])] = &[
-            ("error", &["error", "fail", "crash", "bug", "broken", "exception"]),
-            ("decision", &["decided", "decision", "chose", "approach", "strategy"]),
+            (
+                "error",
+                &["error", "fail", "crash", "bug", "broken", "exception"],
+            ),
+            (
+                "decision",
+                &["decided", "decision", "chose", "approach", "strategy"],
+            ),
             ("pattern", &["pattern", "workflow", "process", "how to"]),
             ("lesson", &["learned", "lesson", "insight", "takeaway"]),
         ];
@@ -86,7 +92,10 @@ mod tests {
     fn keyword_hint_match() {
         let scorer = CategoryScorer::default();
         let m = scorer.score_multiplier(&meta_cat("error"), "why did it fail", 1.0);
-        assert!((m - 1.3).abs() < 0.01, "fail should hint at error category, got {m}");
+        assert!(
+            (m - 1.3).abs() < 0.01,
+            "fail should hint at error category, got {m}"
+        );
     }
 
     #[test]

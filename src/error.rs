@@ -1,13 +1,13 @@
-/// All fallible MindCore operations return `Result<T>`.
-pub type Result<T> = std::result::Result<T, MindCoreError>;
+/// All fallible femind operations return `Result<T>`.
+pub type Result<T> = std::result::Result<T, FemindError>;
 
-/// Unified error type for all MindCore operations.
+/// Unified error type for all femind operations.
 ///
 /// Consumers can match on variants to handle specific failure domains
 /// (e.g., retry on transient `Database` errors, surface `ModelNotAvailable`
 /// to users, fall back to FTS5 on `ModelMismatch`).
 #[derive(Debug, thiserror::Error)]
-pub enum MindCoreError {
+pub enum FemindError {
     /// SQLite database error (connection, query, constraint violation).
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
@@ -65,13 +65,13 @@ mod tests {
 
     #[test]
     fn error_display() {
-        let err = MindCoreError::Embedding("tensor shape mismatch".into());
+        let err = FemindError::Embedding("tensor shape mismatch".into());
         assert_eq!(err.to_string(), "embedding error: tensor shape mismatch");
     }
 
     #[test]
     fn model_mismatch_display() {
-        let err = MindCoreError::ModelMismatch {
+        let err = FemindError::ModelMismatch {
             stored: "model-a".into(),
             current: "model-b".into(),
         };
@@ -82,8 +82,8 @@ mod tests {
     #[test]
     fn from_rusqlite_error() {
         let sqlite_err = rusqlite::Error::QueryReturnedNoRows;
-        let err: MindCoreError = sqlite_err.into();
-        matches!(err, MindCoreError::Database(_));
+        let err: FemindError = sqlite_err.into();
+        matches!(err, FemindError::Database(_));
     }
 
     #[test]
@@ -92,7 +92,7 @@ mod tests {
             Ok(42)
         }
         fn returns_err() -> Result<i32> {
-            Err(MindCoreError::Migration("test".into()))
+            Err(FemindError::Migration("test".into()))
         }
         assert!(returns_ok().is_ok());
         assert!(returns_err().is_err());

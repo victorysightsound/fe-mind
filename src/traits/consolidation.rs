@@ -10,11 +10,7 @@ pub trait ConsolidationStrategy: Send + Sync {
     /// Given a new memory and existing similar memories, decide what to do.
     ///
     /// Returns a list of actions to perform. An empty list means "proceed with ADD".
-    fn consolidate(
-        &self,
-        new: &MemoryMeta,
-        existing: &[ScoredResult],
-    ) -> Vec<ConsolidationAction>;
+    fn consolidate(&self, new: &MemoryMeta, existing: &[ScoredResult]) -> Vec<ConsolidationAction>;
 }
 
 /// Actions the consolidation pipeline can take.
@@ -50,14 +46,22 @@ mod tests {
 
     struct AlwaysAdd;
     impl ConsolidationStrategy for AlwaysAdd {
-        fn consolidate(&self, _new: &MemoryMeta, _existing: &[ScoredResult]) -> Vec<ConsolidationAction> {
+        fn consolidate(
+            &self,
+            _new: &MemoryMeta,
+            _existing: &[ScoredResult],
+        ) -> Vec<ConsolidationAction> {
             vec![ConsolidationAction::Add]
         }
     }
 
     struct AlwaysNoop;
     impl ConsolidationStrategy for AlwaysNoop {
-        fn consolidate(&self, _new: &MemoryMeta, _existing: &[ScoredResult]) -> Vec<ConsolidationAction> {
+        fn consolidate(
+            &self,
+            _new: &MemoryMeta,
+            _existing: &[ScoredResult],
+        ) -> Vec<ConsolidationAction> {
             vec![ConsolidationAction::Noop]
         }
     }

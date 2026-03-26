@@ -35,7 +35,10 @@ impl Database {
     ///
     /// When the `encryption` feature is enabled and a key is provided,
     /// `PRAGMA key` is applied as the first statement after connection open.
-    pub fn open_with_key(path: impl AsRef<Path>, _encryption_key: Option<&crate::storage::EncryptionKey>) -> Result<Self> {
+    pub fn open_with_key(
+        path: impl AsRef<Path>,
+        _encryption_key: Option<&crate::storage::EncryptionKey>,
+    ) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let conn = Connection::open(&path)?;
         Self::configure(&conn)?;
@@ -118,7 +121,7 @@ impl Database {
     /// Lock the writer connection.
     fn lock_writer(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
         self.writer.lock().map_err(|e| {
-            crate::error::MindCoreError::Database(rusqlite::Error::SqliteFailure(
+            crate::error::FemindError::Database(rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
                 Some(format!("writer lock poisoned: {e}")),
             ))
@@ -181,8 +184,7 @@ mod tests {
     fn wal_mode_enabled() {
         let db = Database::open_in_memory().expect("open failed");
         db.with_reader(|conn| {
-            let mode: String =
-                conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+            let mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
             assert!(
                 mode == "wal" || mode == "memory",
                 "unexpected journal mode: {mode}"
@@ -196,8 +198,7 @@ mod tests {
     fn foreign_keys_enabled() {
         let db = Database::open_in_memory().expect("open failed");
         db.with_reader(|conn| {
-            let fk: i32 =
-                conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+            let fk: i32 = conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
             assert_eq!(fk, 1, "foreign keys should be enabled");
             Ok(())
         })
@@ -262,7 +263,10 @@ mod tests {
         let db = Arc::new(Database::open(&path).expect("open failed"));
 
         db.with_writer(|conn| {
-            conn.execute("CREATE TABLE nums (id INTEGER PRIMARY KEY, val INTEGER)", [])?;
+            conn.execute(
+                "CREATE TABLE nums (id INTEGER PRIMARY KEY, val INTEGER)",
+                [],
+            )?;
             for i in 0..100 {
                 conn.execute("INSERT INTO nums (val) VALUES (?1)", [i])?;
             }

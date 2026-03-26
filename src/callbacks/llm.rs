@@ -2,7 +2,7 @@ use crate::error::Result;
 
 /// Consumer-provided LLM access for all LLM-assisted operations.
 ///
-/// MindCore never calls an LLM directly — the consumer controls model choice,
+/// femind never calls an LLM directly — the consumer controls model choice,
 /// cost, and retry behavior by providing this trait implementation.
 ///
 /// Used by: `LLMConsolidation`, `LlmIngest`, `EvolutionStrategy`, `reflect()`.

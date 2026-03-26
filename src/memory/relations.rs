@@ -99,11 +99,7 @@ impl GraphMemory {
     ///
     /// Returns memory IDs with their relationship type and hop distance.
     /// Includes cycle prevention and depth limits.
-    pub fn traverse(
-        db: &Database,
-        start_id: i64,
-        max_depth: u32,
-    ) -> Result<Vec<GraphNode>> {
+    pub fn traverse(db: &Database, start_id: i64, max_depth: u32) -> Result<Vec<GraphNode>> {
         db.with_reader(|conn| {
             let mut stmt = conn.prepare(
                 "WITH RECURSIVE chain(id, relation, depth, path) AS (
@@ -194,7 +190,11 @@ mod tests {
 
     fn setup() -> Database {
         let db = Database::open_in_memory().expect("open");
-        db.with_writer(|conn| { migrations::migrate(conn)?; Ok(()) }).expect("migrate");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
 
         // Insert test memories
         for i in 1..=5 {
@@ -225,7 +225,8 @@ mod tests {
     fn duplicate_relation_ignored() {
         let db = setup();
         GraphMemory::relate(&db, 1, 2, &RelationType::SolvedBy).expect("first");
-        GraphMemory::relate(&db, 1, 2, &RelationType::SolvedBy).expect("duplicate should be ignored");
+        GraphMemory::relate(&db, 1, 2, &RelationType::SolvedBy)
+            .expect("duplicate should be ignored");
 
         let rels = GraphMemory::direct_relations(&db, 1).expect("direct");
         assert_eq!(rels.len(), 1);
@@ -292,9 +293,14 @@ mod tests {
     #[test]
     fn relation_type_roundtrip() {
         let types = vec![
-            RelationType::CausedBy, RelationType::SolvedBy, RelationType::DependsOn,
-            RelationType::SupersededBy, RelationType::RelatedTo, RelationType::PartOf,
-            RelationType::ConflictsWith, RelationType::ValidatedBy,
+            RelationType::CausedBy,
+            RelationType::SolvedBy,
+            RelationType::DependsOn,
+            RelationType::SupersededBy,
+            RelationType::RelatedTo,
+            RelationType::PartOf,
+            RelationType::ConflictsWith,
+            RelationType::ValidatedBy,
             RelationType::Custom("my_custom".to_string()),
         ];
         for rt in &types {

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use crate::embeddings::EmbeddingBackend;
+use crate::engine::VectorSearchMode;
 use crate::error::Result;
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
@@ -76,6 +77,9 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     valid_at: Option<DateTime<Utc>>,
     scoring: Option<Arc<dyn ScoringStrategy>>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
+    vector_search_mode: VectorSearchMode,
+    #[cfg(feature = "ann")]
+    ann_index: Option<Arc<crate::search::AnnIndex>>,
     _phantom: PhantomData<T>,
 }
 
@@ -95,6 +99,9 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             valid_at: None,
             scoring: None,
             embedding: None,
+            vector_search_mode: VectorSearchMode::default(),
+            #[cfg(feature = "ann")]
+            ann_index: None,
             _phantom: PhantomData,
         }
     }
@@ -108,6 +115,19 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Attach an embedding backend for vector search (called by MemoryEngine).
     pub fn with_embedding(mut self, embedding: Arc<dyn EmbeddingBackend>) -> Self {
         self.embedding = Some(embedding);
+        self
+    }
+
+    /// Attach the engine's vector search mode.
+    pub fn with_vector_search_mode(mut self, mode: VectorSearchMode) -> Self {
+        self.vector_search_mode = mode;
+        self
+    }
+
+    /// Attach the engine's shared ANN index.
+    #[cfg(feature = "ann")]
+    pub fn with_ann_index(mut self, ann_index: Arc<crate::search::AnnIndex>) -> Self {
+        self.ann_index = Some(ann_index);
         self
     }
 
@@ -172,17 +192,19 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             SearchMode::Keyword => self.execute_keyword(),
             SearchMode::Vector => self.execute_vector(),
             SearchMode::Hybrid => self.execute_hybrid(),
-            SearchMode::Auto => {
-                if self.embedding.is_some() {
-                    self.execute_hybrid()
-                } else {
-                    self.execute_keyword()
-                }
-            }
+            SearchMode::Auto => self.execute_auto(),
             SearchMode::Exhaustive { min_score } => {
                 let threshold = *min_score;
                 self.execute_exhaustive(threshold)
             }
+        }
+    }
+
+    fn execute_auto(&self) -> Result<Vec<SearchResult>> {
+        if self.vector_search_mode == VectorSearchMode::Off || self.embedding.is_none() {
+            self.execute_keyword()
+        } else {
+            self.execute_hybrid()
         }
     }
 
@@ -234,6 +256,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
     /// Execute vector-only search.
     fn execute_vector(&self) -> Result<Vec<SearchResult>> {
+        if self.vector_search_mode == VectorSearchMode::Off {
+            return self.execute_keyword();
+        }
+
         let Some(ref embedding) = self.embedding else {
             // No embedding backend — fall back to keyword
             return self.execute_keyword();
@@ -245,13 +271,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let query_vec = embedding.embed_query(&self.query)?;
         let model = embedding.model_name();
-
-        let vector_results = VectorSearch::search(
-            self.db,
-            &query_vec,
-            model,
-            self.limit * 3,
-        )?;
+        let vector_results = self.vector_results(&query_vec, model, self.limit * 3)?;
 
         let mut results = self.apply_filters(vector_results);
         if let Some(threshold) = self.min_score {
@@ -263,6 +283,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
     /// Execute hybrid search: FTS5 + vector merged via RRF.
     fn execute_hybrid(&self) -> Result<Vec<SearchResult>> {
+        if self.vector_search_mode == VectorSearchMode::Off {
+            return self.execute_keyword();
+        }
+
         let Some(ref embedding) = self.embedding else {
             return self.execute_keyword();
         };
@@ -288,12 +312,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         // Vector similarity search (over-fetch 3x)
         let query_vec = embedding.embed_query(&self.query)?;
         let model = embedding.model_name();
-        let vector_results = VectorSearch::search(
-            self.db,
-            &query_vec,
-            model,
-            self.limit * 3,
-        )?;
+        let vector_results = self.vector_results(&query_vec, model, self.limit * 3)?;
 
         // Merge via RRF
         let merged = rrf_merge(&fts_results, &vector_results, &self.query, self.limit * 2);
@@ -313,12 +332,67 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         Ok(results)
     }
 
+    fn vector_results(
+        &self,
+        query_vec: &[f32],
+        model: &str,
+        limit: usize,
+    ) -> Result<Vec<FtsResult>> {
+        match self.vector_search_mode {
+            VectorSearchMode::Off => Ok(Vec::new()),
+            VectorSearchMode::Exact => VectorSearch::search(self.db, query_vec, model, limit),
+            VectorSearchMode::Ann => self.execute_ann_vector_search(query_vec, model, limit),
+        }
+    }
+
+    #[cfg(feature = "ann")]
+    fn execute_ann_vector_search(
+        &self,
+        query_vec: &[f32],
+        model: &str,
+        limit: usize,
+    ) -> Result<Vec<FtsResult>> {
+        let Some(ref ann_index) = self.ann_index else {
+            return VectorSearch::search(self.db, query_vec, model, limit);
+        };
+
+        let expected_count = VectorSearch::count_vectors(self.db, model)?;
+        if expected_count == 0 {
+            return Ok(Vec::new());
+        }
+
+        let needs_rebuild = !ann_index.is_built()
+            || ann_index.len() != expected_count
+            || ann_index.model_name().as_deref() != Some(model);
+
+        if needs_rebuild {
+            ann_index.build(self.db, model)?;
+        }
+
+        let results = ann_index.search(query_vec, limit)?;
+        if results.is_empty() {
+            VectorSearch::search(self.db, query_vec, model, limit)
+        } else {
+            Ok(results)
+        }
+    }
+
+    #[cfg(not(feature = "ann"))]
+    fn execute_ann_vector_search(
+        &self,
+        query_vec: &[f32],
+        model: &str,
+        limit: usize,
+    ) -> Result<Vec<FtsResult>> {
+        VectorSearch::search(self.db, query_vec, model, limit)
+    }
+
     /// Convert search depth to minimum tier filter.
     fn depth_to_min_tier(&self) -> Option<i32> {
         match self.depth {
             SearchDepth::Standard => Some(1), // Tiers 1+2 (summaries and facts)
             SearchDepth::Deep => Some(0),     // All tiers including raw episodes
-            SearchDepth::Forensic => None,    // No filter (same as Deep, but conceptually includes archived)
+            SearchDepth::Forensic => None, // No filter (same as Deep, but conceptually includes archived)
         }
     }
 
@@ -338,7 +412,11 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         }
 
         // Re-sort by final score (descending)
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         results
     }
@@ -357,12 +435,13 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                             id: Some(result.memory_id),
                             searchable_text: row.get(0)?,
                             memory_type: crate::traits::MemoryType::from_str(
-                                &row.get::<_, String>(1)?
-                            ).unwrap_or(crate::traits::MemoryType::Episodic),
+                                &row.get::<_, String>(1)?,
+                            )
+                            .unwrap_or(crate::traits::MemoryType::Episodic),
                             importance: row.get::<_, i32>(2)? as u8,
                             category: row.get(3)?,
                             created_at: chrono::DateTime::parse_from_rfc3339(
-                                &row.get::<_, String>(4)?
+                                &row.get::<_, String>(4)?,
                             )
                             .map(|dt| dt.with_timezone(&chrono::Utc))
                             .unwrap_or_else(|_| chrono::Utc::now()),
@@ -389,6 +468,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 ///
 /// 1. Unigram + bigram overlap scoring — captures phrase-level matches
 /// 2. Length penalty — penalizes very short memories as noise
+#[allow(dead_code)]
 fn rerank_results(db: &Database, results: &mut [SearchResult], query: &str) {
     use crate::search::fts5::strip_stop_words;
 
@@ -400,7 +480,8 @@ fn rerank_results(db: &Database, results: &mut [SearchResult], query: &str) {
     }
 
     // Extract query bigrams for phrase-level matching
-    let query_bigrams: Vec<String> = query_words.windows(2)
+    let query_bigrams: Vec<String> = query_words
+        .windows(2)
         .map(|w| format!("{} {}", w[0], w[1]))
         .collect();
 
@@ -410,21 +491,24 @@ fn rerank_results(db: &Database, results: &mut [SearchResult], query: &str) {
                 "SELECT searchable_text FROM memories WHERE id = ?1",
                 [result.memory_id],
                 |row| row.get::<_, String>(0),
-            ).map_err(|e| crate::error::MindCoreError::Database(e))
+            )
+            .map_err(crate::error::FemindError::Database)
         });
 
         let Ok(text) = text else { continue };
         let text_lower = text.to_lowercase();
 
         // Unigram overlap (0.0 to 1.0)
-        let unigram_matches = query_words.iter()
+        let unigram_matches = query_words
+            .iter()
             .filter(|w| text_lower.contains(*w))
             .count();
         let unigram_ratio = unigram_matches as f32 / query_words.len() as f32;
 
         // Bigram overlap (0.0 to 1.0) — captures phrase matching
         let bigram_ratio = if !query_bigrams.is_empty() {
-            let bigram_matches = query_bigrams.iter()
+            let bigram_matches = query_bigrams
+                .iter()
                 .filter(|bg| text_lower.contains(bg.as_str()))
                 .count();
             bigram_matches as f32 / query_bigrams.len() as f32
@@ -443,7 +527,11 @@ fn rerank_results(db: &Database, results: &mut [SearchResult], query: &str) {
         }
     }
 
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 }
 
 /// Filter near-duplicate results based on stored vector cosine similarity.
@@ -463,27 +551,34 @@ fn deduplicate_by_vector_similarity(
     }
 
     // Load vectors for all results
-    let vectors: Vec<Option<Vec<f32>>> = results.iter().map(|r| {
-        db.with_reader(|conn| {
-            let blob = conn.query_row(
-                "SELECT embedding FROM memory_vectors WHERE memory_id = ?1 AND model_name = ?2",
-                rusqlite::params![r.memory_id, model_name],
-                |row| row.get::<_, Vec<u8>>(0),
-            );
-            match blob {
-                Ok(b) => Ok(Some(bytes_to_vec(&b))),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-                Err(e) => Err(crate::error::MindCoreError::Database(e)),
-            }
-        }).ok().flatten()
-    }).collect();
+    let vectors: Vec<Option<Vec<f32>>> = results
+        .iter()
+        .map(|r| {
+            db.with_reader(|conn| {
+                let blob = conn.query_row(
+                    "SELECT embedding FROM memory_vectors WHERE memory_id = ?1 AND model_name = ?2",
+                    rusqlite::params![r.memory_id, model_name],
+                    |row| row.get::<_, Vec<u8>>(0),
+                );
+                match blob {
+                    Ok(b) => Ok(Some(bytes_to_vec(&b))),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(crate::error::FemindError::Database(e)),
+                }
+            })
+            .ok()
+            .flatten()
+        })
+        .collect();
 
     // Greedy deduplication: keep item if not too similar to any already-kept item
     let mut keep = vec![true; results.len()];
     for i in 1..results.len() {
         let Some(ref vi) = vectors[i] else { continue };
         for j in 0..i {
-            if !keep[j] { continue; }
+            if !keep[j] {
+                continue;
+            }
             let Some(ref vj) = vectors[j] else { continue };
             if cosine_similarity(vi, vj) > threshold {
                 keep[i] = false;
@@ -493,7 +588,11 @@ fn deduplicate_by_vector_similarity(
     }
 
     let mut idx = 0;
-    results.retain(|_| { let k = keep[idx]; idx += 1; k });
+    results.retain(|_| {
+        let k = keep[idx];
+        idx += 1;
+        k
+    });
 }
 
 #[cfg(test)]
@@ -512,16 +611,30 @@ mod tests {
     }
 
     impl MemoryRecord for TestMem {
-        fn id(&self) -> Option<i64> { self.id }
-        fn searchable_text(&self) -> String { self.text.clone() }
-        fn memory_type(&self) -> MemoryType { MemoryType::Semantic }
-        fn created_at(&self) -> chrono::DateTime<Utc> { self.created_at }
-        fn category(&self) -> Option<&str> { self.category.as_deref() }
+        fn id(&self) -> Option<i64> {
+            self.id
+        }
+        fn searchable_text(&self) -> String {
+            self.text.clone()
+        }
+        fn memory_type(&self) -> MemoryType {
+            MemoryType::Semantic
+        }
+        fn created_at(&self) -> chrono::DateTime<Utc> {
+            self.created_at
+        }
+        fn category(&self) -> Option<&str> {
+            self.category.as_deref()
+        }
     }
 
     fn setup() -> Database {
         let db = Database::open_in_memory().expect("open failed");
-        db.with_writer(|conn| { migrations::migrate(conn)?; Ok(()) }).expect("migrate");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
         let store = MemoryStore::<TestMem>::new();
         for text in [
             "authentication failed with JWT token",
@@ -529,12 +642,17 @@ mod tests {
             "build succeeded after fixing imports",
             "authentication flow redesigned",
         ] {
-            store.store(&db, &TestMem {
-                id: None,
-                text: text.to_string(),
-                category: None,
-                created_at: Utc::now(),
-            }).expect("store");
+            store
+                .store(
+                    &db,
+                    &TestMem {
+                        id: None,
+                        text: text.to_string(),
+                        category: None,
+                        created_at: Utc::now(),
+                    },
+                )
+                .expect("store");
         }
         db
     }
@@ -593,7 +711,10 @@ mod tests {
             .min_score(999.0)
             .execute()
             .expect("search failed");
-        assert!(results.is_empty(), "no results should pass a very high min_score");
+        assert!(
+            results.is_empty(),
+            "no results should pass a very high min_score"
+        );
     }
 
     #[test]

@@ -79,10 +79,8 @@ pub fn compute_activation(db: &Database, memory_id: i64) -> Result<f32> {
         // Compute activation from individual accesses
         // Use max(0.1) to ensure very recent accesses (< 0.1 seconds ago)
         // still contribute positively to activation.
-        let individual_activation: f64 = accesses
-            .iter()
-            .map(|t| t.max(0.1).powf(-decay).ln())
-            .sum();
+        let individual_activation: f64 =
+            accesses.iter().map(|t| t.max(0.1).powf(-decay).ln()).sum();
 
         // Approximate compacted accesses (assume they were spread over 90+ days ago)
         let compacted_activation = if compacted_count > 0 {
@@ -217,12 +215,18 @@ mod tests {
 
         // No accesses: activation = base only (0.5)
         let a0 = compute_activation(&db, id).expect("compute");
-        assert!((a0 - 0.5).abs() < 0.1, "base activation should be ~0.5, got {a0}");
+        assert!(
+            (a0 - 0.5).abs() < 0.1,
+            "base activation should be ~0.5, got {a0}"
+        );
 
         // One access: activation should increase
         record_access(&db, id, "test query").expect("record");
         let a1 = compute_activation(&db, id).expect("compute");
-        assert!(a1 > a0, "activation should increase after access: before={a0}, after={a1}");
+        assert!(
+            a1 > a0,
+            "activation should increase after access: before={a0}, after={a1}"
+        );
     }
 
     #[test]

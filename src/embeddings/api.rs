@@ -8,7 +8,7 @@
 #[cfg(feature = "api-embeddings")]
 mod inner {
     use crate::embeddings::EmbeddingBackend;
-    use crate::error::{MindCoreError, Result};
+    use crate::error::{FemindError, Result};
 
     /// Embedding backend using an OpenAI-compatible API endpoint.
     ///
@@ -49,16 +49,16 @@ mod inner {
             let output = std::process::Command::new("sh")
                 .args(["-c", key_cmd])
                 .output()
-                .map_err(|e| MindCoreError::Embedding(format!("key_cmd failed: {e}")))?;
+                .map_err(|e| FemindError::Embedding(format!("key_cmd failed: {e}")))?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(MindCoreError::Embedding(format!("key_cmd error: {stderr}")));
+                return Err(FemindError::Embedding(format!("key_cmd error: {stderr}")));
             }
 
             let api_key = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if api_key.is_empty() {
-                return Err(MindCoreError::Embedding("key_cmd returned empty key".into()));
+                return Err(FemindError::Embedding("key_cmd returned empty key".into()));
             }
 
             Ok(Self::new(base_url, api_key, model, dimensions))
@@ -84,15 +84,17 @@ mod inner {
                 "encoding_format": "float",
             });
 
-            let response = self.agent
+            let response = self
+                .agent
                 .post(&url)
                 .set("Authorization", &format!("Bearer {}", self.api_key))
                 .set("Content-Type", "application/json")
                 .send_json(&body)
-                .map_err(|e| MindCoreError::Embedding(format!("API request failed: {e}")))?;
+                .map_err(|e| FemindError::Embedding(format!("API request failed: {e}")))?;
 
-            let resp: ApiResponse = response.into_json()
-                .map_err(|e| MindCoreError::Embedding(format!("API response parse: {e}")))?;
+            let resp: ApiResponse = response
+                .into_json()
+                .map_err(|e| FemindError::Embedding(format!("API response parse: {e}")))?;
 
             // Sort by index to maintain input order
             let mut data = resp.data;
@@ -120,7 +122,7 @@ mod inner {
             results
                 .into_iter()
                 .next()
-                .ok_or_else(|| MindCoreError::Embedding("empty API response".into()))
+                .ok_or_else(|| FemindError::Embedding("empty API response".into()))
         }
 
         fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {

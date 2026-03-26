@@ -3,7 +3,7 @@
 //! Pipes prompt via stdin, reads response from stdout.
 //! Works with any CLI tool that accepts text input and produces text output.
 
-use crate::error::{MindCoreError, Result};
+use crate::error::{FemindError, Result};
 use crate::traits::LlmCallback;
 
 /// LLM callback using a CLI tool (claude, chatgpt, gemini, etc.)
@@ -34,7 +34,11 @@ impl CliLlmCallback {
     }
 
     /// Create a CLI callback for any command.
-    pub fn custom(command: impl Into<String>, args: Vec<String>, model_label: impl Into<String>) -> Self {
+    pub fn custom(
+        command: impl Into<String>,
+        args: Vec<String>,
+        model_label: impl Into<String>,
+    ) -> Self {
         Self {
             command: command.into(),
             args,
@@ -52,27 +56,31 @@ impl LlmCallback for CliLlmCallback {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        let mut child = cmd.spawn()
-            .map_err(|e| MindCoreError::Embedding(format!(
-                "Failed to spawn '{}': {e}", self.command
-            )))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            FemindError::Embedding(format!("Failed to spawn '{}': {e}", self.command))
+        })?;
 
         if let Some(stdin) = child.stdin.as_mut() {
             use std::io::Write;
-            stdin.write_all(prompt.as_bytes())
-                .map_err(|e| MindCoreError::Embedding(format!("stdin write: {e}")))?;
+            stdin
+                .write_all(prompt.as_bytes())
+                .map_err(|e| FemindError::Embedding(format!("stdin write: {e}")))?;
         }
 
-        let output = child.wait_with_output()
-            .map_err(|e| MindCoreError::Embedding(format!("wait: {e}")))?;
+        let output = child
+            .wait_with_output()
+            .map_err(|e| FemindError::Embedding(format!("wait: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
         // Tolerate non-zero exit if stdout has content (hooks may fail)
         if stdout.trim().is_empty() && !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(MindCoreError::Embedding(format!(
-                "{} exited with {}: {}", self.command, output.status, stderr.trim()
+            return Err(FemindError::Embedding(format!(
+                "{} exited with {}: {}",
+                self.command,
+                output.status,
+                stderr.trim()
             )));
         }
 

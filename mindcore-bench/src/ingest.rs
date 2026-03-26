@@ -2,13 +2,13 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use mindcore::engine::MemoryEngine;
-use mindcore::traits::{MemoryRecord, MemoryType};
+use femind::engine::MemoryEngine;
+use femind::traits::{MemoryRecord, MemoryType};
 use serde::{Deserialize, Serialize};
 
 use crate::dataset::Question;
 
-/// A conversation turn stored as a MindCore memory.
+/// A conversation turn stored as a femind memory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationMemory {
     pub id: Option<i64>,
@@ -55,7 +55,7 @@ impl MemoryRecord for ConversationMemory {
     }
 }
 
-/// Ingest all haystack sessions from a question into a MindCore engine.
+/// Ingest all haystack sessions from a question into a femind engine.
 ///
 /// Returns the number of memories stored.
 pub fn ingest_question(
@@ -88,8 +88,8 @@ pub fn ingest_question(
             };
 
             match engine.store(&memory) {
-                Ok(mindcore::memory::store::StoreResult::Added(_)) => stored += 1,
-                Ok(mindcore::memory::store::StoreResult::Duplicate(_)) => {} // skip dupes
+                Ok(femind::memory::store::StoreResult::Added(_)) => stored += 1,
+                Ok(femind::memory::store::StoreResult::Duplicate(_)) => {} // skip dupes
                 Err(e) => {
                     tracing::warn!("Failed to store turn: {e}");
                 }
@@ -115,10 +115,26 @@ mod tests {
             haystack_session_ids: vec!["s1".into()],
             haystack_dates: vec!["2024/01/15 (Mon) 10:00".into()],
             haystack_sessions: vec![vec![
-                Turn { role: "user".into(), content: "My name is John".into(), has_answer: true },
-                Turn { role: "assistant".into(), content: "Nice to meet you, John!".into(), has_answer: false },
-                Turn { role: "user".into(), content: "What's the weather like?".into(), has_answer: false },
-                Turn { role: "assistant".into(), content: "It's sunny today.".into(), has_answer: false },
+                Turn {
+                    role: "user".into(),
+                    content: "My name is John".into(),
+                    has_answer: true,
+                },
+                Turn {
+                    role: "assistant".into(),
+                    content: "Nice to meet you, John!".into(),
+                    has_answer: false,
+                },
+                Turn {
+                    role: "user".into(),
+                    content: "What's the weather like?".into(),
+                    has_answer: false,
+                },
+                Turn {
+                    role: "assistant".into(),
+                    content: "It's sunny today.".into(),
+                    has_answer: false,
+                },
             ]],
             answer_session_ids: vec!["s1".into()],
         }

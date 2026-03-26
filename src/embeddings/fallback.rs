@@ -1,5 +1,5 @@
 use crate::embeddings::EmbeddingBackend;
-use crate::error::{MindCoreError, Result};
+use crate::error::{FemindError, Result};
 
 /// Wraps embedding backends with graceful degradation.
 ///
@@ -26,7 +26,11 @@ impl FallbackBackend {
 
     /// Create without a backend (FTS5-only mode).
     pub fn none(dims: usize) -> Self {
-        Self { primary: None, fallback: None, dims }
+        Self {
+            primary: None,
+            fallback: None,
+            dims,
+        }
     }
 
     /// Create with API as primary and local as fallback.
@@ -77,7 +81,7 @@ impl FallbackBackend {
             }
         }
 
-        Err(MindCoreError::ModelNotAvailable(
+        Err(FemindError::ModelNotAvailable(
             "no embedding backend available".into(),
         ))
     }

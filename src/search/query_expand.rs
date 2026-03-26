@@ -39,30 +39,38 @@ pub fn expand_query(query: &str, now: DateTime<Utc>) -> ExpandedQuery {
     let mut filters = Vec::new();
 
     let patterns: &[(&str, Box<dyn Fn(DateTime<Utc>) -> FilterOp>)] = &[
-        ("yesterday", Box::new(|now| {
-            FilterOp::Between(now - Duration::days(2), now - Duration::days(1))
-        })),
-        ("last week", Box::new(|now| {
-            FilterOp::After(now - Duration::days(7))
-        })),
-        ("last month", Box::new(|now| {
-            FilterOp::After(now - Duration::days(30))
-        })),
-        ("last year", Box::new(|now| {
-            FilterOp::After(now - Duration::days(365))
-        })),
-        ("today", Box::new(|now| {
-            FilterOp::After(now - Duration::days(1))
-        })),
-        ("this week", Box::new(|now| {
-            FilterOp::After(now - Duration::days(7))
-        })),
-        ("this month", Box::new(|now| {
-            FilterOp::After(now - Duration::days(30))
-        })),
-        ("recently", Box::new(|now| {
-            FilterOp::After(now - Duration::days(7))
-        })),
+        (
+            "yesterday",
+            Box::new(|now| FilterOp::Between(now - Duration::days(2), now - Duration::days(1))),
+        ),
+        (
+            "last week",
+            Box::new(|now| FilterOp::After(now - Duration::days(7))),
+        ),
+        (
+            "last month",
+            Box::new(|now| FilterOp::After(now - Duration::days(30))),
+        ),
+        (
+            "last year",
+            Box::new(|now| FilterOp::After(now - Duration::days(365))),
+        ),
+        (
+            "today",
+            Box::new(|now| FilterOp::After(now - Duration::days(1))),
+        ),
+        (
+            "this week",
+            Box::new(|now| FilterOp::After(now - Duration::days(7))),
+        ),
+        (
+            "this month",
+            Box::new(|now| FilterOp::After(now - Duration::days(30))),
+        ),
+        (
+            "recently",
+            Box::new(|now| FilterOp::After(now - Duration::days(7))),
+        ),
     ];
 
     for (pattern, make_filter) in patterns {
@@ -77,7 +85,9 @@ pub fn expand_query(query: &str, now: DateTime<Utc>) -> ExpandedQuery {
                     "{} {}",
                     cleaned[..pos].trim(),
                     cleaned[pos + pattern.len()..].trim()
-                ).trim().to_string();
+                )
+                .trim()
+                .to_string();
             }
             break; // Only apply first match
         }
@@ -107,7 +117,10 @@ mod tests {
         let result = expand_query("errors from last week", now);
         assert_eq!(result.cleaned_text, "errors from");
         assert_eq!(result.date_filters.len(), 1);
-        assert!(matches!(result.date_filters[0].operator, FilterOp::After(_)));
+        assert!(matches!(
+            result.date_filters[0].operator,
+            FilterOp::After(_)
+        ));
     }
 
     #[test]
@@ -115,7 +128,10 @@ mod tests {
         let now = Utc::now();
         let result = expand_query("what happened yesterday", now);
         assert!(result.date_filters.len() == 1);
-        assert!(matches!(result.date_filters[0].operator, FilterOp::Between(_, _)));
+        assert!(matches!(
+            result.date_filters[0].operator,
+            FilterOp::Between(_, _)
+        ));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# MindCore
+# femind
 
 A standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
 
@@ -6,7 +6,7 @@ Handles persistent storage, keyword search (FTS5), vector search (candle), hybri
 
 ## Design Principles
 
-- **Library, not framework** — projects call into MindCore, not the other way around
+- **Library, not framework** — projects call into femind, not the other way around
 - **Feature-gated everything** — heavy dependencies behind compile-time flags
 - **Local-first** — SQLite-backed, single-file databases, no cloud dependency
 - **Pure Rust where possible** — candle over ort, SQLite over Postgres
@@ -14,9 +14,15 @@ Handles persistent storage, keyword search (FTS5), vector search (candle), hybri
 
 ## Status
 
-v0.1.0 published on crates.io. See:
+The local crate and repo are now `femind` / `fe-mind`. The published crates.io release is still `mindcore` v0.2.0 until the rename is published there. Non-LLM verification is currently green:
 
-- `MINDCORE_ARCHITECTURE.md` — full crate structure and API design
-- `MINDCORE_RESEARCH.md` — research, landscape analysis, and specification
+- `cargo test`
+- `cargo test --features full`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+
+The remaining approval-gated work is live CLI/API LLM validation. See:
+
+- `ARCHITECTURE.md` — full crate structure and API design
+- `RESEARCH.md` — research, landscape analysis, and specification
 - `DECISIONS.md` — architectural decisions log
 - `research/` — competitive landscape analysis

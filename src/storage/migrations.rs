@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use crate::error::{MindCoreError, Result};
+use crate::error::{FemindError, Result};
 use crate::storage::schema;
 
 /// Current schema version. Incremented with each migration.
@@ -25,7 +25,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     }
 
     if version > CURRENT_VERSION {
-        return Err(MindCoreError::Migration(format!(
+        return Err(FemindError::Migration(format!(
             "database schema version ({version}) is newer than this build supports ({CURRENT_VERSION}). \
              Upgrade mindcore to open this database."
         )));
@@ -60,7 +60,7 @@ fn get_version(conn: &Connection) -> Result<u32> {
     match result {
         Ok(v) => v
             .parse::<u32>()
-            .map_err(|e| MindCoreError::Migration(format!("invalid schema version '{v}': {e}"))),
+            .map_err(|e| FemindError::Migration(format!("invalid schema version '{v}': {e}"))),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
         Err(e) => Err(e.into()),
     }
@@ -98,15 +98,14 @@ fn run_migrations(conn: &Connection, from_version: u32) -> Result<()> {
 
             // Run each migration in a transaction
             let tx = conn.unchecked_transaction().map_err(|e| {
-                MindCoreError::Migration(format!("failed to start migration transaction: {e}"))
+                FemindError::Migration(format!("failed to start migration transaction: {e}"))
             })?;
 
             migration(&tx)?;
             set_version(&tx, migration_version + 1)?;
 
-            tx.commit().map_err(|e| {
-                MindCoreError::Migration(format!("migration commit failed: {e}"))
-            })?;
+            tx.commit()
+                .map_err(|e| FemindError::Migration(format!("migration commit failed: {e}")))?;
         }
     }
     Ok(())

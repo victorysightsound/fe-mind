@@ -59,7 +59,14 @@ pub fn compute_metrics(results: &[EvalResult]) -> BenchmarkMetrics {
             } else {
                 0.0
             };
-            (qt, TypeMetric { correct, total, accuracy })
+            (
+                qt,
+                TypeMetric {
+                    correct,
+                    total,
+                    accuracy,
+                },
+            )
         })
         .collect();
 
@@ -110,9 +117,15 @@ pub fn print_report(metrics: &BenchmarkMetrics) {
     }
 
     println!();
-    println!("Task-Averaged Accuracy:  {:.1}%", metrics.task_averaged * 100.0);
+    println!(
+        "Task-Averaged Accuracy:  {:.1}%",
+        metrics.task_averaged * 100.0
+    );
     println!("Overall Accuracy:        {:.1}%", metrics.overall * 100.0);
-    println!("Abstention Accuracy:     {:.1}%", metrics.abstention * 100.0);
+    println!(
+        "Abstention Accuracy:     {:.1}%",
+        metrics.abstention * 100.0
+    );
     println!();
     println!("Total Questions: {}", metrics.total_questions);
     println!("Total Tokens:    {}", metrics.total_tokens);

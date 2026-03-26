@@ -7,7 +7,7 @@
 
 #[cfg(feature = "api-llm")]
 mod inner {
-    use crate::error::{MindCoreError, Result};
+    use crate::error::{FemindError, Result};
     use crate::traits::LlmCallback;
 
     /// LLM callback using an OpenAI-compatible chat completions API.
@@ -42,11 +42,11 @@ mod inner {
             let output = std::process::Command::new("sh")
                 .args(["-c", key_cmd])
                 .output()
-                .map_err(|e| MindCoreError::Embedding(format!("key_cmd failed: {e}")))?;
+                .map_err(|e| FemindError::Embedding(format!("key_cmd failed: {e}")))?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(MindCoreError::Embedding(format!("key_cmd error: {stderr}")));
+                return Err(FemindError::Embedding(format!("key_cmd error: {stderr}")));
             }
 
             let api_key = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -76,21 +76,23 @@ mod inner {
                 "temperature": 0.0,
             });
 
-            let response = self.agent
+            let response = self
+                .agent
                 .post(&url)
                 .set("Authorization", &format!("Bearer {}", self.api_key))
                 .set("Content-Type", "application/json")
                 .send_json(&body)
-                .map_err(|e| MindCoreError::Embedding(format!("LLM API request failed: {e}")))?;
+                .map_err(|e| FemindError::Embedding(format!("LLM API request failed: {e}")))?;
 
-            let resp: ChatResponse = response.into_json()
-                .map_err(|e| MindCoreError::Embedding(format!("LLM API response parse: {e}")))?;
+            let resp: ChatResponse = response
+                .into_json()
+                .map_err(|e| FemindError::Embedding(format!("LLM API response parse: {e}")))?;
 
             resp.choices
                 .into_iter()
                 .next()
                 .map(|c| c.message.content)
-                .ok_or_else(|| MindCoreError::Embedding("Empty LLM response".into()))
+                .ok_or_else(|| FemindError::Embedding("Empty LLM response".into()))
         }
 
         fn model_name(&self) -> &str {

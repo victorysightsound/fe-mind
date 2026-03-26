@@ -1,15 +1,26 @@
-//! # MindCore
+#![cfg_attr(
+    test,
+    allow(
+        clippy::approx_constant,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::useless_vec
+    )
+)]
+
+//! # femind
 //!
 //! A pluggable, feature-gated memory engine for AI agent applications.
 //!
-//! MindCore provides persistent storage, keyword search (FTS5), vector search,
+//! femind provides persistent storage, keyword search (FTS5), vector search,
 //! hybrid retrieval (RRF), graph relationships, memory consolidation, cognitive
 //! decay modeling, and token-budget-aware context assembly.
 //!
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use mindcore::prelude::*;
+//! use femind::prelude::*;
 //!
 //! // Define your memory type
 //! // (implement MemoryRecord for your struct)
@@ -51,8 +62,8 @@ pub mod traits;
 
 /// Prelude module — common imports for consumers.
 pub mod prelude {
-    pub use crate::engine::MemoryEngine;
-    pub use crate::error::{MindCoreError, Result};
+    pub use crate::engine::{MemoryEngine, VectorSearchMode};
+    pub use crate::error::{FemindError, Result};
     pub use crate::memory::store::StoreResult;
     pub use crate::search::{SearchBuilder, SearchDepth, SearchMode, SearchResult};
     pub use crate::traits::{MemoryMeta, MemoryRecord, MemoryType};

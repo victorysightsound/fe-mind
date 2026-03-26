@@ -1,4 +1,4 @@
-# MindCore Production Pipeline — Complete Build Spec
+# femind Production Pipeline — Complete Build Spec
 
 ## Goal
 
@@ -15,27 +15,22 @@ until the build is complete and approved.
 - LlmIngest extraction — prompts + parser (src/ingest/llm_extract.rs)
 - Fact extraction — regex parser for structured facts (src/ingest/fact_extraction.rs)
 - store_with_extraction() — extracts facts, stores, creates graph edges
-- EngineConfig struct — has fields but NOT wired into operations
+- EngineConfig toggles wired into store, search, and extraction paths
 - AssemblyConfig — diversification, recency, graph_depth, search_limit
 - Graph infrastructure — memory_relations table, GraphMemory CRUD, traversal
 - Hybrid search — FTS5 OR-mode + vector + RRF + multi-query
 - Embedding backends — CandleNativeBackend, ApiBackend, FallbackBackend
 - Retrieval test harness — zero-cost search quality measurement
 - Extraction test harness — LLM extraction quality measurement
+- ANN runtime modes — exact, ann, and off now select real runtime behavior
 - Pipeline test harness — structure only, no CLI subcommand
 - Session cache — raw dataset storage
 - Embedding cache — per chunk size
 
-### NOT Built ✗
-1. EngineConfig toggles not wired into store() — embedding always runs
-2. EngineConfig toggles not wired into store_with_extraction() — graph/dedup always run
-3. EngineConfig toggles not wired into search — graph filtering always checks depth from AssemblyConfig, not EngineConfig.graph_enabled
-4. cli-llm feature flag missing from Cargo.toml
-5. ANN indexing — not started (vector_search_mode field exists but does nothing)
-6. Pipeline test harness — no CLI subcommand, no actual implementation
-7. Extraction model not configurable — hardcoded in main.rs
-8. store_with_extraction() ExtractionResult doesn't match spec (returns llm_extract::ExtractionResult, not the spec's struct)
-9. Architecture documentation not updated
+### Remaining Work
+1. Live CLI/API LLM validation — approval required before running it
+2. Rename and integrate the crate/repo as `femind`
+3. Optional pipeline harness completion in downstream tooling
 
 ## Build Tasks
 
@@ -63,8 +58,8 @@ until the build is complete and approved.
 
 **A7.** Wire `config.vector_search_mode` into hybrid search:
 - "off" → skip vector search entirely, FTS5 only
-- "exact" → current brute-force (default for now)
-- "ann" → placeholder that falls back to exact until ANN is built
+- "exact" → brute-force vector search
+- "ann" → use the shared ANN index, rebuilding it when vectors change and falling back to exact if needed
 
 **A8.** Add `cli-llm` feature flag to Cargo.toml
 
@@ -90,7 +85,7 @@ until the build is complete and approved.
 ### Phase C: ANN Indexing
 
 **C1.** Research sqlite-vec Rust bindings availability and maturity
-**C2.** Implement ANN search mode with fallback to exact
+**C2.** Implement ANN search mode with shared index lifecycle and fallback to exact
 **C3.** Add `ann` feature flag to Cargo.toml
 **C4.** Unit tests comparing ANN vs exact results
 
@@ -102,7 +97,7 @@ until the build is complete and approved.
 
 ### Phase E: Documentation
 
-**E1.** Update MINDCORE_ARCHITECTURE.md with complete pipeline
+**E1.** Update ARCHITECTURE.md with complete pipeline
 **E2.** Update STATUS doc with final build state
 **E3.** Document all feature flags and their interactions
 
@@ -127,7 +122,7 @@ pub struct EngineConfig {
     pub embedding_enabled: bool,     // A1-A3: skip embedding when false
     pub graph_enabled: bool,         // A4, A6: skip graph create/query when false
     pub dedup_enabled: bool,         // A5: skip dedup check when false
-    pub vector_search_mode: String,  // A7: "ann", "exact", "off"
+    pub vector_search_mode: VectorSearchMode,  // exact, ann, off
     pub assembly: AssemblyConfig,    // search-time config
 }
 ```
@@ -147,9 +142,9 @@ pub struct AssemblyConfig {
 local-embeddings    # CandleNativeBackend (MiniLM local)
 api-embeddings      # ApiBackend (DeepInfra embedding API)
 api-llm             # ApiLlmCallback (DeepInfra/OpenAI chat API)
-cli-llm             # CliLlmCallback (Claude/ChatGPT CLI) — MISSING, add
+cli-llm             # CliLlmCallback (Claude/ChatGPT CLI)
 llm-ingest          # LlmIngest extraction strategy
 vector-search       # local-embeddings + tokio
 graph-memory        # graph tables (always created, this gates logic)
-ann                 # ANN vector indexing — NOT BUILT YET
+ann                 # ANN vector indexing via instant-distance HNSW
 ```

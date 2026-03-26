@@ -1,3 +1,10 @@
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::useless_format
+)]
+
 //! End-to-end test for CandleNativeBackend with real model inference.
 //!
 //! Only runs with: cargo test --features local-embeddings --test candle_e2e
@@ -5,8 +12,8 @@
 
 #![cfg(feature = "local-embeddings")]
 
-use mindcore::embeddings::{CandleNativeBackend, EmbeddingBackend};
-use mindcore::embeddings::pooling::cosine_similarity;
+use femind::embeddings::pooling::cosine_similarity;
+use femind::embeddings::{CandleNativeBackend, EmbeddingBackend};
 
 #[test]
 fn candle_backend_loads_and_embeds() {
@@ -16,7 +23,9 @@ fn candle_backend_loads_and_embeds() {
     assert!(backend.is_available());
     assert_eq!(backend.model_name(), "all-MiniLM-L6-v2");
 
-    let vec = backend.embed("authentication error with JWT token").expect("embed failed");
+    let vec = backend
+        .embed("authentication error with JWT token")
+        .expect("embed failed");
     assert_eq!(vec.len(), 384, "expected 384 dimensions");
 
     // Vector should be L2-normalized (magnitude ≈ 1.0)
@@ -31,9 +40,15 @@ fn candle_backend_loads_and_embeds() {
 fn similar_texts_have_high_similarity() {
     let backend = CandleNativeBackend::new().expect("load");
 
-    let v1 = backend.embed("authentication failed with invalid JWT token").expect("embed 1");
-    let v2 = backend.embed("auth error: JWT token expired").expect("embed 2");
-    let v3 = backend.embed("the weather is sunny today").expect("embed 3");
+    let v1 = backend
+        .embed("authentication failed with invalid JWT token")
+        .expect("embed 1");
+    let v2 = backend
+        .embed("auth error: JWT token expired")
+        .expect("embed 2");
+    let v3 = backend
+        .embed("the weather is sunny today")
+        .expect("embed 3");
 
     let sim_related = cosine_similarity(&v1, &v2);
     let sim_unrelated = cosine_similarity(&v1, &v3);
@@ -98,10 +113,10 @@ fn embedding_deterministic() {
 /// improves retrieval quality over keyword-only search.
 #[test]
 fn full_pipeline_with_real_embeddings() {
-    use mindcore::context::ContextBudget;
-    use mindcore::engine::MemoryEngine;
-    use mindcore::memory::store::StoreResult;
-    use mindcore::traits::{MemoryRecord, MemoryType};
+    use femind::context::ContextBudget;
+    use femind::engine::MemoryEngine;
+    use femind::memory::store::StoreResult;
+    use femind::traits::{MemoryRecord, MemoryType};
 
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     struct TestMem {
@@ -111,10 +126,18 @@ fn full_pipeline_with_real_embeddings() {
     }
 
     impl MemoryRecord for TestMem {
-        fn id(&self) -> Option<i64> { self.id }
-        fn searchable_text(&self) -> String { self.text.clone() }
-        fn memory_type(&self) -> MemoryType { MemoryType::Episodic }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created }
+        fn id(&self) -> Option<i64> {
+            self.id
+        }
+        fn searchable_text(&self) -> String {
+            self.text.clone()
+        }
+        fn memory_type(&self) -> MemoryType {
+            MemoryType::Episodic
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created
+        }
     }
 
     let backend = CandleNativeBackend::new().expect("load model");
@@ -138,36 +161,50 @@ fn full_pipeline_with_real_embeddings() {
     ];
 
     for text in &topics {
-        let mem = TestMem { id: None, text: text.to_string(), created: chrono::Utc::now() };
+        let mem = TestMem {
+            id: None,
+            text: text.to_string(),
+            created: chrono::Utc::now(),
+        };
         let result = engine.store(&mem).expect("store");
         assert!(matches!(result, StoreResult::Added(_)));
     }
 
     // Verify all embeddings stored
     let db = engine.database();
-    let vector_count: i64 = db.with_reader(|conn| {
-        conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
-            .map_err(Into::into)
-    }).expect("count");
+    let vector_count: i64 = db
+        .with_reader(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+                .map_err(Into::into)
+        })
+        .expect("count");
     assert_eq!(vector_count, 10, "all memories should have vectors");
 
     // TEST 1: Semantic query that shares NO keywords with the stored memory
     // "What food do I like?" should find "My favorite cuisine is Japanese..."
     // even though the query words don't appear in the stored text.
-    let results = engine.search("What food do I like?")
+    let results = engine
+        .search("What food do I like?")
         .limit(3)
         .execute()
         .expect("search");
-    assert!(!results.is_empty(), "semantic search should find food-related memory");
+    assert!(
+        !results.is_empty(),
+        "semantic search should find food-related memory"
+    );
     // Check that a top-3 result is about food (cuisine or allergy)
     let mut found_food = false;
     for sr in &results {
-        let text: String = db.with_reader(|conn| {
-            conn.query_row(
-                "SELECT searchable_text FROM memories WHERE id = ?1",
-                [sr.memory_id], |row| row.get(0),
-            ).map_err(Into::into)
-        }).expect("get text");
+        let text: String = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [sr.memory_id],
+                    |row| row.get(0),
+                )
+                .map_err(Into::into)
+            })
+            .expect("get text");
         if text.contains("cuisine") || text.contains("sushi") || text.contains("peanut") {
             found_food = true;
         }
@@ -175,7 +212,8 @@ fn full_pipeline_with_real_embeddings() {
     assert!(found_food, "Top-3 should include food-related memory");
 
     // TEST 2: Context assembly with semantic query
-    let assembly = engine.assemble_context("Do I have any pets?", &ContextBudget::new(2000))
+    let assembly = engine
+        .assemble_context("Do I have any pets?", &ContextBudget::new(2000))
         .expect("assemble");
     assert!(!assembly.items.is_empty());
     let context_text = assembly.render();
@@ -185,19 +223,23 @@ fn full_pipeline_with_real_embeddings() {
     );
 
     // TEST 3: Hybrid search improves recall for paraphrased queries
-    let results = engine.search("musical instruments and hobbies")
+    let results = engine
+        .search("musical instruments and hobbies")
         .limit(3)
         .execute()
         .expect("search");
-    assert!(!results.is_empty(), "should find music-related memory via semantic similarity");
+    assert!(
+        !results.is_empty(),
+        "should find music-related memory via semantic similarity"
+    );
 }
 
 /// Batch store with real embeddings at 50+ scale.
 #[test]
 fn batch_store_with_real_embeddings() {
-    use mindcore::engine::MemoryEngine;
-    use mindcore::memory::store::StoreResult;
-    use mindcore::traits::{MemoryRecord, MemoryType};
+    use femind::engine::MemoryEngine;
+    use femind::memory::store::StoreResult;
+    use femind::traits::{MemoryRecord, MemoryType};
 
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     struct Mem {
@@ -207,10 +249,18 @@ fn batch_store_with_real_embeddings() {
     }
 
     impl MemoryRecord for Mem {
-        fn id(&self) -> Option<i64> { self.id }
-        fn searchable_text(&self) -> String { self.text.clone() }
-        fn memory_type(&self) -> MemoryType { MemoryType::Episodic }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created }
+        fn id(&self) -> Option<i64> {
+            self.id
+        }
+        fn searchable_text(&self) -> String {
+            self.text.clone()
+        }
+        fn memory_type(&self) -> MemoryType {
+            MemoryType::Episodic
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created
+        }
     }
 
     let backend = CandleNativeBackend::new().expect("load");
@@ -221,26 +271,47 @@ fn batch_store_with_real_embeddings() {
 
     // Generate 60 distinct memories
     let subjects = [
-        "authentication", "database", "caching", "deployment", "testing",
-        "monitoring", "security", "performance", "networking", "storage",
-        "logging", "scheduling",
+        "authentication",
+        "database",
+        "caching",
+        "deployment",
+        "testing",
+        "monitoring",
+        "security",
+        "performance",
+        "networking",
+        "storage",
+        "logging",
+        "scheduling",
     ];
     let actions = [
-        "error occurred during", "completed successfully for", "timeout in",
-        "was upgraded for", "needs attention in",
+        "error occurred during",
+        "completed successfully for",
+        "timeout in",
+        "was upgraded for",
+        "needs attention in",
     ];
 
-    let records: Vec<Mem> = subjects.iter().enumerate().flat_map(|(i, subj)| {
-        actions.iter().enumerate().map(move |(j, act)| {
-            Mem {
+    let records: Vec<Mem> = subjects
+        .iter()
+        .enumerate()
+        .flat_map(|(i, subj)| {
+            actions.iter().enumerate().map(move |(j, act)| Mem {
                 id: None,
-                text: format!("The {subj} system {act} the production environment on day {}", i * 5 + j),
+                text: format!(
+                    "The {subj} system {act} the production environment on day {}",
+                    i * 5 + j
+                ),
                 created: chrono::Utc::now(),
-            }
+            })
         })
-    }).collect();
+        .collect();
 
-    assert!(records.len() >= 50, "should have 60 records, got {}", records.len());
+    assert!(
+        records.len() >= 50,
+        "should have 60 records, got {}",
+        records.len()
+    );
 
     let start = std::time::Instant::now();
     let results = engine.store_batch(&records).expect("batch store");
@@ -251,29 +322,40 @@ fn batch_store_with_real_embeddings() {
 
     // Verify all embeddings stored
     let db = engine.database();
-    let vector_count: i64 = db.with_reader(|conn| {
-        conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
-            .map_err(Into::into)
-    }).expect("count");
+    let vector_count: i64 = db
+        .with_reader(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+                .map_err(Into::into)
+        })
+        .expect("count");
     assert_eq!(vector_count, records.len() as i64);
 
     // Verify embedding_status
-    let success_count: i64 = db.with_reader(|conn| {
-        conn.query_row(
-            "SELECT COUNT(*) FROM memories WHERE embedding_status = 'success'",
-            [], |row| row.get(0),
-        ).map_err(Into::into)
-    }).expect("count");
+    let success_count: i64 = db
+        .with_reader(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM memories WHERE embedding_status = 'success'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+        .expect("count");
     assert_eq!(success_count, records.len() as i64);
 
     // Hybrid search finds results
-    let results = engine.search("database timeout production")
+    let results = engine
+        .search("database timeout production")
         .limit(5)
         .execute()
         .expect("search");
     assert!(!results.is_empty(), "should find database-related memories");
 
-    println!("Batch store of {} records with embeddings took {:?}", records.len(), elapsed);
+    println!(
+        "Batch store of {} records with embeddings took {:?}",
+        records.len(),
+        elapsed
+    );
 }
 
 /// Distractor scenario: simulates LongMemEval-S conditions.
@@ -283,8 +365,8 @@ fn batch_store_with_real_embeddings() {
 /// surface the relevant content in the top-5 results despite overwhelming noise.
 #[test]
 fn distractor_scenario_finds_needle_in_haystack() {
-    use mindcore::engine::MemoryEngine;
-    use mindcore::traits::{MemoryRecord, MemoryType};
+    use femind::engine::MemoryEngine;
+    use femind::traits::{MemoryRecord, MemoryType};
 
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     struct Msg {
@@ -294,10 +376,18 @@ fn distractor_scenario_finds_needle_in_haystack() {
     }
 
     impl MemoryRecord for Msg {
-        fn id(&self) -> Option<i64> { self.id }
-        fn searchable_text(&self) -> String { self.text.clone() }
-        fn memory_type(&self) -> MemoryType { MemoryType::Episodic }
-        fn created_at(&self) -> chrono::DateTime<chrono::Utc> { self.created }
+        fn id(&self) -> Option<i64> {
+            self.id
+        }
+        fn searchable_text(&self) -> String {
+            self.text.clone()
+        }
+        fn memory_type(&self) -> MemoryType {
+            MemoryType::Episodic
+        }
+        fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
+            self.created
+        }
     }
 
     let backend = CandleNativeBackend::new().expect("load");
@@ -398,15 +488,27 @@ fn distractor_scenario_finds_needle_in_haystack() {
 
     // Store relevant sessions
     for turn in &relevant_turns {
-        all_records.push(Msg { id: None, text: turn.to_string(), created: chrono::Utc::now() });
+        all_records.push(Msg {
+            id: None,
+            text: turn.to_string(),
+            created: chrono::Utc::now(),
+        });
     }
     for turn in &relevant_turns_2 {
-        all_records.push(Msg { id: None, text: turn.to_string(), created: chrono::Utc::now() });
+        all_records.push(Msg {
+            id: None,
+            text: turn.to_string(),
+            created: chrono::Utc::now(),
+        });
     }
 
     let total_records = all_records.len();
-    println!("Storing {} records ({} distractor + {} relevant)...",
-        total_records, total_records - 8, 8);
+    println!(
+        "Storing {} records ({} distractor + {} relevant)...",
+        total_records,
+        total_records - 8,
+        8
+    );
 
     let start = std::time::Instant::now();
     let results = engine.store_batch(&all_records).expect("batch store");
@@ -416,7 +518,8 @@ fn distractor_scenario_finds_needle_in_haystack() {
 
     // THE KEY TEST: Query for information only in the relevant sessions
     let search_start = std::time::Instant::now();
-    let results = engine.search("What is the name of my cat?")
+    let results = engine
+        .search("What is the name of my cat?")
         .limit(5)
         .execute()
         .expect("search");
@@ -429,13 +532,22 @@ fn distractor_scenario_finds_needle_in_haystack() {
     let db = engine.database();
     let mut found_cat = false;
     for (rank, sr) in results.iter().enumerate() {
-        let text: String = db.with_reader(|conn| {
-            conn.query_row(
-                "SELECT searchable_text FROM memories WHERE id = ?1",
-                [sr.memory_id], |row| row.get(0),
-            ).map_err(Into::into)
-        }).expect("get");
-        println!("  #{}: (score={:.4}) {}", rank + 1, sr.score, &text[..text.len().min(80)]);
+        let text: String = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [sr.memory_id],
+                    |row| row.get(0),
+                )
+                .map_err(Into::into)
+            })
+            .expect("get");
+        println!(
+            "  #{}: (score={:.4}) {}",
+            rank + 1,
+            sr.score,
+            &text[..text.len().min(80)]
+        );
         if text.contains("Patches") || text.contains("calico") || text.contains("cat") {
             found_cat = true;
         }
@@ -443,18 +555,23 @@ fn distractor_scenario_finds_needle_in_haystack() {
     assert!(found_cat, "Top-5 results should include cat-related memory");
 
     // Second query: more specific
-    let results = engine.search("What does Patches like to eat?")
+    let results = engine
+        .search("What does Patches like to eat?")
         .limit(5)
         .execute()
         .expect("search");
     let mut found_food = false;
     for sr in &results {
-        let text: String = db.with_reader(|conn| {
-            conn.query_row(
-                "SELECT searchable_text FROM memories WHERE id = ?1",
-                [sr.memory_id], |row| row.get(0),
-            ).map_err(Into::into)
-        }).expect("get");
+        let text: String = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [sr.memory_id],
+                    |row| row.get(0),
+                )
+                .map_err(Into::into)
+            })
+            .expect("get");
         if text.contains("salmon") {
             found_food = true;
         }
@@ -463,22 +580,37 @@ fn distractor_scenario_finds_needle_in_haystack() {
 
     // Third query: long natural language question (tests OR-mode + stop-word removal)
     // Without OR mode, this query would match nothing because AND requires all terms
-    let results = engine.search("How many days did I spend playing with my cat and what toys does she enjoy?")
+    let results = engine
+        .search("How many days did I spend playing with my cat and what toys does she enjoy?")
         .limit(5)
         .execute()
         .expect("search");
-    assert!(!results.is_empty(), "Long natural language query should find results via OR-mode + stop-word removal");
+    assert!(
+        !results.is_empty(),
+        "Long natural language query should find results via OR-mode + stop-word removal"
+    );
     let mut found_toy = false;
     for sr in &results {
-        let text: String = db.with_reader(|conn| {
-            conn.query_row(
-                "SELECT searchable_text FROM memories WHERE id = ?1",
-                [sr.memory_id], |row| row.get(0),
-            ).map_err(Into::into)
-        }).expect("get");
-        if text.contains("feather") || text.contains("toy") || text.contains("cat") || text.contains("Patches") {
+        let text: String = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [sr.memory_id],
+                    |row| row.get(0),
+                )
+                .map_err(Into::into)
+            })
+            .expect("get");
+        if text.contains("feather")
+            || text.contains("toy")
+            || text.contains("cat")
+            || text.contains("Patches")
+        {
             found_toy = true;
         }
     }
-    assert!(found_toy, "Long query should find cat/toy-related memories via semantic + OR-mode FTS5");
+    assert!(
+        found_toy,
+        "Long query should find cat/toy-related memories via semantic + OR-mode FTS5"
+    );
 }

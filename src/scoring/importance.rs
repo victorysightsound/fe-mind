@@ -69,7 +69,10 @@ mod tests {
         let scorer = ImportanceScorer::default();
         let m = scorer.score_multiplier(&meta_importance(5), "q", 1.0);
         // (5-1)/9 = 0.444, 0.5 + 0.444*1.0 = 0.944
-        assert!(m > 0.9 && m < 1.1, "importance 5 should be near 1.0, got {m}");
+        assert!(
+            m > 0.9 && m < 1.1,
+            "importance 5 should be near 1.0, got {m}"
+        );
     }
 
     #[test]

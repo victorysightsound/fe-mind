@@ -22,9 +22,8 @@ impl VectorSearch {
         limit: usize,
     ) -> Result<Vec<FtsResult>> {
         db.with_reader(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT memory_id, embedding FROM memory_vectors WHERE model_name = ?1",
-            )?;
+            let mut stmt = conn
+                .prepare("SELECT memory_id, embedding FROM memory_vectors WHERE model_name = ?1")?;
 
             let mut scored: Vec<(i64, f32)> = stmt
                 .query_map(params![model_name], |row| {
@@ -84,6 +83,18 @@ impl VectorSearch {
                 |row| row.get(0),
             )?;
             Ok(count > 0)
+        })
+    }
+
+    /// Count vectors stored for the given model.
+    pub fn count_vectors(db: &Database, model_name: &str) -> Result<usize> {
+        db.with_reader(|conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM memory_vectors WHERE model_name = ?1",
+                [model_name],
+                |row| row.get(0),
+            )?;
+            Ok(count as usize)
         })
     }
 }

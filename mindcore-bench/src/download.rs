@@ -78,5 +78,8 @@ pub async fn download_dataset(variant: DatasetVariant) -> Result<PathBuf> {
 /// Check if a dataset is already cached locally.
 pub fn is_cached(variant: DatasetVariant) -> bool {
     let path = data_dir().join(variant.filename());
-    path.exists() && std::fs::metadata(&path).map(|m| m.len() > 1000).unwrap_or(false)
+    path.exists()
+        && std::fs::metadata(&path)
+            .map(|m| m.len() > 1000)
+            .unwrap_or(false)
 }

@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic)]
+
 //! Performance benchmark at 10K scale.
 //!
 //! Run with: cargo run --release --example benchmark
@@ -11,14 +13,14 @@
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use mindcore::context::ContextBudget;
-use mindcore::embeddings::pooling::{normalize_l2, vec_to_bytes};
-use mindcore::engine::MemoryEngine;
-use mindcore::memory::activation;
-use mindcore::memory::store::StoreResult;
-use mindcore::scoring::{CompositeScorer, ImportanceScorer, RecencyScorer};
-use mindcore::search::{SearchMode, VectorSearch};
-use mindcore::traits::{MemoryRecord, MemoryType};
+use femind::context::ContextBudget;
+use femind::embeddings::pooling::normalize_l2;
+use femind::engine::MemoryEngine;
+use femind::memory::activation;
+use femind::memory::store::StoreResult;
+use femind::scoring::{CompositeScorer, ImportanceScorer, RecencyScorer};
+use femind::search::VectorSearch;
+use femind::traits::{MemoryRecord, MemoryType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,15 +32,25 @@ struct Mem {
 }
 
 impl MemoryRecord for Mem {
-    fn id(&self) -> Option<i64> { self.id }
-    fn searchable_text(&self) -> String { self.text.clone() }
-    fn memory_type(&self) -> MemoryType { MemoryType::Semantic }
-    fn importance(&self) -> u8 { self.importance }
-    fn created_at(&self) -> DateTime<Utc> { self.created_at }
+    fn id(&self) -> Option<i64> {
+        self.id
+    }
+    fn searchable_text(&self) -> String {
+        self.text.clone()
+    }
+    fn memory_type(&self) -> MemoryType {
+        MemoryType::Semantic
+    }
+    fn importance(&self) -> u8 {
+        self.importance
+    }
+    fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
 }
 
 fn main() {
-    println!("MindCore 10K Performance Benchmark");
+    println!("femind 10K Performance Benchmark");
     println!("===================================\n");
 
     let scorer = CompositeScorer::new(vec![
@@ -69,18 +81,29 @@ fn main() {
             importance: imp,
             created_at: Utc::now(),
         };
-        let StoreResult::Added(id) = engine.store(&mem).expect("store") else { panic!("dup at {i}") };
+        let StoreResult::Added(id) = engine.store(&mem).expect("store") else {
+            panic!("dup at {i}")
+        };
         ids.push(id);
     }
     let store_elapsed = start.elapsed();
     let store_rate = 10_000.0 / store_elapsed.as_secs_f64();
     println!("   Store: {store_elapsed:?} ({store_rate:.0}/sec)");
-    assert!(store_rate > 100.0, "FAIL: store rate {store_rate:.0}/sec < 100/sec");
+    assert!(
+        store_rate > 100.0,
+        "FAIL: store rate {store_rate:.0}/sec < 100/sec"
+    );
     println!("   PASS: >{:.0}/sec\n", store_rate);
 
     // --- FTS5 Search at 10K ---
     println!("[2] FTS5 search at 10K...");
-    let queries = ["authentication", "JWT error", "database timeout", "build deploy", "production fix"];
+    let queries = [
+        "authentication",
+        "JWT error",
+        "database timeout",
+        "build deploy",
+        "production fix",
+    ];
     let mut total_fts_ms = 0.0;
     for query in &queries {
         let start = Instant::now();
@@ -92,7 +115,10 @@ fn main() {
     let avg_fts_ms = total_fts_ms / queries.len() as f64;
     println!("   Average: {avg_fts_ms:.2}ms");
     // Target: <5ms for raw FTS5, <20ms with post-search scoring (metadata load per result)
-    assert!(avg_fts_ms < 25.0, "FAIL: avg FTS5+scoring {avg_fts_ms:.2}ms > 25ms target");
+    assert!(
+        avg_fts_ms < 25.0,
+        "FAIL: avg FTS5+scoring {avg_fts_ms:.2}ms > 25ms target"
+    );
     println!("   PASS: <{avg_fts_ms:.1}ms (includes scoring metadata load)\n");
 
     // --- Vector scan at 10K ---
@@ -111,17 +137,34 @@ fn main() {
     let start = Instant::now();
     let results = VectorSearch::search(db, &query_vec, "bench-model", 10).expect("vector search");
     let vec_elapsed = start.elapsed();
-    println!("   Vector scan: {:?} ({} results)", vec_elapsed, results.len());
-    assert!(vec_elapsed.as_millis() < 50, "FAIL: vector scan {vec_elapsed:?} > 50ms");
+    println!(
+        "   Vector scan: {:?} ({} results)",
+        vec_elapsed,
+        results.len()
+    );
+    assert!(
+        vec_elapsed.as_millis() < 50,
+        "FAIL: vector scan {vec_elapsed:?} > 50ms"
+    );
     println!("   PASS: <{:?}\n", vec_elapsed);
 
     // --- Context Assembly at 10K ---
     println!("[4] Context assembly at 10K...");
     let start = Instant::now();
-    let assembly = engine.assemble_context("authentication error", &ContextBudget::new(4096)).expect("assemble");
+    let assembly = engine
+        .assemble_context("authentication error", &ContextBudget::new(4096))
+        .expect("assemble");
     let ctx_elapsed = start.elapsed();
-    println!("   Assembly: {:?} ({} items, {} tokens)", ctx_elapsed, assembly.items.len(), assembly.total_tokens);
-    assert!(ctx_elapsed.as_millis() < 50, "FAIL: context assembly {ctx_elapsed:?} > 10ms");
+    println!(
+        "   Assembly: {:?} ({} items, {} tokens)",
+        ctx_elapsed,
+        assembly.items.len(),
+        assembly.total_tokens
+    );
+    assert!(
+        ctx_elapsed.as_millis() < 50,
+        "FAIL: context assembly {ctx_elapsed:?} > 10ms"
+    );
     println!("   PASS: <{:?}\n", ctx_elapsed);
 
     // --- Activation computation ---
@@ -136,7 +179,10 @@ fn main() {
     }
     let act_elapsed = start.elapsed();
     let act_per = act_elapsed.as_secs_f64() * 1000.0 / 100.0;
-    println!("   100 activations: {:?} ({act_per:.2}ms/each)", act_elapsed);
+    println!(
+        "   100 activations: {:?} ({act_per:.2}ms/each)",
+        act_elapsed
+    );
     assert!(act_per < 5.0, "FAIL: activation {act_per:.2}ms/each > 5ms");
     println!("   PASS: <{act_per:.1}ms/each\n");
 

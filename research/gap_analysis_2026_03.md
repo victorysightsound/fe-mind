@@ -1,9 +1,9 @@
 # MindCore Gap Analysis — March 2026
 
-> **Note:** This research predates MindCore's v0.1.0 release. Many of the recommendations here were incorporated into the shipped architecture.
+> **Note:** This research predates MindCore's current v0.2.0 crate state. Many of the recommendations here were incorporated into the shipped architecture.
 
 **Date:** 2026-03-17
-**Status:** Research complete. Findings incorporated into v0.1.0 architecture.
+**Status:** Research complete. Findings incorporated into the current v0.2.0 architecture.
 **Context:** Targeted research across 5 areas to validate and strengthen MindCore's architecture against the cutting edge of agent memory systems.
 
 ---

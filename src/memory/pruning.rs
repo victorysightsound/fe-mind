@@ -130,7 +130,11 @@ mod tests {
 
     fn setup() -> Database {
         let db = Database::open_in_memory().expect("open");
-        db.with_writer(|conn| { migrations::migrate(conn)?; Ok(()) }).expect("migrate");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
         db
     }
 
@@ -156,7 +160,10 @@ mod tests {
         }).expect("insert");
 
         let report = prune(&db, &PruningPolicy::default()).expect("prune");
-        assert_eq!(report.pruned, 0, "semantic memories should not be pruned by default");
+        assert_eq!(
+            report.pruned, 0,
+            "semantic memories should not be pruned by default"
+        );
     }
 
     #[test]

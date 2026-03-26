@@ -39,17 +39,23 @@ impl ClaudeCliClient {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
-        let mut child = cmd.spawn().context("failed to spawn claude CLI — is it installed?")?;
+        let mut child = cmd
+            .spawn()
+            .context("failed to spawn claude CLI — is it installed?")?;
 
         // Write prompt to stdin
         if let Some(ref mut stdin) = child.stdin {
             use std::io::Write;
-            stdin.write_all(prompt.as_bytes()).context("failed to write to claude stdin")?;
+            stdin
+                .write_all(prompt.as_bytes())
+                .context("failed to write to claude stdin")?;
         }
         // Close stdin so claude knows input is complete
         drop(child.stdin.take());
 
-        let output = child.wait_with_output().context("failed to wait for claude CLI")?;
+        let output = child
+            .wait_with_output()
+            .context("failed to wait for claude CLI")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

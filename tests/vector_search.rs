@@ -1,35 +1,29 @@
+#![allow(
+    clippy::approx_constant,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used
+)]
+
 //! Integration tests for Phase 5: Vector Search + Hybrid RRF
 //!
 //! Uses NoopBackend (zero vectors) to test the infrastructure
 //! without requiring candle model download.
 
-use mindcore::embeddings::{EmbeddingBackend, FallbackBackend, NoopBackend};
-use mindcore::embeddings::pooling::{bytes_to_vec, cosine_similarity, normalize_l2, vec_to_bytes};
-use mindcore::search::{VectorSearch, rrf_merge};
-use mindcore::search::FtsResult;
-use mindcore::storage::Database;
-use mindcore::storage::migrations;
-use mindcore::traits::{MemoryRecord, MemoryType};
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Mem {
-    id: Option<i64>,
-    text: String,
-    created_at: DateTime<Utc>,
-}
-
-impl MemoryRecord for Mem {
-    fn id(&self) -> Option<i64> { self.id }
-    fn searchable_text(&self) -> String { self.text.clone() }
-    fn memory_type(&self) -> MemoryType { MemoryType::Semantic }
-    fn created_at(&self) -> DateTime<Utc> { self.created_at }
-}
+use femind::embeddings::pooling::{bytes_to_vec, cosine_similarity, normalize_l2, vec_to_bytes};
+use femind::embeddings::{EmbeddingBackend, FallbackBackend, NoopBackend};
+use femind::search::FtsResult;
+use femind::search::{rrf_merge, VectorSearch};
+use femind::storage::migrations;
+use femind::storage::Database;
 
 fn setup_db() -> Database {
     let db = Database::open_in_memory().expect("open");
-    db.with_writer(|conn| { migrations::migrate(conn)?; Ok(()) }).expect("migrate");
+    db.with_writer(|conn| {
+        migrations::migrate(conn)?;
+        Ok(())
+    })
+    .expect("migrate");
     db
 }
 
@@ -41,7 +35,8 @@ fn insert_mem(db: &Database, id: i64, text: &str) {
             rusqlite::params![id, text, format!("hash_{id}")],
         )?;
         Ok(())
-    }).expect("insert");
+    })
+    .expect("insert");
 }
 
 // --- Vector Storage ---
@@ -57,7 +52,10 @@ fn store_and_retrieve_vectors() {
     let query = normalize_l2(&[1.0, 0.0, 0.0]);
     let results = VectorSearch::search(&db, &query, "test-model", 10).expect("search");
     assert_eq!(results.len(), 1);
-    assert!((results[0].score - 1.0).abs() < 0.01, "identical vectors should have sim ~1.0");
+    assert!(
+        (results[0].score - 1.0).abs() < 0.01,
+        "identical vectors should have sim ~1.0"
+    );
 }
 
 #[test]
@@ -81,12 +79,24 @@ fn vector_model_isolation() {
 #[test]
 fn rrf_merges_results() {
     let kw = vec![
-        FtsResult { memory_id: 1, score: 1.0 },
-        FtsResult { memory_id: 2, score: 0.5 },
+        FtsResult {
+            memory_id: 1,
+            score: 1.0,
+        },
+        FtsResult {
+            memory_id: 2,
+            score: 0.5,
+        },
     ];
     let vec = vec![
-        FtsResult { memory_id: 2, score: 0.9 },
-        FtsResult { memory_id: 3, score: 0.3 },
+        FtsResult {
+            memory_id: 2,
+            score: 0.9,
+        },
+        FtsResult {
+            memory_id: 3,
+            score: 0.3,
+        },
     ];
 
     let merged = rrf_merge(&kw, &vec, "test query", 10);
@@ -97,8 +107,14 @@ fn rrf_merges_results() {
 
 #[test]
 fn rrf_quoted_favors_keyword() {
-    let kw = vec![FtsResult { memory_id: 1, score: 1.0 }];
-    let vec_results = vec![FtsResult { memory_id: 2, score: 1.0 }];
+    let kw = vec![FtsResult {
+        memory_id: 1,
+        score: 1.0,
+    }];
+    let vec_results = vec![FtsResult {
+        memory_id: 2,
+        score: 1.0,
+    }];
 
     let merged = rrf_merge(&kw, &vec_results, "\"exact match\"", 10);
     // With quoted query, keyword result (id=1) should rank higher
@@ -107,8 +123,14 @@ fn rrf_quoted_favors_keyword() {
 
 #[test]
 fn rrf_question_favors_vector() {
-    let kw = vec![FtsResult { memory_id: 1, score: 1.0 }];
-    let vec_results = vec![FtsResult { memory_id: 2, score: 1.0 }];
+    let kw = vec![FtsResult {
+        memory_id: 1,
+        score: 1.0,
+    }];
+    let vec_results = vec![FtsResult {
+        memory_id: 2,
+        score: 1.0,
+    }];
 
     let merged = rrf_merge(&kw, &vec_results, "how does authentication work", 10);
     // With question query, vector result (id=2) should rank higher

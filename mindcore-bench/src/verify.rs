@@ -98,10 +98,7 @@ mod tests {
 
     #[test]
     fn single_session_skips_verification() {
-        assert!(!needs_verification(
-            QuestionType::SingleSessionUser,
-            false
-        ));
+        assert!(!needs_verification(QuestionType::SingleSessionUser, false));
         assert!(!needs_verification(
             QuestionType::SingleSessionAssistant,
             false
@@ -129,18 +126,30 @@ mod tests {
     #[test]
     fn verify_prompt_contains_type_check() {
         let ctx = "some chat history";
-        let prompt =
-            build_verify_prompt(ctx, "How many?", "I counted 5 items.", QuestionType::MultiSession);
+        let prompt = build_verify_prompt(
+            ctx,
+            "How many?",
+            "I counted 5 items.",
+            QuestionType::MultiSession,
+        );
         assert!(prompt.contains("re-enumerate"));
         assert!(prompt.contains("recount"));
         assert!(prompt.contains("Chat History:"));
 
-        let prompt =
-            build_verify_prompt(ctx, "How long?", "14 days.", QuestionType::TemporalReasoning);
+        let prompt = build_verify_prompt(
+            ctx,
+            "How long?",
+            "14 days.",
+            QuestionType::TemporalReasoning,
+        );
         assert!(prompt.contains("recompute"));
 
-        let prompt =
-            build_verify_prompt(ctx, "What now?", "The new value.", QuestionType::KnowledgeUpdate);
+        let prompt = build_verify_prompt(
+            ctx,
+            "What now?",
+            "The new value.",
+            QuestionType::KnowledgeUpdate,
+        );
         assert!(prompt.contains("MOST RECENT"));
     }
 }

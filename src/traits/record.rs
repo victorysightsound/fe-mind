@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 
 /// Cognitive memory type classification (CoALA framework).
@@ -47,7 +47,7 @@ impl std::fmt::Display for MemoryType {
 
 /// Consumers implement this for their memory types.
 ///
-/// MindCore handles storage, indexing, search, and decay.
+/// femind handles storage, indexing, search, and decay.
 /// The consumer defines what a "memory" is by implementing this trait.
 ///
 /// # Object Safety
@@ -164,7 +164,11 @@ mod tests {
 
     #[test]
     fn memory_type_roundtrip() {
-        for mt in [MemoryType::Episodic, MemoryType::Semantic, MemoryType::Procedural] {
+        for mt in [
+            MemoryType::Episodic,
+            MemoryType::Semantic,
+            MemoryType::Procedural,
+        ] {
             let s = mt.as_str();
             let parsed = MemoryType::from_str(s);
             assert_eq!(parsed, Some(mt), "roundtrip failed for {s}");

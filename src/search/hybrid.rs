@@ -26,8 +26,7 @@ pub fn rrf_merge(
     }
 
     for (rank, result) in vector_results.iter().enumerate() {
-        *scores.entry(result.memory_id).or_default() +=
-            1.0 / (vector_k as f32 + rank as f32 + 1.0);
+        *scores.entry(result.memory_id).or_default() += 1.0 / (vector_k as f32 + rank as f32 + 1.0);
     }
 
     let mut merged: Vec<FtsResult> = scores
@@ -38,7 +37,11 @@ pub fn rrf_merge(
         })
         .collect();
 
-    merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    merged.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     merged.truncate(limit);
     merged
 }
@@ -82,7 +85,10 @@ mod tests {
         let merged = rrf_merge(&kw, &vec, "test query", 10);
 
         // Memory 2 appears in both lists → should have highest RRF score
-        assert_eq!(merged[0].memory_id, 2, "memory in both lists should rank first");
+        assert_eq!(
+            merged[0].memory_id, 2,
+            "memory in both lists should rank first"
+        );
         // Memory 1 also in both
         assert_eq!(merged[1].memory_id, 1);
         assert!(merged[0].score > merged[1].score);

@@ -46,9 +46,9 @@ impl ScoringStrategy for RecencyScorer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traits::MemoryType;
     use chrono::{Duration, Utc};
     use std::collections::HashMap;
-    use crate::traits::MemoryType;
 
     fn meta_aged(days: i64) -> MemoryMeta {
         MemoryMeta {
@@ -73,21 +73,30 @@ mod tests {
     fn half_life_gives_half_score() {
         let scorer = RecencyScorer::new(30.0);
         let m = scorer.score_multiplier(&meta_aged(30), "q", 1.0);
-        assert!((m - 0.5).abs() < 0.05, "at half-life should be ~0.5, got {m}");
+        assert!(
+            (m - 0.5).abs() < 0.05,
+            "at half-life should be ~0.5, got {m}"
+        );
     }
 
     #[test]
     fn double_half_life_gives_quarter() {
         let scorer = RecencyScorer::new(30.0);
         let m = scorer.score_multiplier(&meta_aged(60), "q", 1.0);
-        assert!((m - 0.25).abs() < 0.05, "at 2x half-life should be ~0.25, got {m}");
+        assert!(
+            (m - 0.25).abs() < 0.05,
+            "at 2x half-life should be ~0.25, got {m}"
+        );
     }
 
     #[test]
     fn very_old_approaches_zero() {
         let scorer = RecencyScorer::new(7.0);
         let m = scorer.score_multiplier(&meta_aged(365), "q", 1.0);
-        assert!(m < 0.001, "year-old memory with 7-day half-life should be ~0, got {m}");
+        assert!(
+            m < 0.001,
+            "year-old memory with 7-day half-life should be ~0, got {m}"
+        );
     }
 
     #[test]

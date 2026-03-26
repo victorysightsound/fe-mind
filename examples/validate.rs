@@ -1,4 +1,6 @@
-//! Comprehensive validation of MindCore as a consumer would use it.
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
+//! Comprehensive validation of femind as a consumer would use it.
 //!
 //! Run with: cargo run --example validate
 //!
@@ -20,15 +22,15 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Duration, Utc};
-use mindcore::context::ContextBudget;
-use mindcore::engine::MemoryEngine;
-use mindcore::memory::activation;
-use mindcore::memory::pruning::{self, PruningPolicy};
-use mindcore::memory::store::StoreResult;
-use mindcore::memory::{GraphMemory, RelationType};
-use mindcore::scoring::{CompositeScorer, ImportanceScorer, MemoryTypeScorer, RecencyScorer};
-use mindcore::search::SearchMode;
-use mindcore::traits::{MemoryRecord, MemoryType};
+use femind::context::ContextBudget;
+use femind::engine::MemoryEngine;
+use femind::memory::activation;
+use femind::memory::pruning::{self, PruningPolicy};
+use femind::memory::store::StoreResult;
+use femind::memory::{GraphMemory, RelationType};
+use femind::scoring::{CompositeScorer, ImportanceScorer, MemoryTypeScorer, RecencyScorer};
+use femind::search::SearchMode;
+use femind::traits::{MemoryRecord, MemoryType};
 use serde::{Deserialize, Serialize};
 
 // --- Memory types that simulate real consumers ---
@@ -44,12 +46,24 @@ struct Learning {
 }
 
 impl MemoryRecord for Learning {
-    fn id(&self) -> Option<i64> { self.id }
-    fn searchable_text(&self) -> String { self.description.clone() }
-    fn memory_type(&self) -> MemoryType { self.mem_type }
-    fn importance(&self) -> u8 { self.importance }
-    fn created_at(&self) -> DateTime<Utc> { self.created_at }
-    fn category(&self) -> Option<&str> { Some(&self.category) }
+    fn id(&self) -> Option<i64> {
+        self.id
+    }
+    fn searchable_text(&self) -> String {
+        self.description.clone()
+    }
+    fn memory_type(&self) -> MemoryType {
+        self.mem_type
+    }
+    fn importance(&self) -> u8 {
+        self.importance
+    }
+    fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+    fn category(&self) -> Option<&str> {
+        Some(&self.category)
+    }
 }
 
 fn learning(desc: &str, cat: &str, imp: u8, mem_type: MemoryType) -> Learning {
@@ -97,7 +111,7 @@ fn main() {
         };
     }
 
-    println!("MindCore v0.1.1 Validation Suite");
+    println!("femind v0.2.0 Validation Suite");
     println!("================================\n");
 
     // --- 1. Engine Lifecycle ---
@@ -111,7 +125,9 @@ fn main() {
     check!("Store and retrieve", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
         let r = engine.store(&learning("test memory", "test", 5, MemoryType::Semantic))?;
-        let StoreResult::Added(id) = r else { return Err("expected Added".into()) };
+        let StoreResult::Added(id) = r else {
+            return Err("expected Added".into());
+        };
         let mem = engine.get(id)?.ok_or("not found")?;
         assert_eq!(mem.description, "test memory");
         Ok::<(), Box<dyn std::error::Error>>(())
@@ -119,8 +135,16 @@ fn main() {
 
     check!("Update memory", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        let StoreResult::Added(id) = engine.store(&learning("original", "test", 5, MemoryType::Semantic))? else { return Err("expected Added".into()) };
-        let updated = Learning { id: Some(id), description: "updated".into(), ..learning("", "test", 5, MemoryType::Semantic) };
+        let StoreResult::Added(id) =
+            engine.store(&learning("original", "test", 5, MemoryType::Semantic))?
+        else {
+            return Err("expected Added".into());
+        };
+        let updated = Learning {
+            id: Some(id),
+            description: "updated".into(),
+            ..learning("", "test", 5, MemoryType::Semantic)
+        };
         engine.update(id, &updated)?;
         let mem = engine.get(id)?.ok_or("not found")?;
         assert_eq!(mem.description, "updated");
@@ -129,7 +153,11 @@ fn main() {
 
     check!("Delete memory", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        let StoreResult::Added(id) = engine.store(&learning("to delete", "test", 5, MemoryType::Semantic))? else { return Err("expected Added".into()) };
+        let StoreResult::Added(id) =
+            engine.store(&learning("to delete", "test", 5, MemoryType::Semantic))?
+        else {
+            return Err("expected Added".into());
+        };
         assert!(engine.delete(id)?);
         assert!(engine.get(id)?.is_none());
         Ok::<(), Box<dyn std::error::Error>>(())
@@ -160,9 +188,24 @@ fn main() {
     println!("\n[3] FTS5 Search");
     check!("Basic keyword search", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        engine.store(&learning("authentication failed with JWT token", "error", 7, MemoryType::Procedural))?;
-        engine.store(&learning("database connection pool exhausted", "error", 5, MemoryType::Episodic))?;
-        engine.store(&learning("cargo build succeeded", "build", 3, MemoryType::Episodic))?;
+        engine.store(&learning(
+            "authentication failed with JWT token",
+            "error",
+            7,
+            MemoryType::Procedural,
+        ))?;
+        engine.store(&learning(
+            "database connection pool exhausted",
+            "error",
+            5,
+            MemoryType::Episodic,
+        ))?;
+        engine.store(&learning(
+            "cargo build succeeded",
+            "build",
+            3,
+            MemoryType::Episodic,
+        ))?;
         let results = engine.search("authentication").execute()?;
         assert_eq!(results.len(), 1);
         Ok::<(), Box<dyn std::error::Error>>(())
@@ -170,8 +213,18 @@ fn main() {
 
     check!("Porter stemming (authenticate → authentication)", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        engine.store(&learning("the authentication system was redesigned", "decision", 8, MemoryType::Semantic))?;
-        engine.store(&learning("user failed to authenticate via OAuth", "error", 6, MemoryType::Procedural))?;
+        engine.store(&learning(
+            "the authentication system was redesigned",
+            "decision",
+            8,
+            MemoryType::Semantic,
+        ))?;
+        engine.store(&learning(
+            "user failed to authenticate via OAuth",
+            "error",
+            6,
+            MemoryType::Procedural,
+        ))?;
         let results = engine.search("authenticate").execute()?;
         assert_eq!(results.len(), 2, "Porter stemming should match both");
         Ok::<(), Box<dyn std::error::Error>>(())
@@ -180,7 +233,12 @@ fn main() {
     check!("Search with limit", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
         for i in 0..20 {
-            engine.store(&learning(&format!("searchable test item {i}"), "test", 5, MemoryType::Semantic))?;
+            engine.store(&learning(
+                &format!("searchable test item {i}"),
+                "test",
+                5,
+                MemoryType::Semantic,
+            ))?;
         }
         let results = engine.search("searchable").limit(5).execute()?;
         assert_eq!(results.len(), 5);
@@ -189,8 +247,18 @@ fn main() {
 
     check!("Search with category filter", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        engine.store(&learning("auth error in prod", "error", 7, MemoryType::Procedural))?;
-        engine.store(&learning("auth flow decision", "decision", 8, MemoryType::Semantic))?;
+        engine.store(&learning(
+            "auth error in prod",
+            "error",
+            7,
+            MemoryType::Procedural,
+        ))?;
+        engine.store(&learning(
+            "auth flow decision",
+            "decision",
+            8,
+            MemoryType::Semantic,
+        ))?;
         let results = engine.search("auth").category("error").execute()?;
         assert_eq!(results.len(), 1);
         Ok::<(), Box<dyn std::error::Error>>(())
@@ -198,9 +266,22 @@ fn main() {
 
     check!("Search with memory type filter", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        engine.store(&learning("build error log", "error", 5, MemoryType::Episodic))?;
-        engine.store(&learning("build fix pattern", "pattern", 7, MemoryType::Procedural))?;
-        let results = engine.search("build").memory_type(MemoryType::Procedural).execute()?;
+        engine.store(&learning(
+            "build error log",
+            "error",
+            5,
+            MemoryType::Episodic,
+        ))?;
+        engine.store(&learning(
+            "build fix pattern",
+            "pattern",
+            7,
+            MemoryType::Procedural,
+        ))?;
+        let results = engine
+            .search("build")
+            .memory_type(MemoryType::Procedural)
+            .execute()?;
         assert_eq!(results.len(), 1);
         Ok::<(), Box<dyn std::error::Error>>(())
     });
@@ -208,9 +289,17 @@ fn main() {
     check!("Exhaustive search mode", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
         for i in 0..30 {
-            engine.store(&learning(&format!("exhaustive item {i}"), "test", 5, MemoryType::Semantic))?;
+            engine.store(&learning(
+                &format!("exhaustive item {i}"),
+                "test",
+                5,
+                MemoryType::Semantic,
+            ))?;
         }
-        let results = engine.search("exhaustive").mode(SearchMode::Exhaustive { min_score: 0.0 }).execute()?;
+        let results = engine
+            .search("exhaustive")
+            .mode(SearchMode::Exhaustive { min_score: 0.0 })
+            .execute()?;
         assert_eq!(results.len(), 30, "exhaustive should return all matches");
         Ok::<(), Box<dyn std::error::Error>>(())
     });
@@ -221,10 +310,23 @@ fn main() {
         let engine = MemoryEngine::<Learning>::builder()
             .scoring(ImportanceScorer::default())
             .build()?;
-        engine.store(&learning("scored item low", "test", 1, MemoryType::Semantic))?;
-        engine.store(&learning("scored item high", "test", 10, MemoryType::Semantic))?;
+        engine.store(&learning(
+            "scored item low",
+            "test",
+            1,
+            MemoryType::Semantic,
+        ))?;
+        engine.store(&learning(
+            "scored item high",
+            "test",
+            10,
+            MemoryType::Semantic,
+        ))?;
         let results = engine.search("scored item").execute()?;
-        assert!(results[0].score >= results[1].score, "high importance should rank first");
+        assert!(
+            results[0].score >= results[1].score,
+            "high importance should rank first"
+        );
         Ok::<(), Box<dyn std::error::Error>>(())
     });
 
@@ -234,9 +336,21 @@ fn main() {
             Box::new(ImportanceScorer::default()),
             Box::new(MemoryTypeScorer::default()),
         ]);
-        let engine = MemoryEngine::<Learning>::builder().scoring(scorer).build()?;
-        engine.store(&learning("composite test alpha", "test", 9, MemoryType::Procedural))?;
-        engine.store(&learning("composite test beta", "test", 2, MemoryType::Episodic))?;
+        let engine = MemoryEngine::<Learning>::builder()
+            .scoring(scorer)
+            .build()?;
+        engine.store(&learning(
+            "composite test alpha",
+            "test",
+            9,
+            MemoryType::Procedural,
+        ))?;
+        engine.store(&learning(
+            "composite test beta",
+            "test",
+            2,
+            MemoryType::Episodic,
+        ))?;
         let results = engine.search("composite test").execute()?;
         assert!(results[0].score > results[1].score);
         Ok::<(), Box<dyn std::error::Error>>(())
@@ -246,9 +360,24 @@ fn main() {
     println!("\n[5] Context Assembly");
     check!("Assemble within budget", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        engine.store(&learning("context alpha item", "test", 5, MemoryType::Semantic))?;
-        engine.store(&learning("context beta item", "test", 7, MemoryType::Semantic))?;
-        engine.store(&learning("unrelated cats and dogs", "test", 5, MemoryType::Episodic))?;
+        engine.store(&learning(
+            "context alpha item",
+            "test",
+            5,
+            MemoryType::Semantic,
+        ))?;
+        engine.store(&learning(
+            "context beta item",
+            "test",
+            7,
+            MemoryType::Semantic,
+        ))?;
+        engine.store(&learning(
+            "unrelated cats and dogs",
+            "test",
+            5,
+            MemoryType::Episodic,
+        ))?;
         let assembly = engine.assemble_context("context item", &ContextBudget::new(1000))?;
         assert_eq!(assembly.items.len(), 2);
         let rendered = assembly.render();
@@ -260,7 +389,12 @@ fn main() {
     check!("Budget limits output", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
         for i in 0..20 {
-            engine.store(&learning(&format!("budget test memory with padding text number {i}"), "test", 5, MemoryType::Semantic))?;
+            engine.store(&learning(
+                &format!("budget test memory with padding text number {i}"),
+                "test",
+                5,
+                MemoryType::Semantic,
+            ))?;
         }
         let assembly = engine.assemble_context("budget test", &ContextBudget::new(50))?;
         assert!(assembly.items.len() < 20);
@@ -273,18 +407,33 @@ fn main() {
     println!("\n[6] Activation Model");
     check!("Access tracking increases activation", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        let StoreResult::Added(id) = engine.store(&learning("activation test", "test", 5, MemoryType::Semantic))? else { return Err("expected Added".into()) };
+        let StoreResult::Added(id) = engine.store(&learning(
+            "activation test",
+            "test",
+            5,
+            MemoryType::Semantic,
+        ))?
+        else {
+            return Err("expected Added".into());
+        };
         let db = engine.database();
         let a0 = activation::compute_activation(db, id)?;
         activation::record_access(db, id, "test query")?;
         let a1 = activation::compute_activation(db, id)?;
-        assert!(a1 > a0, "activation should increase: before={a0}, after={a1}");
+        assert!(
+            a1 > a0,
+            "activation should increase: before={a0}, after={a1}"
+        );
         Ok::<(), Box<dyn std::error::Error>>(())
     });
 
     check!("Activation cache", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        let StoreResult::Added(id) = engine.store(&learning("cache test", "test", 5, MemoryType::Semantic))? else { return Err("expected Added".into()) };
+        let StoreResult::Added(id) =
+            engine.store(&learning("cache test", "test", 5, MemoryType::Semantic))?
+        else {
+            return Err("expected Added".into());
+        };
         let db = engine.database();
         activation::record_access(db, id, "q")?;
         let cached = activation::update_activation_cache(db, id)?;
@@ -297,9 +446,33 @@ fn main() {
     println!("\n[7] Graph Relationships");
     check!("Create and traverse relationships", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        let StoreResult::Added(id1) = engine.store(&learning("error: JWT expired", "error", 7, MemoryType::Procedural))? else { return Err("".into()) };
-        let StoreResult::Added(id2) = engine.store(&learning("fix: refresh JWT token", "fix", 8, MemoryType::Procedural))? else { return Err("".into()) };
-        let StoreResult::Added(id3) = engine.store(&learning("root cause: clock drift", "cause", 9, MemoryType::Semantic))? else { return Err("".into()) };
+        let StoreResult::Added(id1) = engine.store(&learning(
+            "error: JWT expired",
+            "error",
+            7,
+            MemoryType::Procedural,
+        ))?
+        else {
+            return Err("".into());
+        };
+        let StoreResult::Added(id2) = engine.store(&learning(
+            "fix: refresh JWT token",
+            "fix",
+            8,
+            MemoryType::Procedural,
+        ))?
+        else {
+            return Err("".into());
+        };
+        let StoreResult::Added(id3) = engine.store(&learning(
+            "root cause: clock drift",
+            "cause",
+            9,
+            MemoryType::Semantic,
+        ))?
+        else {
+            return Err("".into());
+        };
         let db = engine.database();
         GraphMemory::relate(db, id1, id2, &RelationType::SolvedBy)?;
         GraphMemory::relate(db, id1, id3, &RelationType::CausedBy)?;
@@ -310,15 +483,30 @@ fn main() {
 
     check!("Cycle prevention", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
-        let StoreResult::Added(a) = engine.store(&learning("cycle node A", "test", 5, MemoryType::Semantic))? else { return Err("".into()) };
-        let StoreResult::Added(b) = engine.store(&learning("cycle node B", "test", 5, MemoryType::Semantic))? else { return Err("".into()) };
-        let StoreResult::Added(c) = engine.store(&learning("cycle node C", "test", 5, MemoryType::Semantic))? else { return Err("".into()) };
+        let StoreResult::Added(a) =
+            engine.store(&learning("cycle node A", "test", 5, MemoryType::Semantic))?
+        else {
+            return Err("".into());
+        };
+        let StoreResult::Added(b) =
+            engine.store(&learning("cycle node B", "test", 5, MemoryType::Semantic))?
+        else {
+            return Err("".into());
+        };
+        let StoreResult::Added(c) =
+            engine.store(&learning("cycle node C", "test", 5, MemoryType::Semantic))?
+        else {
+            return Err("".into());
+        };
         let db = engine.database();
         GraphMemory::relate(db, a, b, &RelationType::RelatedTo)?;
         GraphMemory::relate(db, b, c, &RelationType::RelatedTo)?;
         GraphMemory::relate(db, c, a, &RelationType::RelatedTo)?;
         let nodes = GraphMemory::traverse(db, a, 10)?;
-        assert!(nodes.len() <= 3, "cycle should not cause infinite traversal");
+        assert!(
+            nodes.len() <= 3,
+            "cycle should not cause infinite traversal"
+        );
         Ok::<(), Box<dyn std::error::Error>>(())
     });
 
@@ -327,11 +515,19 @@ fn main() {
     check!("Prune old episodic memories", {
         let engine = MemoryEngine::<Learning>::builder().build()?;
         engine.store(&old_learning("old session log", 60))?;
-        engine.store(&learning("recent semantic fact", "test", 5, MemoryType::Semantic))?;
+        engine.store(&learning(
+            "recent semantic fact",
+            "test",
+            5,
+            MemoryType::Semantic,
+        ))?;
         // Set low activation on the old memory
         let db = engine.database();
         db.with_writer(|conn| {
-            conn.execute("UPDATE memories SET activation_cache = -3.0 WHERE searchable_text LIKE 'old%'", [])?;
+            conn.execute(
+                "UPDATE memories SET activation_cache = -3.0 WHERE searchable_text LIKE 'old%'",
+                [],
+            )?;
             Ok(())
         })?;
         let report = pruning::prune(db, &PruningPolicy::default())?;
@@ -346,15 +542,25 @@ fn main() {
         let engine = MemoryEngine::<Learning>::builder().build()?;
         for i in 0..1000 {
             engine.store(&learning(
-                &format!("performance test memory item number {i} with authentication and JWT tokens"),
-                "test", 5, MemoryType::Semantic,
+                &format!(
+                    "performance test memory item number {i} with authentication and JWT tokens"
+                ),
+                "test",
+                5,
+                MemoryType::Semantic,
             ))?;
         }
         let start = Instant::now();
         let results = engine.search("authentication JWT").limit(10).execute()?;
         let elapsed = start.elapsed();
-        println!("         FTS5 search: {elapsed:?} ({} results)", results.len());
-        assert!(elapsed.as_millis() < 50, "FTS5 search took {elapsed:?} (target: <10ms)");
+        println!(
+            "         FTS5 search: {elapsed:?} ({} results)",
+            results.len()
+        );
+        assert!(
+            elapsed.as_millis() < 50,
+            "FTS5 search took {elapsed:?} (target: <10ms)"
+        );
         assert!(!results.is_empty());
         Ok::<(), Box<dyn std::error::Error>>(())
     });
@@ -364,13 +570,18 @@ fn main() {
         for i in 0..1000 {
             engine.store(&learning(
                 &format!("context perf test {i} with error handling patterns"),
-                "test", 5, MemoryType::Semantic,
+                "test",
+                5,
+                MemoryType::Semantic,
             ))?;
         }
         let start = Instant::now();
         let assembly = engine.assemble_context("error handling", &ContextBudget::new(4096))?;
         let elapsed = start.elapsed();
-        println!("         Context assembly: {elapsed:?} ({} items)", assembly.items.len());
+        println!(
+            "         Context assembly: {elapsed:?} ({} items)",
+            assembly.items.len()
+        );
         assert!(elapsed.as_millis() < 100, "assembly took {elapsed:?}");
         Ok::<(), Box<dyn std::error::Error>>(())
     });
@@ -379,12 +590,20 @@ fn main() {
         let engine = MemoryEngine::<Learning>::builder().build()?;
         let start = Instant::now();
         for i in 0..100 {
-            engine.store(&learning(&format!("throughput test {i}"), "test", 5, MemoryType::Semantic))?;
+            engine.store(&learning(
+                &format!("throughput test {i}"),
+                "test",
+                5,
+                MemoryType::Semantic,
+            ))?;
         }
         let elapsed = start.elapsed();
         let per_sec = 100.0 / elapsed.as_secs_f64();
         println!("         Store throughput: {per_sec:.0}/sec");
-        assert!(per_sec > 100.0, "store throughput {per_sec:.0}/sec (target: >100/sec)");
+        assert!(
+            per_sec > 100.0,
+            "store throughput {per_sec:.0}/sec (target: >100/sec)"
+        );
         Ok::<(), Box<dyn std::error::Error>>(())
     });
 
@@ -393,11 +612,18 @@ fn main() {
     check!("Concurrent reads on file database", {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("concurrent.db");
-        let engine = Arc::new(MemoryEngine::<Learning>::builder()
-            .database(path.to_string_lossy().to_string())
-            .build()?);
+        let engine = Arc::new(
+            MemoryEngine::<Learning>::builder()
+                .database(path.to_string_lossy().to_string())
+                .build()?,
+        );
         for i in 0..100 {
-            engine.store(&learning(&format!("concurrent test {i}"), "test", 5, MemoryType::Semantic))?;
+            engine.store(&learning(
+                &format!("concurrent test {i}"),
+                "test",
+                5,
+                MemoryType::Semantic,
+            ))?;
         }
         let mut handles = Vec::new();
         for _ in 0..4 {
@@ -407,7 +633,9 @@ fn main() {
                 assert!(!results.is_empty());
             }));
         }
-        for h in handles { h.join().map_err(|_| "thread panicked")?; }
+        for h in handles {
+            h.join().map_err(|_| "thread panicked")?;
+        }
         Ok::<(), Box<dyn std::error::Error>>(())
     });
 
@@ -420,13 +648,22 @@ fn main() {
 
         // Create and populate
         {
-            let engine = MemoryEngine::<Learning>::builder().database(&path_str).build()?;
-            engine.store(&learning("persistent data test", "test", 5, MemoryType::Semantic))?;
+            let engine = MemoryEngine::<Learning>::builder()
+                .database(&path_str)
+                .build()?;
+            engine.store(&learning(
+                "persistent data test",
+                "test",
+                5,
+                MemoryType::Semantic,
+            ))?;
         }
 
         // Reopen and verify
         {
-            let engine = MemoryEngine::<Learning>::builder().database(&path_str).build()?;
+            let engine = MemoryEngine::<Learning>::builder()
+                .database(&path_str)
+                .build()?;
             assert_eq!(engine.count()?, 1);
             let results = engine.search("persistent").execute()?;
             assert_eq!(results.len(), 1);

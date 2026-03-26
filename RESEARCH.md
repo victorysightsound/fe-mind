@@ -1,8 +1,8 @@
-# MindCore: Research & Specification
+# femind: Research & Specification
 
 **Date:** 2026-03-16
-**Status:** Research Complete (v0.1.0 shipped)
-**Related:** `MINDCORE_ARCHITECTURE.md` (implementation spec), `DECISIONS.md` (decisions 001-016), `research/gap_analysis_2026_03.md` (March 2026 gap analysis)
+**Status:** Research complete. Findings incorporated into the current v0.2.0 crate.
+**Related:** `ARCHITECTURE.md` (implementation spec), `DECISIONS.md` (decisions 001-016), `research/gap_analysis_2026_03.md` (March 2026 gap analysis)
 
 ---
 
@@ -76,7 +76,7 @@ These require cloud services, API keys, and network connectivity. They don't fit
 | **MemOS** | Python | SQLite + hybrid | FTS5 + vector | Graph memory, multi-modal |
 | **memU** | Python | — | — | Proactive intent detection |
 
-These are closest to what MindCore does, but none are in Rust and none are designed as a library crate.
+These are closest to what femind does, but none are in Rust and none are designed as a library crate.
 
 #### Framework-Embedded (Not Standalone)
 | Project | Language | Notes |
@@ -98,7 +98,7 @@ These have memory subsystems but they're coupled to their parent frameworks.
 - Token-budget context assembly
 - Graph relationships
 
-MindCore fills this gap.
+femind fills this gap.
 
 ---
 
@@ -116,7 +116,7 @@ MindCore fills this gap.
 | **Semantic** | What I know | "The project uses PostgreSQL", "The API requires JWT auth" | Stable — facts don't decay unless superseded |
 | **Procedural** | How to do things | "When you see error X, fix with Y", build workflows | Strengthens with use — proven patterns become more valuable |
 
-**Why This Matters for MindCore:**
+**Why This Matters for femind:**
 
 Most agent memory systems treat all memories equally. A learning from yesterday gets the same base score as a learning from six months ago. CoALA's type classification enables:
 
@@ -124,7 +124,7 @@ Most agent memory systems treat all memories equally. A learning from yesterday 
 2. **Type-appropriate scoring** — procedural memories that have been validated are boosted
 3. **Type-appropriate storage** — episodic memories can be pruned aggressively, semantic memories archived carefully
 
-**MindCore Implementation:** The `MemoryType` enum (Episodic/Semantic/Procedural) on the `MemoryRecord` trait. Each type gets different decay parameters in the activation model.
+**femind Implementation:** The `MemoryType` enum (Episodic/Semantic/Procedural) on the `MemoryRecord` trait. Each type gets different decay parameters in the activation model.
 
 ---
 
@@ -164,7 +164,7 @@ Where:
 
 One formula replaces five mechanisms.
 
-**MindCore Implementation:** The `ActivationScorer` computes activation from the `memory_access_log` table at query time. Different decay rates per `MemoryType`.
+**femind Implementation:** The `ActivationScorer` computes activation from the `memory_access_log` table at query time. Different decay rates per `MemoryType`.
 
 **Calibration (decay rate `d` by memory type):**
 
@@ -202,7 +202,7 @@ Without consolidation, a memory system that records "the build failed because of
 
 Mem0 uses an LLM to classify ADD/UPDATE/DELETE/NOOP. This is accurate but costs tokens.
 
-**MindCore Implementation:** Three strategies, increasing in cost and accuracy:
+**femind Implementation:** Three strategies, increasing in cost and accuracy:
 
 | Strategy | Cost | Accuracy | How |
 |----------|------|----------|-----|
@@ -239,7 +239,7 @@ Agent memory systems that don't model temporal validity will:
 2. Contradict themselves (both "use Express.js" and "use Fastify" are "true")
 3. Confuse the LLM with conflicting context
 
-**MindCore Implementation:** Optional `valid_from` and `valid_until` fields on `MemoryRecord`, feature-gated behind `temporal`. Search can filter by `valid_at(timestamp)` to get the truth as of a specific point in time.
+**femind Implementation:** Optional `valid_from` and `valid_until` fields on `MemoryRecord`, feature-gated behind `temporal`. Search can filter by `valid_at(timestamp)` to get the truth as of a specific point in time.
 
 ---
 
@@ -254,7 +254,7 @@ Agent memory systems that don't model temporal validity will:
 - <50ms query latency (hybrid search, 10K memories)
 - LongMemEval benchmark: 76.8% (from OMEGA's own repo `docs/benchmark-report.md`). Note: OMEGA's marketing blog claims 95.4% but this was a self-reported best-of-8 cherry-picked run; their own GitHub benchmark report shows 76.8% under standard evaluation.
 
-**MindCore's Take:** The ACT-R activation model subsumes OMEGA's forgetting intelligence. Memories naturally decay through the power-law formula. Memories that are accessed frequently (like proven error patterns) stay strong. No need for explicit "exempt from decay" rules — the math handles it.
+**femind's Take:** The ACT-R activation model subsumes OMEGA's forgetting intelligence. Memories naturally decay through the power-law formula. Memories that are accessed frequently (like proven error patterns) stay strong. No need for explicit "exempt from decay" rules — the math handles it.
 
 ---
 
@@ -279,12 +279,12 @@ Where:
 - Works with any number of rankers
 - Outperforms individual systems and most learned fusion methods
 
-**MindCore's Enhancement:** Dynamic k-values based on query analysis:
+**femind's Enhancement:** Dynamic k-values based on query analysis:
 - Quoted text → lower keyword k (favor exact matches)
 - Question words → lower vector k (favor semantic matches)
 - Default → equal k values
 
-**MindCore Implementation:** RRF merge with the dynamic k-value logic.
+**femind Implementation:** RRF merge with the dynamic k-value logic.
 
 ---
 
@@ -397,7 +397,7 @@ For 10K vectors at 384 dimensions: 10,000 * 384 * 4 bytes = ~15MB in memory. Tri
 
 **WAL Mode (Write-Ahead Logging):**
 
-WAL is non-negotiable for MindCore. Without it, any concurrent read/write (e.g., searching while indexing) locks the database.
+WAL is non-negotiable for femind. Without it, any concurrent read/write (e.g., searching while indexing) locks the database.
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -482,7 +482,7 @@ Candle dominates compile time. Feature-gating it is essential for projects that 
 
 ### D1: Library, Not Framework
 
-**Decision:** MindCore is a library crate that projects call into, not a framework that structures the project.
+**Decision:** femind is a library crate that projects call into, not a framework that structures the project.
 
 **Alternatives Considered:**
 - Framework with plugin system (like MemOS)
@@ -551,7 +551,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 
 ### Feature Comparison Matrix
 
-| Feature | MindCore | OMEGA | Engram | Mem0 | MemOS |
+| Feature | femind | OMEGA | Engram | Mem0 | MemOS |
 |---------|---------|-------|--------|------|-------|
 | **Language** | Rust | TypeScript | Go | Python | Python |
 | **Storage** | SQLite | SQLite | SQLite | Cloud/Local | SQLite |
@@ -569,7 +569,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 | **Offline** | Yes | Yes | Yes | No | Yes |
 | **Binary Size** | 2-45MB | ~100MB | ~15MB | N/A | N/A |
 
-### MindCore's Unique Advantages
+### femind's Unique Advantages
 
 1. **Rust + feature flags** — only compile what you need, from 2MB to 45MB
 2. **Library crate** — embed in any Rust project, not a separate service
@@ -623,7 +623,7 @@ Composable strategies let each project mix and match. A single formula can't ser
 
 ## 9. Specification Summary
 
-### What MindCore Is
+### What femind Is
 
 A standalone Rust crate providing pluggable, feature-gated persistent memory for AI agent applications. It stores, searches, scores, decays, consolidates, and assembles memories for LLM context injection.
 

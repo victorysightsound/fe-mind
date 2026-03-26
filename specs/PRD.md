@@ -1,8 +1,8 @@
-# MindCore — Product Requirements Document
+# femind — Product Requirements Document
 
 **Version:** 1.0
 **Date:** 2026-03-19
-**Status:** v0.1.0 shipped
+**Status:** v0.2.0 published
 
 ---
 
@@ -14,7 +14,7 @@ AI agent applications in Rust need persistent memory — SQLite + FTS5 + scoring
 
 ### 1.2 Solution
 
-MindCore is a standalone Rust library crate providing a pluggable, feature-gated memory engine. Consumers implement `MemoryRecord` for their types and get storage, search, decay, consolidation, and context assembly — from a 2MB FTS5-only build to a 40MB full-featured engine.
+femind is a standalone Rust library crate providing a pluggable, feature-gated memory engine. Consumers implement `MemoryRecord` for their types and get storage, search, decay, consolidation, and context assembly — from a 2MB FTS5-only build to a 40MB full-featured engine.
 
 ### 1.3 Success Criteria
 
@@ -39,13 +39,13 @@ MindCore is a standalone Rust library crate providing a pluggable, feature-gated
 
 ## 2. Architecture Reference
 
-Full architecture, traits, schemas, and search pipeline are defined in `MINDCORE_ARCHITECTURE.md`. This PRD references it rather than duplicating. Key design documents:
+Full architecture, traits, schemas, and search pipeline are defined in `ARCHITECTURE.md`. This PRD references it rather than duplicating. Key design documents:
 
 | Document | Contents |
 |----------|----------|
-| `MINDCORE_ARCHITECTURE.md` | Crate structure, traits, schema, search pipeline, API |
+| `ARCHITECTURE.md` | Crate structure, traits, schema, search pipeline, API |
 | `DECISIONS.md` | 22 architectural decisions with rationale |
-| `MINDCORE_RESEARCH.md` | Landscape analysis, academic foundations |
+| `RESEARCH.md` | Landscape analysis, academic foundations |
 
 ---
 
@@ -53,13 +53,13 @@ Full architecture, traits, schemas, and search pipeline are defined in `MINDCORE
 
 ### Phase 1: Foundation (Storage + FTS5 + CRUD)
 
-The core that everything else builds on. After this phase, MindCore is a functional keyword-search memory engine.
+The core that everything else builds on. After this phase, femind is a functional keyword-search memory engine.
 
 **Deliverables:**
 - `Cargo.toml` with crate metadata, `default = ["fts5"]`
 - `MemoryRecord` trait and `MemoryMeta` struct
 - `MemoryType` enum (Episodic, Semantic, Procedural)
-- `MindCoreError` enum with `Database`, `Serialization`, `Migration` variants
+- `FemindError` enum with `Database`, `Serialization`, `Migration` variants
 - SQLite storage engine with WAL, mmap, pragmas
 - Core schema: `memories` table, `memories_fts` virtual table, FTS5 triggers
 - `mindcore_meta` table for schema versioning
@@ -79,7 +79,7 @@ The core that everything else builds on. After this phase, MindCore is a functio
 **Tasks (Phase 1):**
 1. Create Cargo.toml with crate metadata and dependency skeleton
 2. Implement `MemoryRecord` trait, `MemoryType` enum, `MemoryMeta` struct
-3. Implement `MindCoreError` enum and `Result<T>` type alias
+3. Implement `FemindError` enum and `Result<T>` type alias
 4. Implement SQLite storage engine (connection, WAL, pragmas, mmap)
 5. Implement core schema creation (memories table, FTS5, triggers)
 6. Implement `mindcore_meta` table and migration framework
@@ -94,7 +94,7 @@ The core that everything else builds on. After this phase, MindCore is a functio
 
 ### Phase 2: Scoring + Context Assembly
 
-Post-search scoring and token-budget context assembly. After this phase, MindCore can rank results intelligently and produce LLM-ready context.
+Post-search scoring and token-budget context assembly. After this phase, femind can rank results intelligently and produce LLM-ready context.
 
 **Deliverables:**
 - `ScoringStrategy` trait (takes `&MemoryMeta`)
@@ -124,7 +124,7 @@ Post-search scoring and token-budget context assembly. After this phase, MindCor
 
 ### Phase 3: Consolidation + Hierarchy
 
-Hash-based dedup on store, three-tier memory hierarchy, and basic consolidation. After this phase, MindCore prevents duplicates and supports tiered memory.
+Hash-based dedup on store, three-tier memory hierarchy, and basic consolidation. After this phase, femind prevents duplicates and supports tiered memory.
 
 **Deliverables:**
 - `ConsolidationStrategy` trait (takes `&MemoryMeta`)
@@ -182,7 +182,7 @@ ACT-R cognitive decay model. After this phase, memories naturally fade or streng
 
 ### Phase 5: Vector Search + Hybrid RRF
 
-Candle embedding backend, brute-force vector search, and RRF hybrid merge. After this phase, MindCore has semantic search.
+Candle embedding backend, brute-force vector search, and RRF hybrid merge. After this phase, femind has semantic search.
 
 **Deliverables:**
 - `EmbeddingBackend` trait (async fn embed, embed_batch, dimensions, model_name)
@@ -225,7 +225,7 @@ Candle embedding backend, brute-force vector search, and RRF hybrid merge. After
 
 ### Phase 6: Graph Memory
 
-SQLite relationship tables with recursive CTE traversal. After this phase, MindCore supports memory relationships and multi-hop queries.
+SQLite relationship tables with recursive CTE traversal. After this phase, femind supports memory relationships and multi-hop queries.
 
 **Deliverables:**
 - `memory_relations` table with indexes
@@ -333,7 +333,7 @@ Optional encryption, MCP server interface, and production hardening.
 - WASM conditional compilation stubs (`cfg(target_family = "wasm")`)
 - Clippy clean (`cargo clippy --features full -- -D warnings`)
 - All features tested in isolation AND combined
-- Final `cargo publish` to crates.io as v0.1.0
+- Final `cargo publish` to crates.io as v0.2.0
 
 **Feature flags active:** All features including `encryption`, `keychain`, `mcp-server`
 
@@ -348,7 +348,7 @@ Optional encryption, MCP server interface, and production hardening.
 81. Run `cargo clippy --features full`, fix all warnings
 82. Run full test suite with `cargo test --features full`
 83. Cross-feature integration tests (encryption + vector + graph + activation)
-84. Publish v0.1.0 to crates.io
+84. Publish v0.2.0 to crates.io
 
 ---
 
@@ -386,7 +386,7 @@ Each phase must pass before the next begins:
 ## 6. Constraints
 
 - **No `unsafe`** except for candle's `VarBuilder::from_mmaped_safetensors` (upstream requirement)
-- **No `unwrap()`** in library code — all errors propagated via `MindCoreError`
+- **No `unwrap()`** in library code — all errors propagated via `FemindError`
 - **No `anyhow`** — structured errors only (`thiserror`)
 - **No `println!`** — all logging via `tracing`
 - **No panics** — library must never panic on valid input
@@ -412,13 +412,13 @@ Each phase must pass before the next begins:
 
 | Spec Section | Architecture Reference |
 |-------------|----------------------|
-| Phase 1: Storage | `MINDCORE_ARCHITECTURE.md` → Storage Layer, Core Schema |
-| Phase 1: CRUD | `MINDCORE_ARCHITECTURE.md` → Public API, MemoryEngine |
-| Phase 2: Scoring | `MINDCORE_ARCHITECTURE.md` → ScoringStrategy, Context Assembly |
-| Phase 3: Consolidation | `MINDCORE_ARCHITECTURE.md` → Consolidation Pipeline |
-| Phase 4: Activation | `MINDCORE_ARCHITECTURE.md` → Activation Model |
-| Phase 5: Vector | `MINDCORE_ARCHITECTURE.md` → Embedding Module, Search Pipeline |
-| Phase 6: Graph | `MINDCORE_ARCHITECTURE.md` → Graph Traversal |
-| Phase 7: Advanced | `MINDCORE_ARCHITECTURE.md` → Two-Tier, Temporal, Reranking |
-| Phase 8: LLM | `MINDCORE_ARCHITECTURE.md` → LlmCallback, IngestStrategy, Evolution |
-| Phase 9: Encryption | `MINDCORE_ARCHITECTURE.md` → Encryption Configuration |
+| Phase 1: Storage | `ARCHITECTURE.md` → Storage Layer, Core Schema |
+| Phase 1: CRUD | `ARCHITECTURE.md` → Public API, MemoryEngine |
+| Phase 2: Scoring | `ARCHITECTURE.md` → ScoringStrategy, Context Assembly |
+| Phase 3: Consolidation | `ARCHITECTURE.md` → Consolidation Pipeline |
+| Phase 4: Activation | `ARCHITECTURE.md` → Activation Model |
+| Phase 5: Vector | `ARCHITECTURE.md` → Embedding Module, Search Pipeline |
+| Phase 6: Graph | `ARCHITECTURE.md` → Graph Traversal |
+| Phase 7: Advanced | `ARCHITECTURE.md` → Two-Tier, Temporal, Reranking |
+| Phase 8: LLM | `ARCHITECTURE.md` → LlmCallback, IngestStrategy, Evolution |
+| Phase 9: Encryption | `ARCHITECTURE.md` → Encryption Configuration |

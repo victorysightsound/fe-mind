@@ -37,9 +37,16 @@ pub struct FactConflict {
 /// Input: text containing numbered facts like "0. Subject relation Object."
 /// Returns: (triples, conflicts)
 pub fn extract_facts(text: &str) -> (Vec<FactTriple>, Vec<FactConflict>) {
-    let lines: Vec<&str> = text.lines()
+    let lines: Vec<&str> = text
+        .lines()
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty() && l.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))
+        .filter(|l| {
+            !l.is_empty()
+                && l.chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+        })
         .collect();
 
     let mut triples = Vec::new();
@@ -58,7 +65,7 @@ pub fn extract_facts(text: &str) -> (Vec<FactTriple>, Vec<FactConflict>) {
     }
 
     let mut conflicts = Vec::new();
-    for (_key, facts) in &by_key {
+    for facts in by_key.values() {
         if facts.len() > 1 {
             // Sort by index (earliest first)
             let mut sorted: Vec<&&FactTriple> = facts.iter().collect();
@@ -139,10 +146,18 @@ fn parse_fact_line(line: &str) -> Option<FactTriple> {
         ("The chairperson of ", " is ", "chairperson_of"),
         ("The chief executive officer of ", " is ", "ceo_of"),
         ("The director of ", " is ", "director_of"),
-        ("The headquarters of ", " is located in the city of ", "headquarters_in"),
+        (
+            "The headquarters of ",
+            " is located in the city of ",
+            "headquarters_in",
+        ),
         ("The official language of ", " is ", "official_language"),
         ("The type of music that ", " plays is ", "music_genre"),
-        ("The name of the current head of the ", " government is ", "government_head"),
+        (
+            "The name of the current head of the ",
+            " government is ",
+            "government_head",
+        ),
         ("The univeristy where ", " was educated is ", "educated_at"),
         ("The company that produced ", " is ", "produced_by"),
         ("The genre of ", " is ", "genre_of"),
@@ -150,8 +165,7 @@ fn parse_fact_line(line: &str) -> Option<FactTriple> {
     ];
 
     for (prefix, middle, rel_type) in &the_patterns {
-        if statement.starts_with(prefix) {
-            let rest = &statement[prefix.len()..];
+        if let Some(rest) = statement.strip_prefix(prefix) {
             if let Some(mid_pos) = rest.find(middle) {
                 let subject = rest[..mid_pos].trim();
                 let object = rest[mid_pos + middle.len()..].trim().trim_end_matches('.');
@@ -171,7 +185,9 @@ fn parse_fact_line(line: &str) -> Option<FactTriple> {
     // Fallback: "X's child is Y"
     if let Some(pos) = statement.find("'s child is ") {
         let subject = statement[..pos].trim();
-        let object = statement[pos + "'s child is ".len()..].trim().trim_end_matches('.');
+        let object = statement[pos + "'s child is ".len()..]
+            .trim()
+            .trim_end_matches('.');
         return Some(FactTriple {
             index,
             subject: subject.to_string(),

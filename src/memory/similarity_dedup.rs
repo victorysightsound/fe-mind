@@ -112,10 +112,7 @@ mod tests {
         let dedup = SimilarityDedup::with_thresholds(0.95, 0.85);
         let existing = vec![scored(42, 0.90)];
         let actions = dedup.consolidate(&meta(), &existing);
-        assert_eq!(
-            actions,
-            vec![ConsolidationAction::Update { target_id: 42 }]
-        );
+        assert_eq!(actions, vec![ConsolidationAction::Update { target_id: 42 }]);
     }
 
     #[test]

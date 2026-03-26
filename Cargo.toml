@@ -2,13 +2,13 @@
 members = [".", "mindcore-bench"]
 
 [package]
-name = "mindcore"
+name = "femind"
 version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Pluggable, feature-gated memory engine for AI agent applications"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/victorysightsound/mindcore"
+repository = "https://github.com/victorysightsound/fe-mind"
 keywords = ["memory", "ai", "agent", "search", "embedding"]
 categories = ["database", "text-processing"]
 readme = "README.md"

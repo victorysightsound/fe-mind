@@ -6,13 +6,13 @@ use sha2::Digest;
 
 use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
 use crate::embeddings::EmbeddingBackend;
-use crate::error::{MindCoreError, Result};
-use crate::memory::MemoryStore;
+use crate::error::{FemindError, Result};
 use crate::memory::store::StoreResult;
+use crate::memory::MemoryStore;
 use crate::scoring::CompositeScorer;
 use crate::search::builder::SearchBuilder;
-use crate::storage::Database;
 use crate::storage::migrations;
+use crate::storage::Database;
 use crate::traits::{MemoryRecord, ScoringStrategy};
 
 /// Result of a store_with_extraction() operation.
@@ -32,7 +32,7 @@ pub struct StoreExtractionResult {
     pub tokens_used: usize,
 }
 
-/// Runtime feature configuration for MindCore.
+/// Runtime feature configuration for femind.
 ///
 /// Two-level config:
 /// - **EngineConfig** controls WHAT features are active (store-time toggles).
@@ -66,8 +66,36 @@ pub struct EngineConfig {
     pub dedup_enabled: bool,
     /// Query-time search configuration (diversification, recency, graph depth).
     pub assembly: crate::context::AssemblyConfig,
-    /// Vector search mode: "ann" (default), "exact" (brute-force), "off".
-    pub vector_search_mode: String,
+    /// Vector search mode: exact (brute-force), ann (approximate), or off.
+    pub vector_search_mode: VectorSearchMode,
+}
+
+/// Runtime vector retrieval mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum VectorSearchMode {
+    /// FTS5 only. Vector search is disabled.
+    Off,
+    /// Brute-force cosine similarity over stored vectors.
+    #[default]
+    Exact,
+    /// ANN cosine similarity via the in-memory HNSW index.
+    Ann,
+}
+
+impl VectorSearchMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Exact => "exact",
+            Self::Ann => "ann",
+        }
+    }
+}
+
+impl std::fmt::Display for VectorSearchMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl Default for EngineConfig {
@@ -77,12 +105,12 @@ impl Default for EngineConfig {
             graph_enabled: true,
             dedup_enabled: true,
             assembly: crate::context::AssemblyConfig::default(),
-            vector_search_mode: "exact".to_string(), // brute-force until ANN is implemented
+            vector_search_mode: VectorSearchMode::Exact,
         }
     }
 }
 
-/// The primary interface to MindCore.
+/// The primary interface to femind.
 ///
 /// Generic over the consumer's memory type `T: MemoryRecord`.
 /// All core operations are synchronous (SQLite queries).
@@ -103,6 +131,8 @@ pub struct MemoryEngine<T: MemoryRecord> {
     store: MemoryStore<T>,
     scoring: Arc<dyn ScoringStrategy>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
+    #[cfg(feature = "ann")]
+    ann_index: Arc<crate::search::AnnIndex>,
     /// Runtime feature configuration.
     pub config: EngineConfig,
 }
@@ -123,57 +153,66 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         // Compute and store embedding for new records (if enabled)
         if let StoreResult::Added(id) = &result {
             if self.config.embedding_enabled {
-            if let Some(ref backend) = self.embedding {
-                if backend.is_available() {
-                    let text = record.searchable_text();
+                if let Some(ref backend) = self.embedding {
+                    if backend.is_available() {
+                        let text = record.searchable_text();
 
-                    // Skip embedding for empty/whitespace-only text
-                    if text.trim().is_empty() {
-                        return Ok(result);
-                    }
+                        // Skip embedding for empty/whitespace-only text
+                        if text.trim().is_empty() {
+                            return Ok(result);
+                        }
 
-                    // Truncate to ~8192 tokens (~32K chars) for model context window
-                    let text = truncate_for_embedding(&text);
-                    let hash = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
+                        // Truncate to ~8192 tokens (~32K chars) for model context window
+                        let text = truncate_for_embedding(&text);
+                        let hash = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
 
-                    // Skip embedding if vector already exists for this content
-                    let already_exists = crate::search::vector::VectorSearch::vector_exists(
-                        &self.db, &hash,
-                    ).unwrap_or(false);
+                        // Skip embedding if vector already exists for this content
+                        let already_exists =
+                            crate::search::vector::VectorSearch::vector_exists(&self.db, &hash)
+                                .unwrap_or(false);
 
-                    if !already_exists {
-                        let embed_start = std::time::Instant::now();
-                        match backend.embed(&text) {
-                            Ok(vec) if vec.is_empty() => {
-                                tracing::warn!("Empty embedding returned for memory {id}");
-                                self.set_embedding_status(*id, "failed");
-                            }
-                            Ok(vec) => {
-                                let embed_ms = embed_start.elapsed().as_millis();
-                                tracing::debug!(memory_id = id, embed_ms, "embedded memory");
-                                match crate::search::vector::VectorSearch::store_vector(
-                                    &self.db, *id, &vec, backend.model_name(), &hash,
-                                ) {
-                                    Ok(()) => {
-                                        tracing::debug!(memory_id = id, "stored vector");
-                                        self.set_embedding_status(*id, "success");
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!("Failed to store embedding for memory {id}: {e}");
-                                        self.set_embedding_status(*id, "failed");
+                        if !already_exists {
+                            let embed_start = std::time::Instant::now();
+                            match backend.embed(text) {
+                                Ok(vec) if vec.is_empty() => {
+                                    tracing::warn!("Empty embedding returned for memory {id}");
+                                    self.set_embedding_status(*id, "failed");
+                                }
+                                Ok(vec) => {
+                                    let embed_ms = embed_start.elapsed().as_millis();
+                                    tracing::debug!(memory_id = id, embed_ms, "embedded memory");
+                                    match crate::search::vector::VectorSearch::store_vector(
+                                        &self.db,
+                                        *id,
+                                        &vec,
+                                        backend.model_name(),
+                                        &hash,
+                                    ) {
+                                        Ok(()) => {
+                                            tracing::debug!(memory_id = id, "stored vector");
+                                            self.set_embedding_status(*id, "success");
+                                            self.invalidate_ann_index();
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "Failed to store embedding for memory {id}: {e}"
+                                            );
+                                            self.set_embedding_status(*id, "failed");
+                                        }
                                     }
                                 }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to compute embedding for memory {id}: {e}"
+                                    );
+                                    self.set_embedding_status(*id, "failed");
+                                }
                             }
-                            Err(e) => {
-                                tracing::warn!("Failed to compute embedding for memory {id}: {e}");
-                                self.set_embedding_status(*id, "failed");
-                            }
+                        } else {
+                            self.set_embedding_status(*id, "success");
                         }
-                    } else {
-                        self.set_embedding_status(*id, "success");
                     }
                 }
-            }
             } // config.embedding_enabled
         }
 
@@ -197,13 +236,15 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         for record in records {
             let result = self.store.store(&self.db, record)?;
             if let StoreResult::Added(id) = &result {
-                if self.config.embedding_enabled && self.embedding.as_ref().is_some_and(|b| b.is_available()) {
+                if self.config.embedding_enabled
+                    && self.embedding.as_ref().is_some_and(|b| b.is_available())
+                {
                     let text = record.searchable_text();
                     if !text.trim().is_empty() {
                         let hash = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
-                        let already_exists = crate::search::vector::VectorSearch::vector_exists(
-                            &self.db, &hash,
-                        ).unwrap_or(false);
+                        let already_exists =
+                            crate::search::vector::VectorSearch::vector_exists(&self.db, &hash)
+                                .unwrap_or(false);
                         if !already_exists {
                             to_embed.push((*id, text, hash));
                         }
@@ -219,6 +260,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 let texts: Vec<&str> = to_embed.iter().map(|(_, t, _)| t.as_str()).collect();
                 let batch_start = std::time::Instant::now();
                 let batch_count = texts.len();
+                let mut stored_any_vectors = false;
                 match backend.embed_batch(&texts) {
                     Ok(embeddings) => {
                         let batch_ms = batch_start.elapsed().as_millis();
@@ -226,14 +268,26 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                         // Phase 3: Store all vectors and update status
                         for ((id, _, hash), embedding) in to_embed.iter().zip(embeddings.iter()) {
                             match crate::search::vector::VectorSearch::store_vector(
-                                &self.db, *id, embedding, backend.model_name(), hash,
+                                &self.db,
+                                *id,
+                                embedding,
+                                backend.model_name(),
+                                hash,
                             ) {
-                                Ok(()) => self.set_embedding_status(*id, "success"),
+                                Ok(()) => {
+                                    self.set_embedding_status(*id, "success");
+                                    stored_any_vectors = true;
+                                }
                                 Err(e) => {
-                                    tracing::warn!("Failed to store embedding for memory {id}: {e}");
+                                    tracing::warn!(
+                                        "Failed to store embedding for memory {id}: {e}"
+                                    );
                                     self.set_embedding_status(*id, "failed");
                                 }
                             }
+                        }
+                        if stored_any_vectors {
+                            self.invalidate_ann_index();
                         }
                     }
                     Err(e) => {
@@ -286,12 +340,16 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// `SearchMode::Auto` will use hybrid FTS5 + vector search.
     pub fn search(&self, query: &str) -> SearchBuilder<'_, T> {
         let mut builder = SearchBuilder::new(&self.db, query)
-            .with_scoring(Arc::clone(&self.scoring));
-        // A7: Only attach embedding backend if vector search is not "off"
-        if self.config.vector_search_mode != "off" {
+            .with_scoring(Arc::clone(&self.scoring))
+            .with_vector_search_mode(self.config.vector_search_mode);
+        if self.config.vector_search_mode != VectorSearchMode::Off {
             if let Some(ref embedding) = self.embedding {
                 builder = builder.with_embedding(Arc::clone(embedding));
             }
+        }
+        #[cfg(feature = "ann")]
+        if self.config.vector_search_mode == VectorSearchMode::Ann {
+            builder = builder.with_ann_index(Arc::clone(&self.ann_index));
         }
         builder
     }
@@ -333,7 +391,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 let split_at = if remaining.len() <= MAX_EXTRACT_CHARS {
                     remaining.len()
                 } else {
-                    remaining[..MAX_EXTRACT_CHARS].rfind('\n')
+                    remaining[..MAX_EXTRACT_CHARS]
+                        .rfind('\n')
                         .map(|p| p + 1)
                         .unwrap_or(MAX_EXTRACT_CHARS)
                 };
@@ -349,7 +408,10 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     }
                 }
             }
-            llm_extract::ExtractionResult { facts: all_facts, tokens_used: total_tokens }
+            llm_extract::ExtractionResult {
+                facts: all_facts,
+                tokens_used: total_tokens,
+            }
         } else {
             llm_extract::extract_facts(raw_text, llm)?
         };
@@ -359,8 +421,12 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
         if extraction.facts.is_empty() {
             return Ok(StoreExtractionResult {
-                facts_extracted: 0, memories_stored: 0, duplicates_skipped: 0,
-                graph_edges_created: 0, superseded_count: 0, tokens_used,
+                facts_extracted: 0,
+                memories_stored: 0,
+                duplicates_skipped: 0,
+                graph_edges_created: 0,
+                superseded_count: 0,
+                tokens_used,
             });
         }
 
@@ -424,21 +490,30 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
             // Compute and store embedding (A3: gated by config)
             if self.config.embedding_enabled {
-            if let Some(ref backend) = self.embedding {
-                if backend.is_available() && !fact.text.trim().is_empty() {
-                    let text = truncate_for_embedding(&fact.text);
-                    match backend.embed(text) {
-                        Ok(vec) if !vec.is_empty() => {
-                            let _ = crate::search::vector::VectorSearch::store_vector(
-                                &self.db, id, &vec, backend.model_name(), &hash,
-                            );
-                            self.set_embedding_status(id, "success");
+                if let Some(ref backend) = self.embedding {
+                    if backend.is_available() && !fact.text.trim().is_empty() {
+                        let text = truncate_for_embedding(&fact.text);
+                        match backend.embed(text) {
+                            Ok(vec) if !vec.is_empty() => {
+                                match crate::search::vector::VectorSearch::store_vector(
+                                    &self.db,
+                                    id,
+                                    &vec,
+                                    backend.model_name(),
+                                    &hash,
+                                ) {
+                                    Ok(()) => {
+                                        self.set_embedding_status(id, "success");
+                                        self.invalidate_ann_index();
+                                    }
+                                    Err(_) => self.set_embedding_status(id, "failed"),
+                                }
+                            }
+                            Ok(_) => self.set_embedding_status(id, "failed"),
+                            Err(_) => self.set_embedding_status(id, "failed"),
                         }
-                        Ok(_) => self.set_embedding_status(id, "failed"),
-                        Err(_) => self.set_embedding_status(id, "failed"),
                     }
                 }
-            }
             } // config.embedding_enabled
 
             stored_ids.push((id, fact));
@@ -448,39 +523,50 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let mut graph_edges_created = 0usize;
         let mut superseded_count = 0usize;
         if self.config.graph_enabled {
-        for (id, fact) in &stored_ids {
-            for (subject, relation, _object) in &fact.relationships {
-                // Search existing memories for same subject + relation with different value
-                let search_text = format!("{} {}", subject, relation);
-                let existing = self.db.with_reader(|conn| {
-                    let mut stmt = conn.prepare(
-                        "SELECT id, searchable_text FROM memories
+            for (id, fact) in &stored_ids {
+                for (subject, relation, _object) in &fact.relationships {
+                    // Search existing memories for same subject + relation with different value
+                    let existing = self.db.with_reader(|conn| {
+                        let mut stmt = conn.prepare(
+                            "SELECT id, searchable_text FROM memories
                          WHERE id != ?1
                          AND searchable_text LIKE ?2
                          ORDER BY id ASC",
-                    )?;
-                    let pattern = format!("%{}%", subject);
-                    let results: Vec<(i64, String)> = stmt.query_map(
-                        rusqlite::params![id, pattern],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )?.filter_map(|r| r.ok()).collect();
-                    Ok::<_, crate::error::MindCoreError>(results)
-                })?;
+                        )?;
+                        let pattern = format!("%{}%", subject);
+                        let results: Vec<(i64, String)> = stmt
+                            .query_map(rusqlite::params![id, pattern], |row| {
+                                Ok((row.get(0)?, row.get(1)?))
+                            })?
+                            .filter_map(|r| r.ok())
+                            .collect();
+                        Ok::<_, crate::error::FemindError>(results)
+                    })?;
 
-                for (existing_id, existing_text) in &existing {
-                    if existing_text.to_lowercase().contains(&subject.to_lowercase())
-                       && existing_text.to_lowercase().contains(&relation.replace('_', " ").to_lowercase()) {
-                        // Same subject + relation → SupersededBy (older is superseded)
-                        if GraphMemory::relate(
-                            &self.db, *existing_id, *id, &RelationType::SupersededBy,
-                        ).is_ok() {
-                            graph_edges_created += 1;
-                            superseded_count += 1;
+                    for (existing_id, existing_text) in &existing {
+                        if existing_text
+                            .to_lowercase()
+                            .contains(&subject.to_lowercase())
+                            && existing_text
+                                .to_lowercase()
+                                .contains(&relation.replace('_', " ").to_lowercase())
+                        {
+                            // Same subject + relation → SupersededBy (older is superseded)
+                            if GraphMemory::relate(
+                                &self.db,
+                                *existing_id,
+                                *id,
+                                &RelationType::SupersededBy,
+                            )
+                            .is_ok()
+                            {
+                                graph_edges_created += 1;
+                                superseded_count += 1;
+                            }
                         }
                     }
                 }
             }
-        }
         } // config.graph_enabled
 
         Ok(StoreExtractionResult {
@@ -503,7 +589,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 "SELECT COUNT(*) FROM memories WHERE embedding_status = 'success'",
                 [],
                 |row| row.get(0),
-            ).map_err(Into::into)
+            )
+            .map_err(Into::into)
         })?;
         Ok((with_embeddings as u64, total))
     }
@@ -515,8 +602,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         config: &crate::context::AssemblyConfig,
     ) -> Result<Vec<crate::search::builder::SearchResult>> {
         let limit = config.search_limit;
-        use std::collections::HashMap;
         use crate::search::fts5::strip_stop_words;
+        use std::collections::HashMap;
 
         // Query variant 1: original
         let results1 = self.search(query).limit(limit).execute()?;
@@ -546,29 +633,43 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         // Recency weighting: boost later chunks (higher turn_index = more recent)
         if config.recency_boost > 0.0 {
             // Find max turn_index across all results for normalization
-            let max_index = merged.iter().filter_map(|r| {
-                self.db.with_reader(|conn| {
-                    conn.query_row(
-                        "SELECT metadata_json FROM memories WHERE id = ?1",
-                        [r.memory_id],
-                        |row| row.get::<_, Option<String>>(0),
-                    ).map_err(|e| crate::error::MindCoreError::Database(e))
-                }).ok().flatten().and_then(|json| {
-                    serde_json::from_str::<HashMap<String, String>>(&json).ok()
-                }).and_then(|meta| meta.get("turn_index").and_then(|v| v.parse::<f32>().ok()))
-            }).fold(1.0_f32, f32::max);
+            let max_index = merged
+                .iter()
+                .filter_map(|r| {
+                    self.db
+                        .with_reader(|conn| {
+                            conn.query_row(
+                                "SELECT metadata_json FROM memories WHERE id = ?1",
+                                [r.memory_id],
+                                |row| row.get::<_, Option<String>>(0),
+                            )
+                            .map_err(crate::error::FemindError::Database)
+                        })
+                        .ok()
+                        .flatten()
+                        .and_then(|json| {
+                            serde_json::from_str::<HashMap<String, String>>(&json).ok()
+                        })
+                        .and_then(|meta| meta.get("turn_index").and_then(|v| v.parse::<f32>().ok()))
+                })
+                .fold(1.0_f32, f32::max);
 
             for r in &mut merged {
-                let turn_index = self.db.with_reader(|conn| {
-                    conn.query_row(
-                        "SELECT metadata_json FROM memories WHERE id = ?1",
-                        [r.memory_id],
-                        |row| row.get::<_, Option<String>>(0),
-                    ).map_err(|e| crate::error::MindCoreError::Database(e))
-                }).ok().flatten().and_then(|json| {
-                    serde_json::from_str::<HashMap<String, String>>(&json).ok()
-                }).and_then(|meta| meta.get("turn_index").and_then(|v| v.parse::<f32>().ok()))
-                .unwrap_or(0.0);
+                let turn_index = self
+                    .db
+                    .with_reader(|conn| {
+                        conn.query_row(
+                            "SELECT metadata_json FROM memories WHERE id = ?1",
+                            [r.memory_id],
+                            |row| row.get::<_, Option<String>>(0),
+                        )
+                        .map_err(crate::error::FemindError::Database)
+                    })
+                    .ok()
+                    .flatten()
+                    .and_then(|json| serde_json::from_str::<HashMap<String, String>>(&json).ok())
+                    .and_then(|meta| meta.get("turn_index").and_then(|v| v.parse::<f32>().ok()))
+                    .unwrap_or(0.0);
 
                 // position_ratio: 0.0 (oldest) to 1.0 (newest)
                 let position_ratio = turn_index / max_index;
@@ -576,27 +677,35 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             }
         }
 
-        merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        merged.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Graph filtering: demote results that have been superseded by newer facts.
         // Only if graph is enabled (A6: EngineConfig master switch + AssemblyConfig depth)
         if self.config.graph_enabled && config.graph_depth > 0 {
-            use crate::memory::{GraphMemory, RelationType};
-
-            let mut superseded_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+            let mut superseded_ids: std::collections::HashSet<i64> =
+                std::collections::HashSet::new();
 
             // Check each result: does anything supersede it?
             for r in &merged {
                 // Look for incoming SupersededBy edges (this memory IS the old one)
-                let is_superseded = self.db.with_reader(|conn| {
-                    let count: i64 = conn.query_row(
-                        "SELECT COUNT(*) FROM memory_relations
+                let is_superseded = self
+                    .db
+                    .with_reader(|conn| {
+                        let count: i64 = conn
+                            .query_row(
+                                "SELECT COUNT(*) FROM memory_relations
                          WHERE source_id = ?1 AND relation = 'superseded_by'",
-                        [r.memory_id],
-                        |row| row.get(0),
-                    ).unwrap_or(0);
-                    Ok::<bool, crate::error::MindCoreError>(count > 0)
-                }).unwrap_or(false);
+                                [r.memory_id],
+                                |row| row.get(0),
+                            )
+                            .unwrap_or(0);
+                        Ok::<bool, crate::error::FemindError>(count > 0)
+                    })
+                    .unwrap_or(false);
 
                 if is_superseded {
                     superseded_ids.insert(r.memory_id);
@@ -604,13 +713,20 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             }
 
             if !superseded_ids.is_empty() {
-                tracing::debug!("Graph filtering: {} results demoted as superseded", superseded_ids.len());
+                tracing::debug!(
+                    "Graph filtering: {} results demoted as superseded",
+                    superseded_ids.len()
+                );
                 for r in &mut merged {
                     if superseded_ids.contains(&r.memory_id) {
                         r.score *= 0.1; // Heavily demote outdated facts
                     }
                 }
-                merged.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+                merged.sort_by(|a, b| {
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
             }
         }
 
@@ -620,22 +736,32 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             merged // No diversification
         } else {
             let mut session_counts: HashMap<String, usize> = HashMap::new();
-            merged.into_iter().filter(|r| {
-                let session_key = self.db.with_reader(|conn| {
-                    conn.query_row(
-                        "SELECT metadata_json FROM memories WHERE id = ?1",
-                        [r.memory_id],
-                        |row| row.get::<_, Option<String>>(0),
-                    ).map_err(|e| crate::error::MindCoreError::Database(e))
-                }).ok().flatten().and_then(|json| {
-                    serde_json::from_str::<HashMap<String, String>>(&json).ok()
-                }).and_then(|meta| meta.get("session_date").cloned())
-                .unwrap_or_else(|| format!("unknown_{}", r.memory_id));
+            merged
+                .into_iter()
+                .filter(|r| {
+                    let session_key = self
+                        .db
+                        .with_reader(|conn| {
+                            conn.query_row(
+                                "SELECT metadata_json FROM memories WHERE id = ?1",
+                                [r.memory_id],
+                                |row| row.get::<_, Option<String>>(0),
+                            )
+                            .map_err(crate::error::FemindError::Database)
+                        })
+                        .ok()
+                        .flatten()
+                        .and_then(|json| {
+                            serde_json::from_str::<HashMap<String, String>>(&json).ok()
+                        })
+                        .and_then(|meta| meta.get("session_date").cloned())
+                        .unwrap_or_else(|| format!("unknown_{}", r.memory_id));
 
-                let count = session_counts.entry(session_key).or_insert(0);
-                *count += 1;
-                *count <= max_per
-            }).collect()
+                    let count = session_counts.entry(session_key).or_insert(0);
+                    *count += 1;
+                    *count <= max_per
+                })
+                .collect()
         };
 
         Ok(diversified)
@@ -644,11 +770,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// Assemble context for an LLM prompt within a token budget.
     ///
     /// Uses default AssemblyConfig (max 1/session, no recency boost).
-    pub fn assemble_context(
-        &self,
-        query: &str,
-        budget: &ContextBudget,
-    ) -> Result<ContextAssembly> {
+    pub fn assemble_context(&self, query: &str, budget: &ContextBudget) -> Result<ContextAssembly> {
         self.assemble_context_with_config(query, budget, &crate::context::AssemblyConfig::default())
     }
 
@@ -721,6 +843,14 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     pub fn global_database(&self) -> Option<&Database> {
         self.global_db.as_ref()
     }
+
+    #[cfg(feature = "ann")]
+    fn invalidate_ann_index(&self) {
+        self.ann_index.invalidate();
+    }
+
+    #[cfg(not(feature = "ann"))]
+    fn invalidate_ann_index(&self) {}
 }
 
 impl<T: MemoryRecord> std::fmt::Debug for MemoryEngine<T> {
@@ -737,6 +867,7 @@ pub struct MemoryEngineBuilder<T: MemoryRecord> {
     global_database_path: Option<String>,
     scoring: Option<Arc<dyn ScoringStrategy>>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
+    config: EngineConfig,
     _phantom: PhantomData<T>,
 }
 
@@ -747,6 +878,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             global_database_path: None,
             scoring: None,
             embedding: None,
+            config: EngineConfig::default(),
             _phantom: PhantomData,
         }
     }
@@ -794,6 +926,12 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
         self
     }
 
+    /// Override the runtime engine configuration.
+    pub fn config(mut self, config: EngineConfig) -> Self {
+        self.config = config;
+        self
+    }
+
     /// Build the engine, creating or opening the database.
     ///
     /// Runs schema migrations to ensure the database is at the current version.
@@ -804,7 +942,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
                 if let Some(parent) = Path::new(path).parent() {
                     if !parent.as_os_str().is_empty() {
                         std::fs::create_dir_all(parent).map_err(|e| {
-                            MindCoreError::Migration(format!(
+                            FemindError::Migration(format!(
                                 "failed to create database directory {}: {e}",
                                 parent.display()
                             ))
@@ -828,7 +966,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
                 if let Some(parent) = Path::new(path).parent() {
                     if !parent.as_os_str().is_empty() {
                         std::fs::create_dir_all(parent).map_err(|e| {
-                            MindCoreError::Migration(format!(
+                            FemindError::Migration(format!(
                                 "failed to create global database directory {}: {e}",
                                 parent.display()
                             ))
@@ -855,7 +993,9 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             store: MemoryStore::new(),
             scoring,
             embedding: self.embedding,
-            config: EngineConfig::default(),
+            #[cfg(feature = "ann")]
+            ann_index: Arc::new(crate::search::AnnIndex::default()),
+            config: self.config,
         })
     }
 }
@@ -881,7 +1021,9 @@ fn truncate_for_embedding(text: &str) -> &str {
 /// If metadata contains a "session_date" field, prepends "[Date: <date>] " to the text.
 /// This makes dates visible in retrieved context, helping LLMs answer temporal questions.
 fn prepend_date_from_metadata(text: &str, metadata_json: Option<&str>) -> String {
-    let Some(json_str) = metadata_json else { return text.to_string() };
+    let Some(json_str) = metadata_json else {
+        return text.to_string();
+    };
 
     // Parse metadata JSON to extract session_date
     if let Ok(meta) = serde_json::from_str::<std::collections::HashMap<String, String>>(json_str) {
@@ -897,6 +1039,7 @@ fn prepend_date_from_metadata(text: &str, metadata_json: Option<&str>) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::embeddings::EmbeddingBackend;
     use crate::traits::MemoryType;
     use chrono::Utc;
 
@@ -908,14 +1051,64 @@ mod tests {
     }
 
     impl MemoryRecord for TestMem {
-        fn id(&self) -> Option<i64> { self.id }
-        fn searchable_text(&self) -> String { self.text.clone() }
-        fn memory_type(&self) -> MemoryType { MemoryType::Semantic }
-        fn created_at(&self) -> chrono::DateTime<Utc> { self.created_at }
+        fn id(&self) -> Option<i64> {
+            self.id
+        }
+        fn searchable_text(&self) -> String {
+            self.text.clone()
+        }
+        fn memory_type(&self) -> MemoryType {
+            MemoryType::Semantic
+        }
+        fn created_at(&self) -> chrono::DateTime<Utc> {
+            self.created_at
+        }
     }
 
     fn mem(text: &str) -> TestMem {
-        TestMem { id: None, text: text.into(), created_at: Utc::now() }
+        TestMem {
+            id: None,
+            text: text.into(),
+            created_at: Utc::now(),
+        }
+    }
+
+    struct ModeTestEmbedder;
+
+    impl ModeTestEmbedder {
+        fn encode(text: &str) -> Vec<f32> {
+            let lower = text.to_lowercase();
+            let raw = if lower.contains("apple")
+                || lower.contains("banana")
+                || lower.contains("fruit")
+            {
+                vec![1.0, 0.0, 0.0]
+            } else if lower.contains("truck") || lower.contains("car") || lower.contains("vehicle")
+            {
+                vec![0.0, 1.0, 0.0]
+            } else {
+                vec![0.0, 0.0, 1.0]
+            };
+            crate::embeddings::pooling::normalize_l2(&raw)
+        }
+    }
+
+    impl EmbeddingBackend for ModeTestEmbedder {
+        fn embed(&self, text: &str) -> Result<Vec<f32>> {
+            Ok(Self::encode(text))
+        }
+
+        fn dimensions(&self) -> usize {
+            3
+        }
+
+        fn is_available(&self) -> bool {
+            true
+        }
+
+        fn model_name(&self) -> &str {
+            "mode-test"
+        }
     }
 
     #[test]
@@ -950,11 +1143,16 @@ mod tests {
         let record = mem("hello from engine");
 
         let result = engine.store(&record).expect("store");
-        let StoreResult::Added(id) = result else { panic!("expected Added") };
+        let StoreResult::Added(id) = result else {
+            panic!("expected Added")
+        };
 
         let retrieved = engine.get(id).expect("get");
         assert!(retrieved.is_some());
-        assert_eq!(retrieved.as_ref().map(|r| r.text.as_str()), Some("hello from engine"));
+        assert_eq!(
+            retrieved.as_ref().map(|r| r.text.as_str()),
+            Some("hello from engine")
+        );
     }
 
     #[test]
@@ -964,7 +1162,11 @@ mod tests {
             panic!("expected Added");
         };
 
-        let updated = TestMem { id: Some(id), text: "updated".into(), created_at: Utc::now() };
+        let updated = TestMem {
+            id: Some(id),
+            text: "updated".into(),
+            created_at: Utc::now(),
+        };
         engine.update(id, &updated).expect("update");
 
         let r = engine.get(id).expect("get").expect("not found");
@@ -985,8 +1187,12 @@ mod tests {
     #[test]
     fn search_via_engine() {
         let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
-        engine.store(&mem("authentication error JWT")).expect("store");
-        engine.store(&mem("database connection timeout")).expect("store");
+        engine
+            .store(&mem("authentication error JWT"))
+            .expect("store");
+        engine
+            .store(&mem("database connection timeout"))
+            .expect("store");
 
         let results = engine.search("authentication").execute().expect("search");
         assert_eq!(results.len(), 1);
@@ -1026,20 +1232,31 @@ mod tests {
         // Disable embedding
         engine.config.embedding_enabled = false;
 
-        let result = engine.store(&mem("test memory without embedding")).expect("store");
+        let result = engine
+            .store(&mem("test memory without embedding"))
+            .expect("store");
         assert!(matches!(result, StoreResult::Added(_)));
 
         // FTS5 should still work
-        let search = engine.search("test memory").limit(5).execute().expect("search");
+        let search = engine
+            .search("test memory")
+            .limit(5)
+            .execute()
+            .expect("search");
         assert!(!search.is_empty(), "FTS5 search should find the memory");
 
         // No vector should be stored
         let db = engine.database();
-        let vec_count: i64 = db.with_reader(|conn| {
-            conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
-                .map_err(Into::into)
-        }).expect("count");
-        assert_eq!(vec_count, 0, "no vectors should be stored when embedding disabled");
+        let vec_count: i64 = db
+            .with_reader(|conn| {
+                conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+                    .map_err(Into::into)
+            })
+            .expect("count");
+        assert_eq!(
+            vec_count, 0,
+            "no vectors should be stored when embedding disabled"
+        );
     }
 
     #[test]
@@ -1055,16 +1272,100 @@ mod tests {
         // Default: embedding enabled
         assert!(engine.config.embedding_enabled);
 
-        let result = engine.store(&mem("test memory with embedding")).expect("store");
+        let result = engine
+            .store(&mem("test memory with embedding"))
+            .expect("store");
         assert!(matches!(result, StoreResult::Added(_)));
 
         // Vector should be stored
         let db = engine.database();
-        let vec_count: i64 = db.with_reader(|conn| {
-            conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
-                .map_err(Into::into)
-        }).expect("count");
-        assert_eq!(vec_count, 1, "vector should be stored when embedding enabled");
+        let vec_count: i64 = db
+            .with_reader(|conn| {
+                conn.query_row("SELECT COUNT(*) FROM memory_vectors", [], |row| row.get(0))
+                    .map_err(Into::into)
+            })
+            .expect("count");
+        assert_eq!(
+            vec_count, 1,
+            "vector should be stored when embedding enabled"
+        );
+    }
+
+    #[test]
+    fn vector_search_mode_off_uses_keyword_only() {
+        let mut engine = MemoryEngine::<TestMem>::builder()
+            .embedding_backend(ModeTestEmbedder)
+            .build()
+            .expect("build");
+        engine.config.vector_search_mode = VectorSearchMode::Off;
+
+        engine.store(&mem("apple orchard notes")).expect("store");
+        engine.store(&mem("truck repair log")).expect("store");
+
+        let results = engine
+            .search("banana")
+            .mode(crate::search::SearchMode::Auto)
+            .execute()
+            .expect("search");
+
+        assert!(
+            results.is_empty(),
+            "off mode should not use vector similarity to surface semantic-only matches"
+        );
+    }
+
+    #[test]
+    fn vector_search_mode_exact_enables_semantic_match() {
+        let mut engine = MemoryEngine::<TestMem>::builder()
+            .embedding_backend(ModeTestEmbedder)
+            .build()
+            .expect("build");
+        engine.config.vector_search_mode = VectorSearchMode::Exact;
+
+        let StoreResult::Added(apple_id) =
+            engine.store(&mem("apple orchard notes")).expect("store")
+        else {
+            panic!("expected Added");
+        };
+        engine.store(&mem("truck repair log")).expect("store");
+
+        let results = engine
+            .search("banana")
+            .mode(crate::search::SearchMode::Vector)
+            .execute()
+            .expect("search");
+
+        assert_eq!(results.first().map(|r| r.memory_id), Some(apple_id));
+    }
+
+    #[cfg(feature = "ann")]
+    #[test]
+    fn vector_search_mode_ann_builds_and_queries_index() {
+        let mut engine = MemoryEngine::<TestMem>::builder()
+            .embedding_backend(ModeTestEmbedder)
+            .build()
+            .expect("build");
+        engine.config.vector_search_mode = VectorSearchMode::Ann;
+
+        let StoreResult::Added(apple_id) =
+            engine.store(&mem("apple orchard notes")).expect("store")
+        else {
+            panic!("expected Added");
+        };
+        engine.store(&mem("truck repair log")).expect("store");
+
+        let results = engine
+            .search("banana")
+            .mode(crate::search::SearchMode::Vector)
+            .execute()
+            .expect("search");
+
+        assert_eq!(results.first().map(|r| r.memory_id), Some(apple_id));
+        assert!(
+            engine.ann_index.is_built(),
+            "ANN mode should build the shared index"
+        );
+        assert_eq!(engine.ann_index.model_name().as_deref(), Some("mode-test"));
     }
 
     #[test]
@@ -1072,31 +1373,50 @@ mod tests {
         use crate::traits::LlmCallback;
 
         // Mock LLM that returns one fact per call
-        struct CountingLlm { call_count: std::sync::atomic::AtomicUsize }
+        struct CountingLlm {
+            call_count: std::sync::atomic::AtomicUsize,
+        }
         impl LlmCallback for CountingLlm {
             fn generate(&self, _prompt: &str, _max_tokens: usize) -> Result<String> {
-                let n = self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let n = self
+                    .call_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(format!("fact|5|Extracted fact number {}||", n))
             }
-            fn model_name(&self) -> &str { "mock" }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
         }
 
         let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
-        let llm = CountingLlm { call_count: std::sync::atomic::AtomicUsize::new(0) };
+        let llm = CountingLlm {
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        };
 
         // Create text larger than MAX_EXTRACT_CHARS (6000)
         let large_text = "Some fact statement.\n".repeat(500); // ~10000 chars
         assert!(large_text.len() > 6000);
 
-        let result = engine.store_with_extraction(&large_text, &llm).expect("extract");
+        let result = engine
+            .store_with_extraction(&large_text, &llm)
+            .expect("extract");
 
         // Should have made multiple LLM calls (text was split)
         let calls = llm.call_count.load(std::sync::atomic::Ordering::SeqCst);
-        assert!(calls >= 2, "large text should be split into multiple LLM calls, got {calls}");
+        assert!(
+            calls >= 2,
+            "large text should be split into multiple LLM calls, got {calls}"
+        );
 
         // Should have extracted facts from each chunk
-        assert!(result.facts_extracted >= 2, "should extract from multiple chunks");
-        assert!(result.memories_stored >= 2, "should store facts from multiple chunks");
+        assert!(
+            result.facts_extracted >= 2,
+            "should extract from multiple chunks"
+        );
+        assert!(
+            result.memories_stored >= 2,
+            "should store facts from multiple chunks"
+        );
     }
 
     #[test]
@@ -1106,13 +1426,20 @@ mod tests {
         struct MockLlm;
         impl LlmCallback for MockLlm {
             fn generate(&self, _prompt: &str, _max_tokens: usize) -> Result<String> {
-                Ok("fact|7|The sky is blue|sky|sky>color>blue\nfact|5|Water is wet|water|".to_string())
+                Ok(
+                    "fact|7|The sky is blue|sky|sky>color>blue\nfact|5|Water is wet|water|"
+                        .to_string(),
+                )
             }
-            fn model_name(&self) -> &str { "mock" }
+            fn model_name(&self) -> &str {
+                "mock"
+            }
         }
 
         let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
-        let result = engine.store_with_extraction("Some text about nature", &MockLlm).expect("extract");
+        let result = engine
+            .store_with_extraction("Some text about nature", &MockLlm)
+            .expect("extract");
 
         assert_eq!(result.facts_extracted, 2);
         assert_eq!(result.memories_stored, 2);
