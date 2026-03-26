@@ -1,5 +1,5 @@
 [package]
-name = "mindcore-bench"
+name = "femind-bench"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
@@ -7,7 +7,7 @@ description = "LongMemEval benchmark harness for femind"
 publish = false
 
 [[bin]]
-name = "mindcore-bench"
+name = "femind-bench"
 path = "src/main.rs"
 
 [dependencies]

@@ -64,7 +64,7 @@ until the build is complete and approved.
 **A8.** Add `cli-llm` feature flag to Cargo.toml
 
 **A9.** Make extraction LLM configurable:
-- `mindcore-extract` system in recallbench should accept --extract-model flag
+- `femind-extract` system in recallbench should accept --extract-model flag
 - Remove hardcoded Llama model
 - Default to Haiku via CLI when no API model specified
 

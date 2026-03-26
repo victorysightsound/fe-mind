@@ -2,7 +2,7 @@
 
 **Version:** 0.2.0
 **Updated:** 2026-03-25
-**Status:** local repo/crate rename to `fe-mind` / `femind` is complete in this workspace. crates.io remains on `mindcore` v0.2.0 until the renamed package is published.
+**Status:** local repo/crate rename to `fe-mind` / `femind` is complete in this workspace. External publication work is still pending.
 
 ---
 
@@ -129,7 +129,7 @@ full               # Everything except encryption/mcp-server
 
 ---
 
-## Original Architecture (historical notes below this line may still refer to the old `mindcore` name)
+## Original Architecture (historical notes below this line may still reflect the prior project name)
 
 ## Overview
 
@@ -157,7 +157,7 @@ full               # Everything except encryption/mcp-server
 ## Crate Structure
 
 ```
-mindcore/
+femind/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs                 # Public API re-exports
@@ -1003,8 +1003,8 @@ CREATE INDEX IF NOT EXISTS idx_relations_type ON memory_relations(relation);
 ### Two-Tier Memory (feature: `two-tier`)
 
 ```
-~/.mindcore/global.db     — Cross-project memories (error patterns, language learnings)
-./.mindcore/memory.db     — Project-specific memories (architecture decisions, conventions)
+~/.femind/global.db     — Cross-project memories (error patterns, language learnings)
+./.femind/memory.db     — Project-specific memories (architecture decisions, conventions)
 ```
 
 Both databases share the same schema. The engine queries both and merges results, with project memories receiving a scoring boost over global memories.
@@ -1013,14 +1013,14 @@ Both databases share the same schema. The engine queries both and merges results
 
 ### Schema Migrations
 
-femind uses a simple version-based migration system. The database stores its schema version in a `mindcore_meta` table:
+femind uses a simple version-based migration system. The database stores its schema version in a `femind_meta` table, while retaining compatibility reads from older metadata tables:
 
 ```sql
-CREATE TABLE IF NOT EXISTS mindcore_meta (
+CREATE TABLE IF NOT EXISTS femind_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
--- Initial: INSERT INTO mindcore_meta VALUES ('schema_version', '1');
+-- Initial: INSERT INTO femind_meta VALUES ('schema_version', '1');
 ```
 
 On connection open, the engine checks the stored version against the compiled version and runs any pending migrations sequentially:
@@ -1678,7 +1678,7 @@ impl<T: MemoryRecord> SearchBuilder<T> {
 ```rust
 let engine = MemoryEngine::<Learning>::builder()
     .database("path/to/memory.db")
-    .global_database("~/.mindcore/global.db")          // optional, two-tier
+    .global_database("~/.femind/global.db")          // optional, two-tier
     .embedding_backend(CandleBackend::new()?)          // optional, vector-search
     .scoring(CompositeScorer::new(vec![
         Box::new(RecencyScorer::new(Duration::days(30))),

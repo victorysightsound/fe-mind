@@ -22,7 +22,7 @@ work. Phase 2 makes it work *well*.
 
 ---
 
-## Phase 5: Search Quality (mindcore)
+## Phase 5: Search Quality (femind)
 
 ### 5.1 — FTS5 OR-mode search
 
@@ -93,9 +93,9 @@ by making dates visible in the retrieved context.
 
 ## Phase 6: Adapter Efficiency (recallbench)
 
-### 6.1 — Use store_batch() in MindCoreAdapter
+### 6.1 — Use store_batch() in FemindAdapter
 
-Update `ingest_session()` in recallbench's mindcore_adapter.rs to:
+Update `ingest_session()` in recallbench's femind adapter to:
 1. Collect all ConversationMemory records from the session
 2. Call `engine.store_batch()` instead of individual `engine.store()` calls
 3. This batches embedding inference for ~20 turns per session

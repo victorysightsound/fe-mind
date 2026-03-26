@@ -29,7 +29,7 @@ from Phase 2 and adds the techniques that separate good retrieval from great.
 
 ---
 
-## Phase 7: Precision Improvements (mindcore)
+## Phase 7: Precision Improvements (femind)
 
 ### 7.1 — Fix stop-word list: remove content words
 

@@ -1,4 +1,4 @@
-# MindCore-Bench — LongMemEval Benchmark Harness PRD
+# femind-bench — LongMemEval Benchmark Harness PRD
 
 **Version:** 1.0
 **Date:** 2026-03-20
@@ -8,9 +8,9 @@
 
 ## 1. Overview
 
-MindCore-Bench is a separate binary crate within the mindcore workspace that runs the LongMemEval benchmark against MindCore's memory engine. It downloads the dataset, ingests conversation histories as memories, retrieves answers to 500 questions, and uses an LLM judge (Claude) to score accuracy.
+femind-bench is a separate binary crate within the femind workspace that runs the LongMemEval benchmark against femind. It downloads the dataset, ingests conversation histories as memories, retrieves answers to 500 questions, and uses an LLM judge (Claude) to score accuracy.
 
-**Target:** 93-96% task-averaged accuracy (MindCore achieved 95.6%, surpassing OMEGA's verified 76.8%).
+**Target:** 93-96% task-averaged accuracy (femind achieved 95.6%, surpassing OMEGA's verified 76.8%).
 
 ---
 
@@ -48,13 +48,13 @@ MindCore-Bench is a separate binary crate within the mindcore workspace that run
 ## 3. Architecture
 
 ```
-mindcore-bench/
-├── Cargo.toml          # Binary crate, depends on mindcore
+femind-bench/
+├── Cargo.toml          # Binary crate, depends on femind
 ├── src/
 │   ├── main.rs         # CLI entry point
 │   ├── dataset.rs      # Download and parse LongMemEval JSON
-│   ├── ingest.rs       # Feed conversations into MindCore as memories
-│   ├── retrieval.rs    # Search MindCore for each question, build context
+│   ├── ingest.rs       # Feed conversations into femind as memories
+│   ├── retrieval.rs    # Search femind for each question, build context
 │   ├── generation.rs   # Send context + question to LLM for answer
 │   ├── judge.rs        # Send hypothesis to LLM judge for scoring
 │   └── metrics.rs      # Compute per-type and overall accuracy
@@ -92,8 +92,8 @@ Each entry in the JSON array:
 - Parse into typed Rust structs
 - Start with oracle (evidence-only) for fast iteration, then test with S variant
 
-### Step 2: Ingest Sessions into MindCore
-- For each question entry, create a fresh MindCore engine
+### Step 2: Ingest Sessions into femind
+- For each question entry, create a fresh femind engine
 - Ingest all `haystack_sessions` as memories:
   - Each conversation turn becomes a memory
   - Mark with session metadata (date, session ID)
@@ -101,7 +101,7 @@ Each entry in the JSON array:
   - Run fact extraction if IngestStrategy is configured
 
 ### Step 3: Retrieve Context
-- For each question, search MindCore with the question text
+- For each question, search femind with the question text
 - Use hybrid search (FTS5 + vector if available)
 - Assemble context within a token budget
 - Include question date for temporal reasoning
@@ -130,7 +130,7 @@ Each entry in the JSON array:
 Download, parse, and validate the LongMemEval dataset.
 
 ### Phase 2: Ingestion + Retrieval (Tasks 5-9)
-Feed conversations into MindCore, retrieve context for questions.
+Feed conversations into femind, retrieve context for questions.
 
 ### Phase 3: Generation + Judging (Tasks 10-14)
 LLM answer generation and judge evaluation.
@@ -144,7 +144,7 @@ Compute scores, generate reports, iterate on retrieval strategy.
 
 ```toml
 [dependencies]
-mindcore = { path = "..", features = ["full"] }
+femind = { path = "..", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1", features = ["derive"] }

@@ -62,7 +62,7 @@ The core that everything else builds on. After this phase, femind is a functiona
 - `FemindError` enum with `Database`, `Serialization`, `Migration` variants
 - SQLite storage engine with WAL, mmap, pragmas
 - Core schema: `memories` table, `memories_fts` virtual table, FTS5 triggers
-- `mindcore_meta` table for schema versioning
+- `femind_meta` table for schema versioning
 - Migration framework (version check + sequential migrations)
 - CRUD: `store()`, `get()`, `update()`, `delete()`
 - SHA-256 content hashing for dedup
@@ -82,7 +82,7 @@ The core that everything else builds on. After this phase, femind is a functiona
 3. Implement `FemindError` enum and `Result<T>` type alias
 4. Implement SQLite storage engine (connection, WAL, pragmas, mmap)
 5. Implement core schema creation (memories table, FTS5, triggers)
-6. Implement `mindcore_meta` table and migration framework
+6. Implement `femind_meta` table and migration framework
 7. Implement CRUD operations (store, get, update, delete) with SHA-256 dedup
 8. Implement FTS5 keyword search with Porter stemming
 9. Implement `SearchBuilder` fluent API
@@ -190,7 +190,7 @@ Candle embedding backend, brute-force vector search, and RRF hybrid merge. After
 - Mean pooling and L2 normalization (shared `pooling.rs`)
 - `NoopBackend` for testing
 - `FallbackBackend` wrapping `Option<Box<dyn EmbeddingBackend>>`
-- Model auto-download via hf-hub, cached at `~/.cache/mindcore/models/`
+- Model auto-download via hf-hub, cached at `~/.cache/femind/models/`
 - `from_path()` constructor for offline/bundled models
 - `memory_vectors` table (embedding BLOB, model_name, dimensions, content_hash)
 - Brute-force dot product vector scan
@@ -258,7 +258,7 @@ Temporal validity, time-aware query expansion, two-tier memory, similarity dedup
 **Deliverables:**
 - Temporal validity: `valid_from`/`valid_until` on MemoryRecord, `.valid_at()` on SearchBuilder
 - Time-aware query expansion (`query_expand.rs`) — temporal expressions to date filters
-- Two-tier memory: global (`~/.mindcore/global.db`) + project (`./.mindcore/memory.db`)
+- Two-tier memory: global (`~/.femind/global.db`) + project (`./.femind/memory.db`)
 - Global/project merge with project scoring boost
 - Promotion logic (N projects → global)
 - `SimilarityDedup` consolidation strategy (requires vector-search)

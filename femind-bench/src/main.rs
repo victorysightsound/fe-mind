@@ -16,7 +16,7 @@ use dataset::{DatasetVariant, EvalResult};
 use indicatif::{ProgressBar, ProgressStyle};
 
 #[derive(Parser)]
-#[command(name = "mindcore-bench")]
+#[command(name = "femind-bench")]
 #[command(about = "LongMemEval benchmark harness for femind")]
 struct Cli {
     #[command(subcommand)]

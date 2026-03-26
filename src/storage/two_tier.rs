@@ -6,8 +6,8 @@ use crate::storage::Database;
 
 /// Two-tier memory database manager.
 ///
-/// Manages a global database (`~/.mindcore/global.db`) for cross-project memories
-/// and a project database (`./.mindcore/memory.db`) for project-specific memories.
+/// Manages a global database (`~/.femind/global.db`) for cross-project memories
+/// and a project database (`./.femind/memory.db`) for project-specific memories.
 ///
 /// Both databases share the same schema. Queries can target either or both,
 /// with project memories receiving a scoring boost.
@@ -21,8 +21,8 @@ pub struct TwoTierManager {
 impl TwoTierManager {
     /// Open or create both databases.
     ///
-    /// - `global_path`: path to the global database (typically `~/.mindcore/global.db`)
-    /// - `project_path`: path to the project database (typically `./.mindcore/memory.db`)
+    /// - `global_path`: path to the global database (typically `~/.femind/global.db`)
+    /// - `project_path`: path to the project database (typically `./.femind/memory.db`)
     pub fn open(global_path: impl AsRef<Path>, project_path: impl AsRef<Path>) -> Result<Self> {
         let global_path = global_path.as_ref();
         let project_path = project_path.as_ref();
@@ -72,12 +72,24 @@ impl TwoTierManager {
 
     /// Default global database path.
     pub fn default_global_path() -> PathBuf {
-        dirs_home().join(".mindcore").join("global.db")
+        let femind = dirs_home().join(".femind").join("global.db");
+        let legacy = dirs_home().join(".mindcore").join("global.db");
+        if legacy.exists() && !femind.exists() {
+            legacy
+        } else {
+            femind
+        }
     }
 
     /// Default project database path (relative to current directory).
     pub fn default_project_path() -> PathBuf {
-        PathBuf::from(".mindcore").join("memory.db")
+        let femind = PathBuf::from(".femind").join("memory.db");
+        let legacy = PathBuf::from(".mindcore").join("memory.db");
+        if legacy.exists() && !femind.exists() {
+            legacy
+        } else {
+            femind
+        }
     }
 }
 
@@ -150,7 +162,7 @@ mod tests {
         let global = TwoTierManager::default_global_path();
         let project = TwoTierManager::default_project_path();
 
-        assert!(global.to_string_lossy().contains(".mindcore"));
-        assert!(project.to_string_lossy().contains(".mindcore"));
+        assert!(global.to_string_lossy().contains(".femind"));
+        assert!(project.to_string_lossy().contains(".femind"));
     }
 }

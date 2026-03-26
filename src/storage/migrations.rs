@@ -27,7 +27,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if version > CURRENT_VERSION {
         return Err(FemindError::Migration(format!(
             "database schema version ({version}) is newer than this build supports ({CURRENT_VERSION}). \
-             Upgrade mindcore to open this database."
+             Upgrade femind to open this database."
         )));
     }
 
@@ -41,7 +41,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 /// Create the metadata table if it doesn't exist.
 fn create_meta_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS mindcore_meta (
+        "CREATE TABLE IF NOT EXISTS femind_meta (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );",
@@ -49,27 +49,50 @@ fn create_meta_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Get the current schema version (0 if no version set = fresh database).
-fn get_version(conn: &Connection) -> Result<u32> {
-    let result = conn.query_row(
-        "SELECT value FROM mindcore_meta WHERE key = 'schema_version'",
-        [],
-        |row| row.get::<_, String>(0),
-    );
+fn table_exists(conn: &Connection, table_name: &str) -> Result<bool> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table_name],
+        |row| row.get(0),
+    )?;
+    Ok(exists > 0)
+}
+
+fn read_version_from_table(conn: &Connection, table_name: &str) -> Result<Option<u32>> {
+    if !table_exists(conn, table_name)? {
+        return Ok(None);
+    }
+
+    let query = format!("SELECT value FROM {table_name} WHERE key = 'schema_version'");
+    let result = conn.query_row(&query, [], |row| row.get::<_, String>(0));
 
     match result {
         Ok(v) => v
             .parse::<u32>()
+            .map(Some)
             .map_err(|e| FemindError::Migration(format!("invalid schema version '{v}': {e}"))),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Get the current schema version (0 if no version set = fresh database).
+fn get_version(conn: &Connection) -> Result<u32> {
+    if let Some(version) = read_version_from_table(conn, "femind_meta")? {
+        return Ok(version);
+    }
+
+    if let Some(version) = read_version_from_table(conn, "mindcore_meta")? {
+        return Ok(version);
+    }
+
+    Ok(0)
 }
 
 /// Set the schema version.
 fn set_version(conn: &Connection, version: u32) -> Result<()> {
     conn.execute(
-        "INSERT OR REPLACE INTO mindcore_meta (key, value) VALUES ('schema_version', ?1)",
+        "INSERT OR REPLACE INTO femind_meta (key, value) VALUES ('schema_version', ?1)",
         [version.to_string()],
     )?;
     Ok(())
@@ -142,12 +165,25 @@ mod tests {
 
         let count: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='mindcore_meta'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='femind_meta'",
                 [],
                 |row| row.get(0),
             )
             .expect("query failed");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn migrate_reads_legacy_meta_table() {
+        let conn = Connection::open_in_memory().expect("open failed");
+        conn.execute_batch(
+            "CREATE TABLE mindcore_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO mindcore_meta (key, value) VALUES ('schema_version', '1');",
+        )
+        .expect("legacy meta table");
+
+        let version = get_version(&conn).expect("get_version failed");
+        assert_eq!(version, 1);
     }
 
     #[test]

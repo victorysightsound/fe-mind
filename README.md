@@ -14,7 +14,7 @@ Handles persistent storage, keyword search (FTS5), vector search (candle), hybri
 
 ## Status
 
-The local crate and repo are now `femind` / `fe-mind`. The published crates.io release is still `mindcore` v0.2.0 until the rename is published there. Non-LLM verification is currently green:
+The local crate and repo are now `femind` / `fe-mind`. The package rename is complete locally, and publication work is the remaining external packaging step. Non-LLM verification is currently green:
 
 - `cargo test`
 - `cargo test --features full`

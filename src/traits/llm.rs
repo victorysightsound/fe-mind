@@ -1,6 +1,6 @@
 //! LLM callback trait — pluggable interface for any language model provider.
 //!
-//! Consumers implement this trait to provide LLM capabilities to mindcore.
+//! Consumers implement this trait to provide LLM capabilities to femind.
 //! Used for fact extraction, consolidation, evolution, and query decomposition.
 //!
 //! femind defines the prompts and logic; consumers provide the transport.
@@ -31,7 +31,7 @@ use crate::error::Result;
 pub trait LlmCallback: Send + Sync {
     /// Generate a text response from a prompt.
     ///
-    /// - `prompt`: The full prompt text (mindcore crafts this internally)
+    /// - `prompt`: The full prompt text (femind crafts this internally)
     /// - `max_tokens`: Maximum response length hint (provider may ignore)
     ///
     /// Returns the generated text, or an error if the LLM call fails.

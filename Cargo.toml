@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "mindcore-bench"]
+members = [".", "femind-bench"]
 
 [package]
 name = "femind"

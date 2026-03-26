@@ -10,7 +10,7 @@ pub fn data_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home)
         .join(".cache")
-        .join("mindcore-bench")
+        .join("femind-bench")
         .join("data")
 }
 

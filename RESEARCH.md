@@ -514,7 +514,7 @@ A generic approach lets each project define its own struct, implement `MemoryRec
 **Alternatives Considered:**
 - Runtime feature detection (check if candle works, fall back)
 - Plugin system (dynamic loading)
-- Separate crates (mindcore-fts, mindcore-vector, mindcore-graph)
+- Separate crates (femind-fts, femind-vector, femind-graph)
 
 **Rationale:** Feature flags have zero runtime cost when disabled. A project that only needs FTS5 compiles in 15 seconds and adds ~2MB. Separate crates would create dependency management overhead. Runtime detection adds complexity. The `FallbackBackend` provides runtime graceful degradation for the vector search case specifically.
 

@@ -2,15 +2,15 @@
 
 This document records key architectural and design decisions for femind.
 
-Decisions 001-007 originated during initial research (2026-03-16) and were carried forward when the project was still named `mindcore`. Historical entries keep that older name when it is part of the original decision record.
+Decisions 001-007 originated during initial research (2026-03-16) and were carried forward into the current femind release line.
 
 ---
 
-## Decision 001: MindCore Shared Memory Engine
+## Decision 001: femind Shared Memory Engine
 
 **Date:** 2026-03-16
 
-**Decision:** Create a standalone Rust crate (MindCore) providing pluggable, feature-gated persistent memory for AI agent applications.
+**Decision:** Create a standalone Rust crate (`femind`) providing pluggable, feature-gated persistent memory for AI agent applications.
 
 **Context:** Multiple AI agent projects need persistent memory with search, scoring, and decay, yet the Rust ecosystem has no standalone crate for this. Research into Mem0, OMEGA, Zep/Graphiti, and MemOS confirms the patterns are converging industry-wide.
 
@@ -21,8 +21,8 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - Every component is backed by published research or established open-source practice
 
 **Consequences:**
-- New standalone crate: `mindcore`
-- Any Rust project can depend on mindcore for persistent agent memory
+- New standalone crate: `femind`
+- Any Rust project can depend on femind for persistent agent memory
 - See `ARCHITECTURE.md` for full specification
 
 ---
@@ -179,7 +179,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - 5-15% overhead on I/O operations, negligible for agent memory workloads
 - rusqlite has first-class support via `bundled-sqlcipher` and `bundled-sqlcipher-vendored-openssl`
 - BSD-3-Clause license, battle-tested (Signal, Mozilla, Adobe)
-- Consumer provides the key — MindCore doesn't manage key storage
+- Consumer provides the key — femind doesn't manage key storage
 
 **Consequences:**
 - Feature-gated behind `encryption` (replaces bundled SQLite with bundled SQLCipher)
@@ -196,17 +196,17 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Target LongMemEval as primary benchmark, with MemoryAgentBench and AMA-Bench as secondary targets. Ship benchmark harness as a separate workspace member.
 
-**Context:** LongMemEval (ICLR 2025) is the de facto standard — 500 questions testing 5 core memory abilities. OMEGA claims 95.4% (marketing) but their own repo shows 76.8%. Hindsight scores 91.4%. MindCore achieved 95.6% on LongMemEval Oracle.
+**Context:** LongMemEval (ICLR 2025) is the de facto standard — 500 questions testing 5 core memory abilities. OMEGA claims 95.4% (marketing) but their own repo shows 76.8%. Hindsight scores 91.4%. femind achieved 95.6% on LongMemEval Oracle.
 
 **Rationale:**
 - LongMemEval is the standard leaderboard that competitors report against
 - MemoryAgentBench (ICLR 2026) tests selective forgetting — directly validates ACT-R decay
-- AMA-Bench tests agentic (non-dialogue) applications — MindCore's primary use case
+- AMA-Bench tests agentic (non-dialogue) applications — femind's primary use case
 - Benchmark harness must be separate from the library (large data, LLM judge dependency)
 - Three specific additions drive the score from 88-93% to 93-96%: fact extraction at ingest, time-aware query expansion, exhaustive retrieval mode
 
 **Consequences:**
-- `mindcore-bench/` workspace member with per-benchmark runners
+- `femind-bench/` workspace member with per-benchmark runners
 - Evaluation uses GPT-4o judge (LongMemEval standard)
 - Score targets guide feature prioritization
 
@@ -243,13 +243,13 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Support WASM compilation with a hybrid architecture — SQLite+FTS5 in browser WASM, embeddings server-side, with full-WASM candle as opt-in.
 
-**Context:** rusqlite has official WASM support since v0.38.0 (Dec 2025) via `sqlite-wasm-rs`. Candle has a working all-MiniLM-L6-v2 WASM demo. No known project combines rusqlite + FTS5 + candle in WASM — MindCore would be novel.
+**Context:** rusqlite has official WASM support since v0.38.0 (Dec 2025) via `sqlite-wasm-rs`. Candle has a working all-MiniLM-L6-v2 WASM demo. No known project combines rusqlite + FTS5 + candle in WASM — femind would be novel.
 
 **Rationale:**
 - All pieces work today: rusqlite WASM, FTS5 enabled in WASM build, OPFS/IndexedDB persistence
 - Hybrid recommended: SQLite+FTS5 in Web Worker (fast local queries, offline), embeddings via server API (native speed)
 - Full-WASM candle is opt-in for offline/privacy use cases (~300-500MB browser memory)
-- Same MindCore API surface via `cfg(target_family = "wasm")` conditional compilation
+- Same femind API surface via `cfg(target_family = "wasm")` conditional compilation
 - Aligns with user's Solid.js web stack
 
 **Consequences:**
@@ -335,13 +335,13 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Define a single `LlmCallback` trait for all LLM-assisted operations. Consumer provides the implementation, controlling model choice, cost, and retry logic.
 
-**Context:** Multiple features need LLM assistance: consolidation (LLMConsolidation), fact extraction (LlmIngest), memory evolution, and reflection. MindCore should never call an LLM directly — the consumer controls cost.
+**Context:** Multiple features need LLM assistance: consolidation (LLMConsolidation), fact extraction (LlmIngest), memory evolution, and reflection. femind should never call an LLM directly — the consumer controls cost.
 
 **Rationale:**
 - Single trait avoids proliferation of callback types
 - Consumer decides model (Claude, GPT, local Llama), token budget, retry behavior
 - `Option<&dyn LlmCallback>` — when None, all features degrade gracefully to non-LLM paths
-- Library, not framework — MindCore provides operations, consumer provides intelligence
+- Library, not framework — femind provides operations, consumer provides intelligence
 
 **Consequences:**
 - `LlmCallback` trait with `complete(prompt: &str) -> Result<String>`
@@ -354,7 +354,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Date:** 2026-03-17 (updated: 2026-03-18 — replaced fastembed with custom candle)
 
-**Decision:** Build a custom embedding module (~100-130 lines) inside MindCore using candle-transformers' native ModernBERT implementation. Drop fastembed-rs entirely.
+**Decision:** Build a custom embedding module (~100-130 lines) inside femind using candle-transformers' native ModernBERT implementation. Drop fastembed-rs entirely.
 
 **Context:** fastembed-rs stability assessment (March 2026) revealed: single maintainer (Anush008/Qdrant, bus factor 1), pinned to pre-release `ort =2.0.0-rc.11`, ships 50-150MB C++ ONNX Runtime shared library, uses `anyhow` in library crate, yearly breaking major versions. candle-transformers already has native ModernBERT support (PR #2791, merged March 2025), and all-MiniLM-L6-v2 ships safetensors weights that candle loads directly.
 
@@ -374,8 +374,8 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - No more dual-model split — same vectors everywhere (native, WASM, API)
 - Cross-model vectors are isolated: different models produce incomparable embedding spaces despite same dimensionality — see Decision 020
 - Dependencies: `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`, `hf-hub`
-- Model cached at `~/.cache/mindcore/models/`, auto-downloaded on first use
-- No `FastembedBackend` in MindCore — removed from codebase
+- Model cached at `~/.cache/femind/models/`, auto-downloaded on first use
+- No `FastembedBackend` in femind — removed from codebase
 
 ---
 
@@ -488,17 +488,17 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - `FemindError::ModelMismatch` enables clear messaging when vector search falls back to FTS5
 
 **Consequences:**
-- `mindcore::Result<T>` type alias used throughout the public API
+- `femind::Result<T>` type alias used throughout the public API
 - Error variants: `Database`, `Embedding`, `ModelNotAvailable`, `ModelMismatch`, `Serialization`, `Migration`, `Encryption`, `Consolidation`, `LlmCallback`
 - Feature-gated variants only exist when their feature is enabled
 
 ---
 
-## Decision 022: Crate Name — mindcore
+## Decision 022: Initial Public Naming Direction
 
 **Date:** 2026-03-19
 
-**Decision:** Name the crate `mindcore`. Reserved on crates.io and GitHub.
+**Decision:** Use a temporary public package and repository reservation before the suite naming settled on `femind`.
 
 **Context:** Evaluated 25+ candidate names across crates.io, npm, PyPI, and GitHub. Key criteria: available on crates.io, short and memorable, low GitHub namespace collision, evocative of the library's purpose.
 
@@ -506,14 +506,14 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - Available on all three package registries (crates.io, npm, PyPI) at time of evaluation
 - Short (8 chars), easy to type, clearly communicates "cognitive/mind + core engine"
 - Minimal GitHub presence (58 repos, top has 3 stars — all abandoned/tiny)
-- Strong alternatives (`cognimem`, `cogmem`, `mnemic`) were also clean but `mindcore` best communicates the crate's purpose
+- Strong alternatives (`cognimem`, `cogmem`, `mnemic`) were also clean but a direct cognitive-memory name communicated the crate's purpose best at that stage
 
 **Consequences:**
-- crates.io: v0.0.1 placeholder published under `mindcore`
-- GitHub: `victorysightsound/mindcore` repository created
-- npm: blocked by `mind-core` similarity — use scoped package if needed
+- crates.io: placeholder publication reserved the namespace before the suite rename
+- GitHub: initial repository was created before the suite rename
+- npm: a scoped package name is still the likely path if JS bindings ship
 - PyPI: deferred until Python bindings are built
-- All documentation renamed from `memcore` → `mindcore`
+- All documentation moved off the earlier `memcore` draft name at that stage
 
 ---
 
@@ -521,9 +521,9 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 ### Q1: Crate Naming and Publishing
 
-**Status:** Decided — `mindcore` (Decision 022)
+**Status:** Superseded — renamed to `femind` for suite alignment
 
-Name `mindcore` selected and reserved on crates.io (v0.0.1 placeholder published 2026-03-19) and GitHub (victorysightsound/mindcore). npm blocked by name similarity to existing `mind-core` package — will use scoped `@victorysightsound/mindcore` if JS/WASM bindings are published. PyPI deferred — only relevant for Python bindings via PyO3.
+The project started under an earlier temporary public name, with placeholder publication and repository setup done before the suite naming settled. The active suite name is now `femind`. If JS/WASM bindings are published, use a scoped package name aligned with `femind`.
 
 ### Q2: FTS5 + Hybrid Search Phasing
 
