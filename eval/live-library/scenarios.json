@@ -466,5 +466,218 @@
         "expected_behavior": "abstain"
       }
     ]
+  },
+  {
+    "id": "live-library-runner-and-artifacts",
+    "title": "Large library runner and artifact paths",
+    "category": "procedural-artifacts",
+    "goal": "Stress exact path and runner-name retrieval for the larger real-world library.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "eval/live-library/README.md",
+        "memory_type": "procedural",
+        "text": "The larger real-world validation library is run with scripts/run-live-library.sh."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "eval/live-library/README.md",
+        "memory_type": "procedural",
+        "text": "The standard live-library run uses all mode, exact vector mode, the api extraction backend, openai/gpt-oss-120b, and writes its summary to target/live-library/live-library-exact.json."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What script runs the larger real-world library?",
+        "expected_answer": "The larger real-world library is run with scripts/run-live-library.sh."
+      },
+      {
+        "query": "What summary file does the standard live-library run write?",
+        "expected_answer": "The standard live-library run writes to target/live-library/live-library-exact.json."
+      },
+      {
+        "query": "What vector mode does the standard live-library run use?",
+        "expected_answer": "The standard live-library run uses exact vector mode."
+      },
+      {
+        "query": "Does the standard live-library run write to target/live-library/live-library-ann.json by default?",
+        "expected_answer": "No. The standard live-library run writes to target/live-library/live-library-exact.json by default."
+      }
+    ],
+    "abstention_checks": []
+  },
+  {
+    "id": "cost-tracking-limitations",
+    "title": "Provider cost tracking limitations",
+    "category": "cost-tracking",
+    "goal": "Verify the system can state what the current run summaries capture and what they do not.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "eval/live-library/README.md",
+        "memory_type": "semantic",
+        "text": "Live-library summaries include scenario path, scenario count, retrieval mode, vector mode, embedding model, extraction backend, extraction model, duration, passed checks, total checks, and pass rate."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "eval/live-library/README.md",
+        "memory_type": "semantic",
+        "text": "The current runner does not capture provider token-usage telemetry yet, so cost should be tracked as a provider-price snapshot rather than as an exact per-run bill."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What does the current live-library summary record about a run?",
+        "expected_answer": "The current live-library summary records mode, vector mode, models, duration, and pass counts."
+      },
+      {
+        "query": "Does the current runner capture exact provider token-usage telemetry?",
+        "expected_answer": "No. The current runner does not capture exact provider token-usage telemetry yet."
+      },
+      {
+        "query": "How should cost be tracked for now?",
+        "expected_answer": "Cost should be tracked as a provider-price snapshot rather than as an exact per-run bill."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact dollar cost did the last live-library run incur?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "feature-flag-boundaries",
+    "title": "Feature flag boundaries and exclusions",
+    "category": "feature-flags",
+    "goal": "Test combined-capability negatives and exact feature-boundary questions.",
+    "records": [
+      {
+        "timestamp": "2026-03-20T00:00:00Z",
+        "source": "ARCHITECTURE.md",
+        "memory_type": "semantic",
+        "text": "Compile-time feature flags include api-embeddings for the DeepInfra embedding API, api-llm for the chat completions API, ann for HNSW approximate nearest neighbor, and full for everything except encryption and mcp-server."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What does the full feature set include?",
+        "expected_answer": "The full feature set includes everything except encryption and mcp-server."
+      },
+      {
+        "query": "Does the full feature set include encryption and mcp-server together?",
+        "expected_answer": "The full feature set includes everything except encryption and mcp-server."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact feature flag enables only SQLCipher encryption?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "stale-versus-current-large-library-baseline",
+    "title": "Stale versus current large-library baseline",
+    "category": "current-vs-superseded",
+    "goal": "Make sure the system prefers the current large-library result over an older intermediate note.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T12:00:00Z",
+        "source": "maintainer-note.md",
+        "memory_type": "episodic",
+        "text": "Intermediate note: the larger real-world library currently passes 36/44 in both all+exact and all+ann, with misses concentrated in abstention behavior."
+      },
+      {
+        "timestamp": "2026-03-26T15:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "Current larger real-world baseline: the live-library corpus now passes 44/44 in both all+exact and all+ann."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the current large-library baseline for exact and ann?",
+        "expected_answer": "The current large-library baseline is 44/44 in both all+exact and all+ann."
+      },
+      {
+        "query": "Is 36/44 still the current large-library baseline?",
+        "expected_answer": "No. The current large-library baseline is 44/44."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact minute was the 36/44 intermediate note recorded?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "rough-note-release-and-cost-extraction",
+    "title": "Rough note extraction for release and cost caveats",
+    "category": "real-world-extraction",
+    "goal": "Stress extraction on rough notes with mixed validation, release, and cost-tracking caveats.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "scratchpad.txt",
+        "memory_type": "episodic",
+        "text": "scratchpad: 0.2.0 is already out, exact + ann both 44/44 on the big live library, don't write that we have true provider cost accounting yet because runner only tracks duration/pass counts for now, next real benchmark step is recallbench only after this bigger corpus stays stable."
+      }
+    ],
+    "extraction_checks": [
+      {
+        "expected_fact": "Version 0.2.0 is already released."
+      },
+      {
+        "expected_fact": "The large live-library corpus passes 44/44 in both exact and ann mode."
+      },
+      {
+        "expected_fact": "The current runner does not yet provide true provider cost accounting."
+      },
+      {
+        "expected_fact": "RecallBench should come only after the larger corpus remains stable."
+      }
+    ]
+  },
+  {
+    "id": "release-date-and-version-traps",
+    "title": "Release date and version traps",
+    "category": "release-details",
+    "goal": "Exercise exact date/version retrieval and unsupported finer-grained detail questions.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "CHANGELOG.md",
+        "memory_type": "episodic",
+        "text": "Version 0.2.0 was released on 2026-03-26."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "The earlier mindcore package line remains legacy only, while femind is the active crate line."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What version was released on 2026-03-26?",
+        "expected_answer": "Version 0.2.0 was released on 2026-03-26."
+      },
+      {
+        "query": "Which crate line is active now?",
+        "expected_answer": "femind is the active crate line."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact hour was version 0.2.0 published?",
+        "expected_behavior": "abstain"
+      },
+      {
+        "query": "What version was released on 2026-03-25?",
+        "expected_behavior": "abstain"
+      }
+    ]
   }
 ]

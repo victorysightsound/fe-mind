@@ -31,6 +31,13 @@ This corpus should stay focused on:
 - extraction from rough notes
 - abstention on unsupported or unknown details
 
+Current size and baseline:
+
+- 18 scenarios
+- 66 total checks
+- `all` + `exact`: `66/66`
+- `all` + `ann`: `66/66`
+
 ## Standard Run
 
 ```bash

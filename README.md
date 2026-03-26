@@ -31,7 +31,8 @@ The practical live-validation path is now established and repeatable:
 - retrieval-only practical eval in `ann` mode currently passes `9/9`
 - broader live-usage sample built from actual project docs currently passes `11/11`
 - larger real-world follow-up library now lives under `eval/live-library/`
-- larger real-world library currently passes `44/44` in both `all` + `exact` and `all` + `ann`
+- larger real-world library now covers 18 scenarios and 66 checks
+- larger real-world library currently passes `66/66` in both `all` + `exact` and `all` + `ann`
 - standard local runner: `scripts/run-practical-eval.sh`
 - larger real-world runner: `scripts/run-live-library.sh`
 

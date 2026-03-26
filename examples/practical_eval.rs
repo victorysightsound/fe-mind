@@ -735,6 +735,9 @@ mod app {
             "happen" | "performed" => "run",
             "built" | "build" => "build",
             "preferred" | "prefer" => "prefer",
+            "bigger" => "large",
+            "larger" => "large",
+            "remain" | "remains" | "remaining" | "stay" | "stays" | "staying" => "remain",
             "superseded" => "superseded",
             other => other,
         };

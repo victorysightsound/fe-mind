@@ -637,7 +637,8 @@ fn query_requires_strict_grounding(query: &str) -> bool {
             "exact" | "precise" | "specific" | "total" | "cost" | "token" | "tokens"
                 | "price" | "version" | "number" | "id" | "first" | "second"
                 | "third" | "fourth" | "fifth" | "reserved" | "removed"
-                | "remove" | "failed" | "fail"
+                | "remove" | "failed" | "fail" | "hour" | "minute"
+                | "day" | "date" | "month" | "year" | "dollar"
         )
     });
     let asks_how_many = tokens.windows(2).any(|pair| pair == ["how", "many"]);
@@ -647,7 +648,7 @@ fn query_requires_strict_grounding(query: &str) -> bool {
 
 fn lexical_grounding_ok(query: &str, text: &str) -> bool {
     if query_asks_for_combined_capability(query) && text_implies_exclusion(text) {
-        return false;
+        return query_is_yes_no(query);
     }
 
     let query_tokens = meaning_tokens(query);
@@ -668,7 +669,25 @@ fn lexical_grounding_ok(query: &str, text: &str) -> bool {
         .count();
     let recall = overlap as f32 / query_tokens.len() as f32;
 
+    let query_numeric = numeric_tokens(query);
+    let text_numeric = numeric_tokens(text);
+    let query_units = unit_tokens(query);
+
     if query_requires_strict_grounding(query) && !detail_tokens(query).is_empty() && detail_overlap == 0 {
+        return false;
+    }
+
+    if query_requires_strict_grounding(query)
+        && !query_units.is_empty()
+        && !query_units.iter().all(|token| text_tokens.contains(token))
+    {
+        return false;
+    }
+
+    if query_requires_strict_grounding(query)
+        && !query_numeric.is_empty()
+        && !query_numeric.iter().all(|token| text_numeric.contains(token))
+    {
         return false;
     }
 
@@ -737,6 +756,13 @@ fn detail_tokens(value: &str) -> Vec<String> {
                     | "removed"
                     | "fail"
                     | "failed"
+                    | "hour"
+                    | "minute"
+                    | "day"
+                    | "date"
+                    | "month"
+                    | "year"
+                    | "dollar"
                     | "emotion"
                     | "publish"
                     | "published"
@@ -746,10 +772,38 @@ fn detail_tokens(value: &str) -> Vec<String> {
         .collect()
 }
 
+fn numeric_tokens(value: &str) -> std::collections::BTreeSet<String> {
+    normalize_text(value)
+        .split_whitespace()
+        .filter(|token| token.chars().any(|c| c.is_ascii_digit()))
+        .map(|token| token.to_string())
+        .collect()
+}
+
+fn unit_tokens(value: &str) -> std::collections::BTreeSet<String> {
+    meaning_tokens(value)
+        .into_iter()
+        .filter(|token| {
+            matches!(
+                token.as_str(),
+                "hour" | "minute" | "day" | "date" | "month" | "year" | "dollar"
+            )
+        })
+        .collect()
+}
+
 fn query_asks_for_combined_capability(query: &str) -> bool {
     let normalized = normalize_text(query);
     let tokens: Vec<_> = normalized.split_whitespace().collect();
     tokens.contains(&"together") || tokens.contains(&"both")
+}
+
+fn query_is_yes_no(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    matches!(
+        normalized.split_whitespace().next(),
+        Some("is" | "are" | "was" | "were" | "does" | "do" | "did" | "can" | "could" | "should" | "would")
+    )
 }
 
 fn text_implies_exclusion(text: &str) -> bool {
@@ -954,6 +1008,14 @@ mod tests {
     }
 
     #[test]
+    fn lexical_grounding_accepts_yes_no_combination_query_with_exclusion_evidence() {
+        let query = "Does the full feature set include encryption and mcp-server together?";
+        let supporting_hit = "Compile-time feature flags include api-embeddings for the DeepInfra embedding API, api-llm for the chat completions API, ann for HNSW approximate nearest neighbor, and full for everything except encryption and mcp-server.";
+
+        assert!(lexical_grounding_ok(query, supporting_hit));
+    }
+
+    #[test]
     fn lexical_grounding_rejects_unsupported_ordinal_detail_query() {
         let query = "What fourth cognitive memory type is reserved for emotions?";
         let weak_hit = "The optimized memory model uses three cognitive memory types: episodic, semantic, and procedural.";
@@ -966,6 +1028,24 @@ mod tests {
     fn lexical_grounding_rejects_removed_candidate_query_without_removal_evidence() {
         let query = "Did Nemotron fail the broader live-usage sample and get removed from the candidate set?";
         let weak_hit = "The broader live-usage sample passes 11/11 across four tested extraction models: openai/gpt-oss-120b, zai-org/GLM-4.7-Flash, gpt-5.4-mini, and gpt-5.1-codex-mini.";
+
+        assert!(query_requires_strict_grounding(query));
+        assert!(!lexical_grounding_ok(query, weak_hit));
+    }
+
+    #[test]
+    fn lexical_grounding_rejects_exact_hour_without_hour_detail() {
+        let query = "What exact hour was version 0.2.0 published?";
+        let weak_hit = "Version 0.2.0 was released on 2026-03-26.";
+
+        assert!(query_requires_strict_grounding(query));
+        assert!(!lexical_grounding_ok(query, weak_hit));
+    }
+
+    #[test]
+    fn lexical_grounding_rejects_mismatched_numeric_date_detail() {
+        let query = "What version was released on 2026-03-25?";
+        let weak_hit = "Version 0.2.0 was released on 2026-03-26.";
 
         assert!(query_requires_strict_grounding(query));
         assert!(!lexical_grounding_ok(query, weak_hit));

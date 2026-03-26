@@ -167,8 +167,9 @@ benchmark sweep through RecallBench.
 
 Current larger-library baseline:
 
-- `all` + `exact` currently passes `44/44`
-- `all` + `ann` currently passes `44/44`
+- the live-library corpus currently includes 18 scenarios and 66 checks
+- `all` + `exact` currently passes `66/66`
+- `all` + `ann` currently passes `66/66`
 - the exact and ANN results currently match on the full larger corpus
 - summary artifacts now include stable run metadata for backend, model, vector
   mode, duration, pass counts, and pass rate
