@@ -30,6 +30,12 @@ The practical live-validation path is now established and repeatable:
 - broader live-usage sample built from actual project docs currently passes `11/11`
 - standard local runner: `scripts/run-practical-eval.sh`
 
+## Migration
+
+`femind` is the successor to the earlier `mindcore` crate and repository.
+The published `mindcore` crate remains the legacy package line; new work and
+future releases should target `femind`.
+
 The next remaining work is release packaging and publication. See:
 
 - `ARCHITECTURE.md` — full crate structure and API design
