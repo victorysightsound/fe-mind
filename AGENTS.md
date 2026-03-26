@@ -24,7 +24,7 @@ session-context
 | `ARCHITECTURE.md` | Full crate structure and API design |
 | `RESEARCH.md` | Landscape analysis, academic foundations, specification |
 | `DECISIONS.md` | Architectural decisions log |
-| `.docs/femind_spec.db` | Authoritative repo-local architecture and DIAL planning database |
+| `.docs/femind_spec.db` | Authoritative repo-local architecture and implementation database |
 | `research/` | Competitive landscape research |
 
 ---
@@ -91,5 +91,5 @@ task done <id>
 ## External-Facing Writing
 
 - Keep README files, architecture docs, changelogs, commit messages, PR text, and code comments in normal developer voice.
-- Do not describe implementation work in terms of agent runs, autonomous loops, model names, or internal AI workflow mechanics.
+- Do not describe implementation work in process language that reads like internal automation or prompt transcripts.
 - Mention AI, LLMs, embeddings, or memory orchestration only when they are part of the actual femind product surface being documented.
