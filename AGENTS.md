@@ -28,6 +28,7 @@ session-context
 | `.docs/femind_spec.db` | Authoritative repo-local architecture and implementation database |
 | `research/` | Competitive landscape research |
 | `eval/practical/` | Curated real-world validation scenarios |
+| `eval/live-library/` | Larger real-world follow-up validation library |
 
 ---
 
@@ -87,7 +88,7 @@ task done <id>
 - Work from the current specs and task list; keep changes scoped and validate them before committing.
 - Prefer local compile, lint, and non-network test paths first.
 - Do not run real CLI/API LLM validation or benchmark paths without explicit user approval.
-- Treat `eval/practical/` as the primary live-validation target before larger benchmark work.
+- Treat `eval/practical/` as the primary live-validation target and `eval/live-library/` as the next real-world layer before larger benchmark work.
 
 ---
 

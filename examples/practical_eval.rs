@@ -5,6 +5,7 @@ mod app {
     use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::time::Instant;
 
     use chrono::{DateTime, Utc};
     use femind::embeddings::{ApiBackend, EmbeddingBackend};
@@ -305,9 +306,33 @@ mod app {
         abstention: Vec<CheckReport>,
     }
 
+    #[derive(Debug, Serialize)]
+    struct RunMetadata {
+        generated_at: DateTime<Utc>,
+        scenarios_path: String,
+        scenario_count: usize,
+        mode: String,
+        vector_mode: String,
+        top_k: usize,
+        embedding_model: String,
+        extract_backend: String,
+        extraction_model: String,
+        duration_ms: u128,
+    }
+
+    #[derive(Debug, Serialize)]
+    struct RunSummary {
+        metadata: RunMetadata,
+        total_checks: usize,
+        passed_checks: usize,
+        pass_rate: f32,
+        reports: Vec<ScenarioReport>,
+    }
+
     pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let config = Config::from_args().map_err(|e| format!("argument error: {e}"))?;
         let scenarios = load_scenarios(&config.scenarios_path)?;
+        let started_at = Instant::now();
 
         let api_key = resolve_api_key(&config)?;
         let embedder =
@@ -354,11 +379,35 @@ mod app {
 
         println!("summary: {passed_checks}/{total_checks} checks passed");
 
+        let duration_ms = started_at.elapsed().as_millis();
+        let summary = RunSummary {
+            metadata: RunMetadata {
+                generated_at: Utc::now(),
+                scenarios_path: config.scenarios_path.display().to_string(),
+                scenario_count: scenarios.len(),
+                mode: mode_name(config.mode).to_string(),
+                vector_mode: config.vector_mode.to_string(),
+                top_k: config.top_k,
+                embedding_model: embedder.model_name().to_string(),
+                extract_backend: config.extraction_backend.name().to_string(),
+                extraction_model: extractor.model_name().to_string(),
+                duration_ms,
+            },
+            total_checks,
+            passed_checks,
+            pass_rate: if total_checks == 0 {
+                0.0
+            } else {
+                passed_checks as f32 / total_checks as f32
+            },
+            reports,
+        };
+
         if let Some(path) = config.summary_path {
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::write(&path, serde_json::to_vec_pretty(&reports)?)?;
+            fs::write(&path, serde_json::to_vec_pretty(&summary)?)?;
             println!("summary_file: {}", path.display());
         }
 

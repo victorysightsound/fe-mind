@@ -7,8 +7,10 @@ It is intentionally limited to real CLI/API model calls and benchmark paths that
 were not exercised during the local non-LLM stabilization pass.
 
 The practical validation set in `eval/practical/` is the primary real-world
-check for this phase. Benchmark datasets are secondary and should only be used
-after the practical eval set is directionally strong.
+check for this phase. The larger real-world library in `eval/live-library/`
+is the next follow-up layer after the practical set stabilizes. Benchmark
+datasets are secondary and should only be used after the real-world sets are
+directionally strong.
 
 ## Preconditions
 
@@ -90,6 +92,22 @@ Stop after the small-sample pass and report:
 
 Any LongMemEval or larger benchmark run requires a separate explicit approval.
 
+## Phase 5: Larger Real-World Library
+
+Before larger benchmark work, run the broader real-world library:
+
+```bash
+scripts/run-live-library.sh
+```
+
+Goals:
+
+- verify retrieval quality on a larger realistic corpus
+- compare exact and ANN behavior on the same broader set
+- track quality and latency over time with stable summary metadata
+- validate provider defaults on material that is larger than the curated
+  practical sample but still easy to inspect by hand
+
 ## Output Expectations
 
 For each approved live run, record:
@@ -115,5 +133,7 @@ As of 2026-03-26:
 - retrieval-only practical validation in `exact` mode passes `9/9`
 - retrieval-only practical validation in `ann` mode passes `9/9`
 - broader live-usage validation from actual project docs passes `11/11` across all four tested extraction models
+- the larger real-world library under `eval/live-library/` is the next follow-up validation layer before benchmark work
+- the larger real-world library currently passes `36/44` in both `all` + `exact` and `all` + `ann`, with the remaining misses concentrated in abstention behavior
 - the standard local live-validation path is `scripts/run-practical-eval.sh`
 - practical real-world eval design is defined in `PRACTICAL_EVAL.md`

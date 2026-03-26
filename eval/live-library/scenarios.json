@@ -1,0 +1,470 @@
+[
+  {
+    "id": "published-release-status",
+    "title": "Published crate and active package line",
+    "category": "release-status",
+    "goal": "Retrieve current release status and avoid falling back to stale rename-era wording.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "femind is the active crate and repository. The earlier mindcore crate remains the legacy package line, while new work and future releases target femind."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "CHANGELOG.md",
+        "memory_type": "episodic",
+        "text": "Version 0.2.0 was released on 2026-03-26 with the unified HTTP MCP endpoint, the tracked documentation databases, and the vault migration fix for legacy plaintext rows."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "Which crate line should new work target now?",
+        "expected_answer": "New work should target femind."
+      },
+      {
+        "query": "What happened to mindcore?",
+        "expected_answer": "mindcore remains the legacy package line."
+      },
+      {
+        "query": "What version was released on 2026-03-26?",
+        "expected_answer": "Version 0.2.0 was released on 2026-03-26."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact date was mindcore first published to crates.io?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memory-model-and-lifecycle",
+    "title": "Cognitive memory types and lifecycle",
+    "category": "architecture-memory-model",
+    "goal": "Verify retrieval across the intended cognitive memory model rather than flattened semantic-only memories.",
+    "records": [
+      {
+        "timestamp": "2026-03-20T00:00:00Z",
+        "source": "ARCHITECTURE.md",
+        "memory_type": "semantic",
+        "text": "The optimized memory model uses three cognitive memory types: episodic for events and sessions, semantic for durable facts and preferences, and procedural for workflows and how-to knowledge."
+      },
+      {
+        "timestamp": "2026-03-20T00:00:00Z",
+        "source": "ARCHITECTURE.md",
+        "memory_type": "semantic",
+        "text": "Memories move through working, long-term, and archive tiers based on importance and reuse instead of remaining in one flat bucket forever."
+      },
+      {
+        "timestamp": "2026-03-20T00:00:00Z",
+        "source": "DECISIONS.md",
+        "memory_type": "procedural",
+        "text": "Evaluation should preserve episodic, semantic, and procedural distinctions so retrieval reflects the architecture rather than a simplified all-semantic test harness."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What are the three cognitive memory types in femind?",
+        "expected_answer": "The three cognitive memory types are episodic, semantic, and procedural."
+      },
+      {
+        "query": "What is procedural memory used for?",
+        "expected_answer": "Procedural memory is used for workflows and how-to knowledge."
+      },
+      {
+        "query": "Does femind use one flat memory bucket?",
+        "expected_answer": "No, memories move through working, long-term, and archive tiers."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What fourth cognitive memory type is reserved for emotions?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "vector-modes-and-search",
+    "title": "Vector search modes and runtime behavior",
+    "category": "architecture-search",
+    "goal": "Verify exact, ann, and off mode behavior for natural-language retrieval questions.",
+    "records": [
+      {
+        "timestamp": "2026-03-20T00:00:00Z",
+        "source": "ARCHITECTURE.md",
+        "memory_type": "semantic",
+        "text": "Vector search modes: exact uses brute-force cosine similarity by default, ann uses HNSW via instant-distance with a shared in-memory index that rebuilds when stored vectors change, and off uses FTS5 keyword search only."
+      },
+      {
+        "timestamp": "2026-03-20T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "femind combines FTS5 keyword search, vector similarity, and hybrid retrieval with reciprocal rank fusion."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What does exact mode use in femind?",
+        "expected_answer": "Exact mode uses brute-force cosine similarity."
+      },
+      {
+        "query": "What does ann mode use?",
+        "expected_answer": "ann mode uses HNSW via instant-distance with a shared in-memory index."
+      },
+      {
+        "query": "What happens when vector search mode is off?",
+        "expected_answer": "off uses FTS5 keyword search only."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Does ann mode require a remote vector database?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "provider-defaults",
+    "title": "Provider defaults and fallbacks",
+    "category": "live-validation-providers",
+    "goal": "Retrieve the locked extraction defaults without mixing API and CLI lanes.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "Recommended API extraction default: DeepInfra openai/gpt-oss-120b."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "Recommended CLI extraction default: Codex CLI gpt-5.4-mini. Lower-cost CLI fallback: Codex CLI gpt-5.1-codex-mini."
+      },
+      {
+        "timestamp": "2026-03-18T00:00:00Z",
+        "source": "DECISIONS.md",
+        "memory_type": "semantic",
+        "text": "Use all-MiniLM-L6-v2 as the default embedding model on all targets because it compiles to WASM, runs faster on CPU, and is available on DeepInfra and other API providers."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the default API extraction model for femind?",
+        "expected_answer": "The default API extraction model is openai/gpt-oss-120b."
+      },
+      {
+        "query": "What is the default CLI extraction model?",
+        "expected_answer": "The default CLI extraction model is gpt-5.4-mini."
+      },
+      {
+        "query": "What is the lower-cost CLI fallback?",
+        "expected_answer": "The lower-cost CLI fallback is gpt-5.1-codex-mini."
+      },
+      {
+        "query": "What is the default embedding model?",
+        "expected_answer": "The default embedding model is all-MiniLM-L6-v2."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Is Llama 3.3 the locked default extraction model for femind?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "real-world-validation-order",
+    "title": "Validation order and benchmark position",
+    "category": "validation-strategy",
+    "goal": "Make sure larger benchmark work stays secondary to practical real-world validation.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "PRACTICAL_EVAL.md",
+        "memory_type": "procedural",
+        "text": "Validation order: practical eval scenarios first, then a small approved live validation pass, then fixes for real-world failures, then repeatable local regression checks, and only then secondary benchmark comparison if it is still useful."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "LIVE_VALIDATION.md",
+        "memory_type": "procedural",
+        "text": "Benchmark datasets are secondary and should only be used after the practical eval set is directionally strong."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What should happen before benchmark comparisons?",
+        "expected_answer": "Practical eval scenarios and real-world fixes should happen before benchmark comparisons."
+      },
+      {
+        "query": "Are benchmark datasets the primary design target?",
+        "expected_answer": "No, benchmark datasets are secondary."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Should LongMemEval be the first gating step before any practical evaluation?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "current-baselines",
+    "title": "Current practical and live-usage baselines",
+    "category": "validation-baselines",
+    "goal": "Retrieve the validated baselines without collapsing practical and larger-sample runs together.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "PRACTICAL_EVAL.md",
+        "memory_type": "semantic",
+        "text": "The current practical baseline is: extraction-only practical eval with openai/gpt-oss-120b passes 4/4, Codex CLI gpt-5.4-mini passes 4/4, Codex CLI gpt-5.1-codex-mini passes 4/4, retrieval-only exact passes 9/9, and retrieval-only ann passes 9/9."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "LIVE_VALIDATION.md",
+        "memory_type": "semantic",
+        "text": "The broader live-usage sample from actual project docs passes 11/11 across all four tested extraction models."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How is the practical retrieval exact baseline doing?",
+        "expected_answer": "The practical retrieval exact baseline passes 9/9."
+      },
+      {
+        "query": "How is ann doing on the practical set?",
+        "expected_answer": "The practical retrieval ann baseline passes 9/9."
+      },
+      {
+        "query": "How did the broader live-usage sample perform?",
+        "expected_answer": "The broader live-usage sample passes 11/11 across the four tested extraction models."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What was the exact prompt-token cost of the 11/11 live-usage run?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "maintainer-commands",
+    "title": "Standard maintainer commands",
+    "category": "procedural-maintenance",
+    "goal": "Test procedural retrieval for the commands maintainers should actually run.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "PRACTICAL_EVAL.md",
+        "memory_type": "procedural",
+        "text": "The primary live-validation entry point is scripts/run-practical-eval.sh."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "LIVE_VALIDATION.md",
+        "memory_type": "procedural",
+        "text": "The standard local live-validation path uses retrieval mode, exact vector mode, the api extraction backend, openai/gpt-oss-120b, and writes a summary artifact to target/practical-eval/retrieval-exact.json."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "procedural",
+        "text": "Non-LLM verification should include cargo test, cargo test --features full, and cargo clippy --all-targets --all-features -- -D warnings."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What script should a maintainer run for the standard live validation path?",
+        "expected_answer": "A maintainer should run scripts/run-practical-eval.sh."
+      },
+      {
+        "query": "What vector mode is used in the standard local live-validation path?",
+        "expected_answer": "The standard local path uses exact vector mode."
+      },
+      {
+        "query": "What are the standard non-LLM verification commands?",
+        "expected_answer": "The standard non-LLM verification commands are cargo test, cargo test --features full, and cargo clippy --all-targets --all-features -- -D warnings."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Is the standard validation entry point scripts/run-benchmark-suite.sh?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "source-of-truth-docs",
+    "title": "Documentation source of truth",
+    "category": "docs-system",
+    "goal": "Verify that the repo-local documentation database and markdown docs are retrieved coherently.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "AGENTS.md",
+        "memory_type": "procedural",
+        "text": "The primary local source of truth is .docs/femind_spec.db. The markdown docs in the repo should stay aligned with that database."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "The key maintainer documents are ARCHITECTURE.md, RESEARCH.md, DECISIONS.md, PRACTICAL_EVAL.md, and the eval/practical directory."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the primary local source of truth for femind docs?",
+        "expected_answer": "The primary local source of truth is .docs/femind_spec.db."
+      },
+      {
+        "query": "Should markdown docs diverge from the spec database?",
+        "expected_answer": "No, the markdown docs should stay aligned with the spec database."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Is the primary local source of truth file femind_architecture.sql?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "migration-and-legacy-compatibility",
+    "title": "Migration and legacy compatibility",
+    "category": "migration-compatibility",
+    "goal": "Verify the system can answer current-vs-legacy package questions without confusing the active line.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "femind is the successor to the earlier mindcore crate and repository."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "ARCHITECTURE.md",
+        "memory_type": "semantic",
+        "text": "Legacy compatibility hooks remain so older .mindcore databases and mindcore_meta tables can still be opened safely."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is femind the successor to?",
+        "expected_answer": "femind is the successor to the earlier mindcore crate and repository."
+      },
+      {
+        "query": "Why do mindcore references still exist in some storage code?",
+        "expected_answer": "Legacy compatibility hooks remain so older .mindcore databases and mindcore_meta tables can still be opened safely."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Should new work still target the mindcore crate name?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "messy-maintainer-notes-extraction",
+    "title": "Messy maintainer note extraction",
+    "category": "real-world-extraction",
+    "goal": "Stress extraction on rough maintainer notes rather than clean prose.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "maintainer-notes.txt",
+        "memory_type": "episodic",
+        "text": "notes from today: exact/ann both look good on practical set, ann not obviously worse. don't chase LongMemEval yet. lock gpt-oss-120b for API extraction, gpt-5.4-mini for CLI, keep 5.1 codex mini as cheap fallback. need bigger real-world library next, not another benchmark rabbit hole."
+      }
+    ],
+    "extraction_checks": [
+      {
+        "expected_fact": "gpt-oss-120b is the locked API extraction default."
+      },
+      {
+        "expected_fact": "gpt-5.4-mini is the locked CLI extraction default."
+      },
+      {
+        "expected_fact": "gpt-5.1-codex-mini should remain the low-cost CLI fallback."
+      },
+      {
+        "expected_fact": "A bigger real-world library should come before more benchmark work."
+      }
+    ]
+  },
+  {
+    "id": "superseded-plan-answering",
+    "title": "Current versus superseded plan",
+    "category": "current-vs-superseded",
+    "goal": "Check yes-no current-state reasoning against superseded plans.",
+    "records": [
+      {
+        "timestamp": "2026-03-22T00:00:00Z",
+        "source": "plan-notes.md",
+        "memory_type": "semantic",
+        "text": "Early thought: benchmark sweeps should drive the next phase before wider live validation."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "PRACTICAL_EVAL.md",
+        "memory_type": "semantic",
+        "text": "Current accepted plan: larger real-world validation should come before broader benchmark sweeps, and benchmarks remain secondary unless they are needed for regression."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "Should broader benchmark sweeps drive the next phase right now?",
+        "expected_answer": "No. Larger real-world validation should come before broader benchmark sweeps."
+      },
+      {
+        "query": "What is the current accepted plan for follow-up testing?",
+        "expected_answer": "The current accepted plan is to do larger real-world validation before broader benchmark sweeps."
+      }
+    ]
+  },
+  {
+    "id": "provider-comparison-results",
+    "title": "Provider comparison results",
+    "category": "provider-comparison",
+    "goal": "Retrieve real comparison outcomes from the current approved provider set.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "LIVE_VALIDATION.md",
+        "memory_type": "semantic",
+        "text": "The broader live-usage sample passes 11/11 across four tested extraction models: openai/gpt-oss-120b, zai-org/GLM-4.7-Flash, gpt-5.4-mini, and gpt-5.1-codex-mini."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "LIVE_VALIDATION.md",
+        "memory_type": "semantic",
+        "text": "The preferred defaults are gpt-oss-120b for the API lane, gpt-5.4-mini for the CLI lane, and gpt-5.1-codex-mini as the lower-cost CLI fallback."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How many extraction models passed the broader live-usage sample?",
+        "expected_answer": "Four extraction models passed the broader live-usage sample."
+      },
+      {
+        "query": "Which API model is the preferred default after comparison?",
+        "expected_answer": "gpt-oss-120b is the preferred API default."
+      },
+      {
+        "query": "Which CLI model is the preferred default after comparison?",
+        "expected_answer": "gpt-5.4-mini is the preferred CLI default."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Did Nemotron fail the broader live-usage sample and get removed from the candidate set?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  }
+]

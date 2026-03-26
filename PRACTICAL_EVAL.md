@@ -58,6 +58,13 @@ The curated eval set lives under `eval/practical/`.
 - `eval/practical/scenarios.json`
   Curated practical scenarios and expected behavior
 
+The larger real-world library lives under `eval/live-library/`.
+
+- `eval/live-library/README.md`
+  Maintainer notes for the broader real-world corpus
+- `eval/live-library/scenarios.json`
+  Larger project-like scenarios for follow-up live validation
+
 ## Review Standard
 
 Every practical scenario should be easy to inspect by hand.
@@ -138,3 +145,31 @@ Current validated baseline:
 
 This exact-mode practical run is the standard local regression check before
 trying wider live usage samples or ANN comparisons.
+
+## Larger Real-World Library
+
+After the small practical set is stable, the next real-world check is:
+
+```bash
+scripts/run-live-library.sh
+```
+
+Default behavior:
+
+- `all` mode
+- `exact` vector mode
+- `api` extraction backend
+- `openai/gpt-oss-120b` extraction model
+- summary output at `target/live-library/live-library-exact.json`
+
+This larger library is the preferred follow-up step before any broader
+benchmark sweep through RecallBench.
+
+Current larger-library baseline:
+
+- `all` + `exact` currently passes `36/44`
+- `all` + `ann` currently passes `36/44`
+- the exact and ANN failure sets currently match
+- the remaining misses are abstention cases, not broad recall failures
+- summary artifacts now include stable run metadata for backend, model, vector
+  mode, duration, pass counts, and pass rate

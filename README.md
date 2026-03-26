@@ -14,7 +14,9 @@ Handles persistent storage, keyword search (FTS5), vector search (candle), hybri
 
 ## Status
 
-The local crate and repo are now `femind` / `fe-mind`. The package rename is complete locally, and publication work is the remaining external packaging step. Non-LLM verification is currently green:
+The local crate and repo are now `femind` / `fe-mind`, and `femind 0.2.0`
+has been published as the active crate line. The earlier `mindcore` package
+line remains legacy only. Non-LLM verification is currently green:
 
 - `cargo test`
 - `cargo test --features full`
@@ -28,7 +30,10 @@ The practical live-validation path is now established and repeatable:
 - retrieval-only practical eval in `exact` mode currently passes `9/9`
 - retrieval-only practical eval in `ann` mode currently passes `9/9`
 - broader live-usage sample built from actual project docs currently passes `11/11`
+- larger real-world follow-up library now lives under `eval/live-library/`
+- larger real-world library currently passes `36/44` in both `all` + `exact` and `all` + `ann`
 - standard local runner: `scripts/run-practical-eval.sh`
+- larger real-world runner: `scripts/run-live-library.sh`
 
 ## Migration
 
@@ -36,11 +41,12 @@ The practical live-validation path is now established and repeatable:
 The published `mindcore` crate remains the legacy package line; new work and
 future releases should target `femind`.
 
-The next remaining work is release packaging and publication. See:
+Key maintainer references:
 
 - `ARCHITECTURE.md` — full crate structure and API design
 - `RESEARCH.md` — research, landscape analysis, and specification
 - `DECISIONS.md` — architectural decisions log
 - `PRACTICAL_EVAL.md` — real-world validation plan and practical eval categories
 - `eval/practical/` — curated practical validation scenarios
+- `eval/live-library/` — larger real-world validation library
 - `research/` — competitive landscape analysis
