@@ -173,3 +173,31 @@ Current larger-library baseline:
 - the exact and ANN results currently match on the full larger corpus
 - summary artifacts now include stable run metadata for backend, model, vector
   mode, duration, pass counts, and pass rate
+
+## Memloft-Derived Real-Data Slice
+
+After the larger real-world library is stable, the next validation layer is a
+technical corpus sampled from the live memloft database:
+
+```bash
+scripts/run-memloft-slice.sh
+```
+
+Default behavior:
+
+- `all` mode
+- `exact` vector mode
+- `api` extraction backend
+- `openai/gpt-oss-120b` extraction model
+- summary output at `target/memloft-slice/memloft-slice-exact.json`
+
+This slice exists to pressure-test `femind` against real maintainer memory
+content instead of additional synthetic scenarios.
+
+Current memloft-slice baseline:
+
+- the memloft-derived slice currently includes 18 scenarios and 90 checks
+- `all` + `exact` currently passes `90/90`
+- `all` + `ann` currently passes `90/90`
+- the exact and ANN results currently match on the full memloft-derived corpus
+- sources are real technical memloft records, not hand-written synthetic notes

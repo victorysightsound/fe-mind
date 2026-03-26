@@ -635,15 +635,18 @@ fn query_requires_strict_grounding(query: &str) -> bool {
         matches!(
             *token,
             "exact" | "precise" | "specific" | "total" | "cost" | "token" | "tokens"
-                | "price" | "version" | "number" | "id" | "first" | "second"
-                | "third" | "fourth" | "fifth" | "reserved" | "removed"
+                | "price" | "version" | "number" | "id" | "reserved" | "removed"
                 | "remove" | "failed" | "fail" | "hour" | "minute"
-                | "day" | "date" | "month" | "year" | "dollar"
+                | "day" | "date" | "month" | "year" | "dollar" | "duration"
+                | "filename" | "file" | "path" | "label" | "header"
+                | "deployment" | "parameter" | "value" | "plist" | "hash"
+                | "threshold"
         )
     });
     let asks_how_many = tokens.windows(2).any(|pair| pair == ["how", "many"]);
+    let has_ordinal_signal = ordinal_detail_signal(&tokens);
 
-    has_exact_signal || asks_how_many || query_asks_for_combined_capability(query)
+    has_exact_signal || asks_how_many || has_ordinal_signal || query_asks_for_combined_capability(query)
 }
 
 fn lexical_grounding_ok(query: &str, text: &str) -> bool {
@@ -663,9 +666,15 @@ fn lexical_grounding_ok(query: &str, text: &str) -> bool {
         .filter(|token| text_tokens.contains(*token))
         .count();
 
-    let detail_overlap = detail_tokens(query)
+    let detail = detail_tokens(query);
+    let specific_detail = specific_detail_tokens(query);
+    let detail_overlap = detail
         .into_iter()
         .filter(|token| text_tokens.contains(token))
+        .count();
+    let specific_detail_overlap = specific_detail
+        .iter()
+        .filter(|token| text_tokens.contains(*token))
         .count();
     let recall = overlap as f32 / query_tokens.len() as f32;
 
@@ -673,7 +682,18 @@ fn lexical_grounding_ok(query: &str, text: &str) -> bool {
     let text_numeric = numeric_tokens(text);
     let query_units = unit_tokens(query);
 
-    if query_requires_strict_grounding(query) && !detail_tokens(query).is_empty() && detail_overlap == 0 {
+    if query_requires_strict_grounding(query)
+        && !specific_detail.is_empty()
+        && specific_detail_overlap < specific_detail.len()
+    {
+        return false;
+    }
+
+    if query_requires_strict_grounding(query)
+        && specific_detail.is_empty()
+        && !detail_tokens(query).is_empty()
+        && detail_overlap == 0
+    {
         return false;
     }
 
@@ -763,10 +783,34 @@ fn detail_tokens(value: &str) -> Vec<String> {
                     | "month"
                     | "year"
                     | "dollar"
+                    | "duration"
+                    | "filename"
+                    | "file"
+                    | "path"
+                    | "label"
+                    | "header"
+                    | "deployment"
+                    | "parameter"
+                    | "value"
+                    | "plist"
+                    | "hash"
+                    | "threshold"
                     | "emotion"
                     | "publish"
                     | "published"
                     | "release"
+            )
+        })
+        .collect()
+}
+
+fn specific_detail_tokens(value: &str) -> Vec<String> {
+    detail_tokens(value)
+        .into_iter()
+        .filter(|token| {
+            !matches!(
+                token.as_str(),
+                "exact" | "precise" | "specific" | "total" | "publish" | "published" | "release"
             )
         })
         .collect()
@@ -804,6 +848,15 @@ fn query_is_yes_no(query: &str) -> bool {
         normalized.split_whitespace().next(),
         Some("is" | "are" | "was" | "were" | "does" | "do" | "did" | "can" | "could" | "should" | "would")
     )
+}
+
+fn ordinal_detail_signal(tokens: &[&str]) -> bool {
+    const ORDINALS: &[&str] = &["first", "second", "third", "fourth", "fifth"];
+
+    tokens.windows(2).any(|pair| {
+        matches!(pair[0], "what" | "which" | "who" | "when" | "where")
+            && ORDINALS.contains(&pair[1])
+    })
 }
 
 fn text_implies_exclusion(text: &str) -> bool {
@@ -1046,6 +1099,24 @@ mod tests {
     fn lexical_grounding_rejects_mismatched_numeric_date_detail() {
         let query = "What version was released on 2026-03-25?";
         let weak_hit = "Version 0.2.0 was released on 2026-03-26.";
+
+        assert!(query_requires_strict_grounding(query));
+        assert!(!lexical_grounding_ok(query, weak_hit));
+    }
+
+    #[test]
+    fn lexical_grounding_rejects_filename_without_filename_detail() {
+        let query = "What exact artifact filename stored the earlier summary?";
+        let weak_hit = "The earlier run scored 36 out of 44 on the larger corpus.";
+
+        assert!(query_requires_strict_grounding(query));
+        assert!(!lexical_grounding_ok(query, weak_hit));
+    }
+
+    #[test]
+    fn lexical_grounding_rejects_deployment_without_deployment_detail() {
+        let query = "Which Azure deployment name is the default CLI extraction backend?";
+        let weak_hit = "The default CLI extraction model is gpt-5.4-mini via codex-cli.";
 
         assert!(query_requires_strict_grounding(query));
         assert!(!lexical_grounding_ok(query, weak_hit));

@@ -1,0 +1,854 @@
+[
+  {
+    "id": "memloft-derived-validation-priority",
+    "title": "Next validation source after the expanded live library",
+    "category": "real-data-validation-priority",
+    "goal": "Prefer real memloft corpus validation over continuing to grow synthetic scenarios once the larger library is green.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T16:38:57Z",
+        "source": "memloft:27162",
+        "memory_type": "procedural",
+        "text": "After the expanded live-library reached 66/66 in exact and ann mode, the next highest-value femind validation step is testing against sampled real memloft data rather than continuing to grow synthetic real-world scenarios first. Additional scenario expansion can still help later, but real corpus validation should come next."
+      },
+      {
+        "timestamp": "2026-03-26T16:31:40Z",
+        "source": "memloft:27161",
+        "memory_type": "episodic",
+        "text": "The femind live-library corpus was expanded from 12 scenarios / 44 checks to 18 scenarios / 66 checks. After targeted tuning of strict grounding for numeric/time-unit detail queries, combined-capability yes/no negatives, and evaluator synonym handling, both all+exact and all+ann now pass 66/66 on the expanded corpus."
+      },
+      {
+        "timestamp": "2026-03-26T16:05:50Z",
+        "source": "memloft:27160",
+        "memory_type": "episodic",
+        "text": "The larger femind real-world library now passes 44/44 in both all+exact and all+ann mode. The key fix was separating contradicted yes/no questions from true abstentions and widening strict grounding for unsupported ordinal and removal or failure detail queries."
+      },
+      {
+        "timestamp": "2026-03-26T16:05:50Z",
+        "source": "memloft:27160",
+        "memory_type": "procedural",
+        "text": "The key fix was not expanding the corpus first. The key fix was separating contradicted yes or no questions from true abstentions and widening strict grounding."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What should femind validate next after the expanded live library reached 66 out of 66?",
+        "expected_answer": "The next validation step should use sampled real memloft data."
+      },
+      {
+        "query": "What is the current expanded live-library size?",
+        "expected_answer": "The current expanded live-library size is 18 scenarios and 66 checks."
+      },
+      {
+        "query": "Did ANN match exact on the expanded live library?",
+        "expected_answer": "Yes, both all+exact and all+ann pass 66 out of 66."
+      },
+      {
+        "query": "Was the key fix for the larger library expanding the corpus first?",
+        "expected_answer": "No, the main fix was separating contradicted yes or no questions from true abstentions and tightening strict grounding."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact wall-clock duration did the 66 out of 66 ANN run take?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-extraction-defaults",
+    "title": "Extraction defaults and backend lanes",
+    "category": "provider-defaults",
+    "goal": "Retrieve the locked defaults and backend separation from real memloft decisions.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T08:10:17Z",
+        "source": "memloft:27046",
+        "memory_type": "semantic",
+        "text": "Locked femind extraction defaults after practical and live-usage comparison. API default is openai/gpt-oss-120b. CLI default is gpt-5.4-mini. Lower-cost CLI fallback is gpt-5.1-codex-mini."
+      },
+      {
+        "timestamp": "2026-03-26T07:52:08Z",
+        "source": "memloft:27017",
+        "memory_type": "procedural",
+        "text": "For femind extraction comparison, add gpt-5.1-codex-mini alongside gpt-5.4-mini so the CLI lane compares two small models. Compare those two CLI models against two smaller API models using the same extraction scenarios and summary format."
+      },
+      {
+        "timestamp": "2026-03-26T07:46:33Z",
+        "source": "memloft:27014",
+        "memory_type": "procedural",
+        "text": "Added a selectable extraction backend to the femind practical_eval runner. The standard API path remains the default, while codex-cli now supports extraction smoke testing with gpt-5.4-mini."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the locked API extraction default for femind?",
+        "expected_answer": "The locked API extraction default is openai/gpt-oss-120b."
+      },
+      {
+        "query": "What is the locked CLI extraction default?",
+        "expected_answer": "The locked CLI extraction default is gpt-5.4-mini."
+      },
+      {
+        "query": "What lower-cost CLI fallback is kept in the comparison lane?",
+        "expected_answer": "The lower-cost CLI fallback is gpt-5.1-codex-mini."
+      },
+      {
+        "query": "Does the practical eval runner support a codex-cli extraction backend?",
+        "expected_answer": "Yes, the practical eval runner supports a codex-cli extraction backend."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Which Azure OpenAI deployment name is the default CLI extraction backend?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-practical-path-and-ann",
+    "title": "Standard practical path and ANN rollout",
+    "category": "validation-path",
+    "goal": "Verify the standard maintainer path, exact baseline, and ANN rollout policy from real project memory.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T07:01:08Z",
+        "source": "memloft:26992",
+        "memory_type": "procedural",
+        "text": "The standard local live-validation entry point for femind is scripts/run-practical-eval.sh, which defaults to retrieval mode with exact vector search and writes target/practical-eval/retrieval-exact.json."
+      },
+      {
+        "timestamp": "2026-03-26T06:55:46Z",
+        "source": "memloft:26991",
+        "memory_type": "episodic",
+        "text": "After adding yes/no supersession-aware matching to the practical evaluator, the typed practical retrieval-only exact-mode run now passes 9/9 checks."
+      },
+      {
+        "timestamp": "2026-03-26T07:25:19Z",
+        "source": "memloft:27004",
+        "memory_type": "procedural",
+        "text": "Add ANN as an optional, feature-gated component for production use, but keep brute-force enabled for current benchmarks."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What script is the standard local practical validation entry point for femind?",
+        "expected_answer": "The standard local practical validation entry point is scripts/run-practical-eval.sh."
+      },
+      {
+        "query": "What does scripts/run-practical-eval.sh default to for vector search?",
+        "expected_answer": "scripts/run-practical-eval.sh defaults to exact vector search."
+      },
+      {
+        "query": "How did the typed practical exact run perform?",
+        "expected_answer": "The typed practical exact run passes 9 out of 9 checks."
+      },
+      {
+        "query": "Is ANN mandatory in every femind build?",
+        "expected_answer": "No, ANN is optional and feature-gated."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact HNSW M value is the practical runner configured to use by default?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-grounding-and-abstention",
+    "title": "Grounding, scoring, and abstention policy",
+    "category": "retrieval-behavior",
+    "goal": "Stress the rules that keep exact-mode retrieval from over-answering unsupported details.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T06:51:32Z",
+        "source": "memloft:26988",
+        "memory_type": "procedural",
+        "text": "For exact/detail-seeking queries in semantic retrieval, femind now requires lexical grounding beyond semantic similarity before returning results. This prevents exact-mode retrieval from surfacing semantically related but unsupported memories for missing-answer questions like exact token cost."
+      },
+      {
+        "timestamp": "2026-03-26T06:30:58Z",
+        "source": "memloft:26979",
+        "memory_type": "semantic",
+        "text": "femind now defaults to a composite post-search scorer combining recency, importance, and memory type instead of raw retrieval scores only."
+      },
+      {
+        "timestamp": "2026-03-26T04:23:17Z",
+        "source": "memloft:26845",
+        "memory_type": "procedural",
+        "text": "Include 30 no-answer abstention questions in the test suite to ensure retrieval does not surface misleading context for questions femind should not answer."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What does exact-mode semantic retrieval require for detail-seeking queries?",
+        "expected_answer": "Exact-mode semantic retrieval requires lexical grounding beyond semantic similarity."
+      },
+      {
+        "query": "Why was lexical grounding added to exact-mode retrieval?",
+        "expected_answer": "Lexical grounding was added to stop unsupported exact-detail answers from semantically related memories."
+      },
+      {
+        "query": "What signals are combined in the default post-search scorer?",
+        "expected_answer": "The default post-search scorer combines recency, importance, and memory type."
+      },
+      {
+        "query": "How many no-answer abstention questions should be in the test suite?",
+        "expected_answer": "The test suite should include 30 no-answer abstention questions."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact token count threshold triggers the lexical-grounding filter?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-cognitive-types-and-priority",
+    "title": "Cognitive memory model and validation priority",
+    "category": "memory-model-priority",
+    "goal": "Verify that the optimized memory model and real-world-first validation order survive in the real memloft corpus.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T06:13:50Z",
+        "source": "memloft:26966",
+        "memory_type": "semantic",
+        "text": "femind uses three cognitive memory types as the core optimized memory model: episodic for events and sessions, semantic for facts and preferences, and procedural for workflows, error patterns, and solutions."
+      },
+      {
+        "timestamp": "2026-03-26T05:10:39Z",
+        "source": "memloft:26940",
+        "memory_type": "procedural",
+        "text": "For femind, prioritize real-world accuracy validation over benchmark chasing. Use benchmark datasets only when they materially help validate real retrieval or extraction behavior or provide regression coverage."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What are the three cognitive memory types in femind?",
+        "expected_answer": "The three cognitive memory types are episodic, semantic, and procedural."
+      },
+      {
+        "query": "What kind of knowledge belongs in procedural memory?",
+        "expected_answer": "Procedural memory holds workflows, error patterns, and solutions."
+      },
+      {
+        "query": "Should femind optimize for benchmark scores before real-world confidence?",
+        "expected_answer": "No, femind should prioritize real-world accuracy validation before benchmark chasing."
+      },
+      {
+        "query": "When are benchmark datasets useful for femind?",
+        "expected_answer": "Benchmark datasets are useful when they materially validate real retrieval or extraction behavior or provide regression coverage."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What emotional-memory subtype was added as the fourth cognitive memory type?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-production-ingest-vs-benchmark",
+    "title": "Production ingest versus benchmark chunking",
+    "category": "ingest-architecture",
+    "goal": "Separate production extraction behavior from benchmark-only chunking behavior.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T05:42:32Z",
+        "source": "memloft:26953",
+        "memory_type": "procedural",
+        "text": "Do not both log each memory and chunk it; select one approach. In production, use LLM extraction to generate individual fact memories with graph edges and no chunking. For benchmarks lacking LLM extraction, use raw-text chunking to create chunk memories with no graph."
+      },
+      {
+        "timestamp": "2026-03-26T02:31:22Z",
+        "source": "memloft:26673",
+        "memory_type": "semantic",
+        "text": "In production memloft processes each incoming message, the LLM extracts individual facts which become separate memory records; no chunking is performed."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How does production memloft ingest new information?",
+        "expected_answer": "Production memloft uses LLM extraction to turn incoming messages into individual fact memories."
+      },
+      {
+        "query": "Does production memloft chunk incoming messages?",
+        "expected_answer": "No, production memloft does not chunk incoming messages."
+      },
+      {
+        "query": "When should raw-text chunking be used instead of extraction?",
+        "expected_answer": "Raw-text chunking should be used for benchmarks when LLM extraction is unavailable."
+      },
+      {
+        "query": "Should the system both log each memory and chunk it?",
+        "expected_answer": "No, the system should select one approach instead of doing both."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "Which exact graph-edge labels are generated for every extracted production fact?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-benchmark-gaps-and-successor",
+    "title": "Benchmark outcomes, gaps, and successor harness",
+    "category": "benchmark-position",
+    "goal": "Keep benchmark knowledge accurate without letting it override current product behavior.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T04:50:58Z",
+        "source": "memloft:26897",
+        "memory_type": "semantic",
+        "text": "Benchmarks validated the core search pipeline, tuned embedding and ranking parameters, built the retrieval test harness, and created the embedding infrastructure with local and API backends and caching."
+      },
+      {
+        "timestamp": "2026-03-26T04:50:58Z",
+        "source": "memloft:26898",
+        "memory_type": "semantic",
+        "text": "Benchmarks did not test LLM fact extraction quality, graph-based retrieval, or real conversation memory with incremental processing of conversations."
+      },
+      {
+        "timestamp": "2026-03-26T03:21:19Z",
+        "source": "memloft:26744",
+        "memory_type": "semantic",
+        "text": "RecallBench is the successor benchmark harness for femind and other memory systems. The old in-repo femind-bench should be treated as obsolete except for historical benchmark artifacts."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What did the earlier benchmarks validate well?",
+        "expected_answer": "The earlier benchmarks validated the core search pipeline, embedding and ranking tuning, the retrieval harness, and the embedding infrastructure."
+      },
+      {
+        "query": "What important things did the benchmarks not test?",
+        "expected_answer": "The benchmarks did not test LLM fact extraction quality, graph-based retrieval, or real conversation memory."
+      },
+      {
+        "query": "What replaced the old in-repo femind-bench?",
+        "expected_answer": "RecallBench replaced the old in-repo femind-bench."
+      },
+      {
+        "query": "Should benchmark history still matter at all?",
+        "expected_answer": "Yes, benchmark history still matters as historical validation of the core search pipeline."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact RecallBench accuracy score was achieved on the Oracle variant in this memory slice?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-embedding-rationale",
+    "title": "Embedding defaults and rationale",
+    "category": "embedding-defaults",
+    "goal": "Retrieve the real embedding choice and why it won across backends.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T04:39:22Z",
+        "source": "memloft:26893",
+        "memory_type": "semantic",
+        "text": "all-MiniLM-L6-v2 is the best local model for memloft: fastest, already in use, and sufficiently accurate."
+      },
+      {
+        "timestamp": "2026-03-23T09:10:37Z",
+        "source": "memloft:23899",
+        "memory_type": "semantic",
+        "text": "Use all-MiniLM-L6-v2 consistently across mindcore embedding backends because smaller embedding models achieve about ninety percent of larger-model quality while reducing compute. Search pipeline quality, chunking strategy, context assembly, and reranking matter more for retrieval accuracy."
+      },
+      {
+        "timestamp": "2026-03-22T10:28:34Z",
+        "source": "memloft:22415",
+        "memory_type": "semantic",
+        "text": "Use all-MiniLM-L6-v2 with 384-dimensional vectors consistently across the local Candle backend, API backend, and API-with-local-fallback wrapper."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What embedding model is preferred for memloft and femind?",
+        "expected_answer": "The preferred embedding model is all-MiniLM-L6-v2."
+      },
+      {
+        "query": "Why was all-MiniLM-L6-v2 preferred?",
+        "expected_answer": "It was preferred because it is fast, already in use, sufficiently accurate, and smaller models reduce compute."
+      },
+      {
+        "query": "What vector dimensionality is used with all-MiniLM-L6-v2 in this stack?",
+        "expected_answer": "all-MiniLM-L6-v2 uses 384-dimensional vectors."
+      },
+      {
+        "query": "What matters more than jumping to a larger embedding model?",
+        "expected_answer": "Search pipeline quality, chunking strategy, context assembly, and reranking matter more than a larger embedding model."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact MTEB retrieval score was recorded for all-MiniLM-L6-v2 in this slice?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-cache-architecture",
+    "title": "Benchmark cache architecture and result history",
+    "category": "benchmark-cache",
+    "goal": "Test exact detail retrieval for cache design without inventing unsupported file or hash details.",
+    "records": [
+      {
+        "timestamp": "2026-03-23T16:33:01Z",
+        "source": "memloft:24498",
+        "memory_type": "procedural",
+        "text": "Pre-embedding cache architecture for benchmark test vectors is implemented in RecallBench, not in femind core. It pre-loads and caches benchmark vectors instead of re-embedding per question, reducing a 500-question run from roughly thirty minutes to about thirty seconds."
+      },
+      {
+        "timestamp": "2026-03-26T01:27:09Z",
+        "source": "memloft:26639",
+        "memory_type": "semantic",
+        "text": "The RecallBench cache database contains two tables: session_chunks with session_id, chunk_index, chunk_text, embedding blob; and cache_meta with model_name, chunk_size, overlap, dataset_hash, and created_at."
+      },
+      {
+        "timestamp": "2026-03-22T17:10:55Z",
+        "source": "memloft:22981",
+        "memory_type": "procedural",
+        "text": "Preserve benchmark results with version numbering such as v1 and v2 instead of deleting previous runs so maintainers can compare regressions and improvements over time."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "Where is the benchmark embedding cache architecture implemented?",
+        "expected_answer": "The benchmark embedding cache architecture is implemented in RecallBench, not in femind core."
+      },
+      {
+        "query": "What are the two main tables in the RecallBench cache database?",
+        "expected_answer": "The two main tables are session_chunks and cache_meta."
+      },
+      {
+        "query": "Why should benchmark results be kept with version numbers like v1 and v2?",
+        "expected_answer": "Benchmark results should be kept with version numbers so maintainers can compare regressions and improvements over time."
+      },
+      {
+        "query": "What kind of speedup was the benchmark cache designed to provide?",
+        "expected_answer": "The benchmark cache was designed to cut a 500-question run from roughly thirty minutes to about thirty seconds."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact dataset hash value is stored in cache_meta for the current benchmark corpus?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-rename-and-release-sequence",
+    "title": "Rename sequence and release gating",
+    "category": "release-sequence",
+    "goal": "Verify current identity versus stale rename-era guidance and keep release steps grounded.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T01:36:20Z",
+        "source": "memloft:26643",
+        "memory_type": "episodic",
+        "text": "For mindcore, complete ANN runtime mode support and non-LLM verification before renaming the crate and repo to femind. Live LLM-backed validation remained blocked pending explicit user approval."
+      },
+      {
+        "timestamp": "2026-03-26T01:54:10Z",
+        "source": "memloft:26651",
+        "memory_type": "semantic",
+        "text": "mindcore was relocated into ~/projects/fe-suite/fe-mind and the local crate and package were renamed to femind. The authoritative local spec database is ~/projects/fe-suite/fe-mind/.docs/femind_spec.db."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What had to be completed before mindcore was renamed to femind?",
+        "expected_answer": "ANN runtime mode support and non-LLM verification had to be completed before the rename."
+      },
+      {
+        "query": "Where is the authoritative local spec database stored for the renamed project?",
+        "expected_answer": "The authoritative local spec database path is ~/projects/fe-suite/fe-mind/.docs/femind_spec.db."
+      },
+      {
+        "query": "Was live LLM validation originally blocked before explicit user approval?",
+        "expected_answer": "Yes, live LLM-backed validation was originally blocked pending explicit user approval."
+      },
+      {
+        "query": "What were the local crate and package renamed to?",
+        "expected_answer": "The local crate and package were renamed to femind."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact crates.io package ID was reserved for the transitional mindcore fallback plan?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-doc-source-of-truth",
+    "title": "Documentation source of truth",
+    "category": "documentation-architecture",
+    "goal": "Test retrieval of the suite documentation architecture from real memloft decisions.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T02:18:47Z",
+        "source": "memloft:26669",
+        "memory_type": "semantic",
+        "text": "fe-suite documentation should use SQLite as the primary source of truth, with markdown and HTML generated on demand and only committed as human-readable docs when required for GitHub or external presentation."
+      },
+      {
+        "timestamp": "2026-03-26T02:18:47Z",
+        "source": "memloft:26669",
+        "memory_type": "semantic",
+        "text": "Additional documentation context is also captured in git commit messages, memloft failure-analysis logs, and spec files, but the primary source of truth remains the SQLite documentation databases."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the primary documentation source of truth for the fe-suite?",
+        "expected_answer": "The primary documentation source of truth for the fe-suite is SQLite documentation databases."
+      },
+      {
+        "query": "Should markdown be the primary documentation source of truth in the suite?",
+        "expected_answer": "No, markdown should not be the primary documentation source of truth in the suite."
+      },
+      {
+        "query": "When should human-readable markdown or HTML docs be committed?",
+        "expected_answer": "Human-readable markdown or HTML docs should be committed when they are required for GitHub or external presentation."
+      },
+      {
+        "query": "Do commit messages and failure-analysis logs replace the SQLite doc databases as the main source of truth?",
+        "expected_answer": "No, commit messages and failure-analysis logs do not replace the SQLite doc databases as the main source of truth."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact SQLite page size was chosen for the documentation databases?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-transport-current-vs-outdated",
+    "title": "Current MCP transport versus outdated descriptions",
+    "category": "transport-current-state",
+    "goal": "Verify current-state retrieval when older or outdated transport descriptions exist elsewhere.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T14:22:11Z",
+        "source": "memloft:27144",
+        "memory_type": "episodic",
+        "text": "Codex memloft failures were caused by Codex launching memloftd mcp-stdio instead of using the daemon HTTP MCP endpoint, and by memloftd having stateful_mode disabled so initialize no longer returned Mcp-Session-Id. The fix switched Codex to http://127.0.0.1:18820/mcp and restored stateful MCP behavior."
+      },
+      {
+        "timestamp": "2026-03-26T14:43:45Z",
+        "source": "memloft:27149",
+        "memory_type": "semantic",
+        "text": "The active memloft MCP contract is daemon-hosted HTTP at http://127.0.0.1:18820/mcp with stateful sessions enabled. Docs describing memloft-mcp stdio transport or stateless MCP are outdated unless clearly marked historical."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the active memloft MCP endpoint now?",
+        "expected_answer": "The active memloft MCP endpoint is http://127.0.0.1:18820/mcp."
+      },
+      {
+        "query": "Does the active memloft MCP contract use stateful sessions?",
+        "expected_answer": "Yes, the active memloft MCP contract uses stateful sessions."
+      },
+      {
+        "query": "Should docs that describe memloft-mcp stdio transport still be treated as current?",
+        "expected_answer": "No, docs describing memloft-mcp stdio transport should be treated as outdated unless marked historical."
+      },
+      {
+        "query": "What two issues caused Codex memloft transport failures?",
+        "expected_answer": "The failures were caused by launching mcp-stdio instead of the HTTP MCP endpoint and by stateful_mode being disabled."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact request header value was sent in the failing initialize call before the transport fix?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-vault-fix-and-release-policy",
+    "title": "Vault migration fix and release policy",
+    "category": "maintenance-and-release-policy",
+    "goal": "Exercise exact retrieval around current maintenance state without inventing unsupported distribution details.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T15:12:37Z",
+        "source": "memloft:27157",
+        "memory_type": "episodic",
+        "text": "The vault startup warning was caused by legacy secrets still stored as SQLite TEXT in ~/.memloft/vault.db. Fixed vault.rs to migrate both TEXT and BLOB rows, backed up vault.db, converted the four remaining TEXT rows to BLOB, and verified startup now logs a successful migration instead of a warning."
+      },
+      {
+        "timestamp": "2026-03-26T15:19:34Z",
+        "source": "memloft:27158",
+        "memory_type": "semantic",
+        "text": "Memloft should stay in local tracked-development mode for now. Maintain a developer-style CHANGELOG.md, but do not create GitHub releases or commit-triggered CI workflows until distribution is actually needed."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What caused the memloft vault startup warning?",
+        "expected_answer": "The memloft vault startup warning was caused by legacy secrets still stored as SQLite TEXT in vault.db."
+      },
+      {
+        "query": "What was done to fix the vault warning?",
+        "expected_answer": "The fix migrated both TEXT and BLOB rows, backed up vault.db, and converted the four remaining TEXT rows to BLOB."
+      },
+      {
+        "query": "Should memloft create GitHub releases right now by default?",
+        "expected_answer": "No, memloft should stay in local tracked-development mode for now."
+      },
+      {
+        "query": "Should commit-triggered CI workflows be kept active for memloft right now?",
+        "expected_answer": "No, commit-triggered CI workflows should not be kept active for memloft right now."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact encryption key material was used during the vault row migration?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-old-versus-current-library-size",
+    "title": "Older and current live-library baselines",
+    "category": "stale-versus-current-baseline",
+    "goal": "Verify current-vs-superseded retrieval when both an older and newer validation baseline are present.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T15:46:09Z",
+        "source": "memloft:27159",
+        "memory_type": "episodic",
+        "text": "Femind now has a larger real-world validation library under eval/live-library with 12 scenarios and 44 checks. The first provider-backed runs on the larger corpus passed 36/44 in both all+exact and all+ann mode."
+      },
+      {
+        "timestamp": "2026-03-26T16:31:40Z",
+        "source": "memloft:27161",
+        "memory_type": "episodic",
+        "text": "The femind live-library corpus was expanded from 12 scenarios / 44 checks to 18 scenarios / 66 checks and now passes 66/66 in both all+exact and all+ann mode."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the current live-library size for femind?",
+        "expected_answer": "The current live-library size is 18 scenarios and 66 checks."
+      },
+      {
+        "query": "Is the 12 scenario and 44 check library still the current baseline?",
+        "expected_answer": "No, the 12 scenario and 44 check library is not the current baseline."
+      },
+      {
+        "query": "What did the earlier larger-library run score before expansion?",
+        "expected_answer": "The earlier larger-library run scored 36 out of 44."
+      },
+      {
+        "query": "What does the current expanded live-library score?",
+        "expected_answer": "The current expanded live-library scores 66 out of 66."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact artifact filename stored the earlier 36 out of 44 summary?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-release-target-after-femind",
+    "title": "What comes after femind shipping",
+    "category": "sequencing",
+    "goal": "Keep suite sequencing grounded in the real memloft decisions.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T14:15:50Z",
+        "source": "memloft:27138",
+        "memory_type": "procedural",
+        "text": "Finish shipping the femind crate before starting work on the feloop suite."
+      },
+      {
+        "timestamp": "2026-03-26T14:15:50Z",
+        "source": "memloft:27138",
+        "memory_type": "procedural",
+        "text": "Before starting the next suite target, run cargo publish --dry-run, perform a metadata and package audit, and clean up the changelog and release notes for femind."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What suite target should come after femind shipping?",
+        "expected_answer": "The suite target after femind shipping should be feloop."
+      },
+      {
+        "query": "Should work move to feloop before femind is shipped?",
+        "expected_answer": "No, work should not move to feloop before femind is shipped."
+      },
+      {
+        "query": "What should be done before starting the next suite target?",
+        "expected_answer": "Before starting the next suite target, run cargo publish --dry-run, do a metadata and package audit, and clean up changelog and release notes."
+      },
+      {
+        "query": "Is post-femind work supposed to jump directly to benchmark expansion instead of the next suite target?",
+        "expected_answer": "No, post-femind work should move to the next suite target after femind is shipped."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact branch name should be used for the first feloop implementation sprint?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-model-comparison-lane",
+    "title": "CLI and API comparison structure",
+    "category": "provider-comparison",
+    "goal": "Test retrieval of the small-model comparison plan and keep lanes distinct.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T07:52:08Z",
+        "source": "memloft:27017",
+        "memory_type": "procedural",
+        "text": "For femind extraction comparison, add gpt-5.1-codex-mini alongside gpt-5.4-mini so the CLI lane compares two small models."
+      },
+      {
+        "timestamp": "2026-03-26T08:10:17Z",
+        "source": "memloft:27046",
+        "memory_type": "semantic",
+        "text": "API default is openai/gpt-oss-120b. CLI default is gpt-5.4-mini. Lower-cost CLI fallback is gpt-5.1-codex-mini."
+      },
+      {
+        "timestamp": "2026-03-26T07:46:33Z",
+        "source": "memloft:27014",
+        "memory_type": "procedural",
+        "text": "The standard API path remains the default, while codex-cli now supports extraction smoke testing."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "Why was gpt-5.1-codex-mini added to the femind comparison set?",
+        "expected_answer": "gpt-5.1-codex-mini was added so the CLI lane compares two small models."
+      },
+      {
+        "query": "What is the default API lane model in the comparison structure?",
+        "expected_answer": "The default API lane model is openai/gpt-oss-120b."
+      },
+      {
+        "query": "What is the default CLI lane model in the comparison structure?",
+        "expected_answer": "The default CLI lane model is gpt-5.4-mini."
+      },
+      {
+        "query": "Is codex-cli the default overall extraction path?",
+        "expected_answer": "No, the standard API path remains the default overall extraction path."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact prompt-cache hit rate was observed for gpt-5.1-codex-mini in this slice?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-benchmark-judgment-limits",
+    "title": "What benchmark history can and cannot prove",
+    "category": "benchmark-limits",
+    "goal": "Make sure benchmark success does not get overstated into unsupported claims about extraction and real conversation memory.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T04:50:58Z",
+        "source": "memloft:26897",
+        "memory_type": "semantic",
+        "text": "Benchmarks validated the core search pipeline, tuned embedding and ranking parameters, built the retrieval test harness, and created the embedding infrastructure."
+      },
+      {
+        "timestamp": "2026-03-26T04:50:58Z",
+        "source": "memloft:26898",
+        "memory_type": "semantic",
+        "text": "Benchmarks did not test LLM fact extraction quality, graph-based retrieval, or real conversation memory."
+      },
+      {
+        "timestamp": "2026-03-22T17:05:38Z",
+        "source": "memloft:22974",
+        "memory_type": "semantic",
+        "text": "Sonnet is the harder test case for validating retrieval quality. If the retrieval pipeline surfaces correct context for Sonnet, higher-tier models should perform at least as well on the same retrieved context."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What did benchmark work prove reliably?",
+        "expected_answer": "Benchmark work reliably proved the core search pipeline, embedding and ranking tuning, and retrieval harness."
+      },
+      {
+        "query": "What did benchmark work not prove reliably?",
+        "expected_answer": "Benchmark work did not prove LLM fact extraction quality, graph-based retrieval, or real conversation memory."
+      },
+      {
+        "query": "Why was Sonnet treated as the harder validation case?",
+        "expected_answer": "Sonnet was treated as the harder validation case because if retrieval surfaces the right context for Sonnet, higher-tier models should do at least as well."
+      },
+      {
+        "query": "Can benchmark success alone prove femind is ready for real conversation memory extraction?",
+        "expected_answer": "No, benchmark success alone cannot prove femind is ready for real conversation memory extraction."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact benchmark score threshold was defined as the pass bar for Sonnet in this slice?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
+    "id": "memloft-current-maintainer-state",
+    "title": "Current maintainer state from memloft operational memory",
+    "category": "maintainer-state",
+    "goal": "Use real operational project memory to answer current-state questions while abstaining on unsupported low-level details.",
+    "records": [
+      {
+        "timestamp": "2026-03-26T14:43:45Z",
+        "source": "memloft:27149",
+        "memory_type": "semantic",
+        "text": "The active memloft MCP contract is daemon-hosted HTTP with stateful sessions enabled."
+      },
+      {
+        "timestamp": "2026-03-26T15:19:34Z",
+        "source": "memloft:27158",
+        "memory_type": "semantic",
+        "text": "Memloft should stay in local tracked-development mode for now, should not use commit-triggered CI workflows, and should not create GitHub releases until distribution is actually needed."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "Are stateful sessions enabled in the active memloft MCP contract?",
+        "expected_answer": "Yes, stateful sessions are enabled in the active memloft MCP contract."
+      },
+      {
+        "query": "Should memloft run commit-triggered CI workflows right now?",
+        "expected_answer": "No, memloft should not run commit-triggered CI workflows right now."
+      },
+      {
+        "query": "Should memloft create GitHub releases by default right now?",
+        "expected_answer": "No, memloft should not create GitHub releases by default right now."
+      },
+      {
+        "query": "Is memloft currently positioned as a packaged release product with formal GitHub releases by default?",
+        "expected_answer": "No, memloft is currently kept in local tracked-development mode."
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact launchd plist label is managing the current memloft daemon in this slice?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  }
+]

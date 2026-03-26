@@ -133,8 +133,10 @@ As of 2026-03-26:
 - retrieval-only practical validation in `exact` mode passes `9/9`
 - retrieval-only practical validation in `ann` mode passes `9/9`
 - broader live-usage validation from actual project docs passes `11/11` across all four tested extraction models
-- the larger real-world library under `eval/live-library/` is the next follow-up validation layer before benchmark work
+- the larger real-world library under `eval/live-library/` passes `66/66` in both `all` + `exact` and `all` + `ann`
 - the larger real-world library now covers 18 scenarios and 66 checks
-- the larger real-world library currently passes `66/66` in both `all` + `exact` and `all` + `ann`
+- the memloft-derived real-data slice under `eval/memloft-slice/` is the current highest-value follow-up validation layer before benchmark work
+- the memloft-derived real-data slice now covers 18 scenarios and 90 checks
+- the memloft-derived real-data slice currently passes `90/90` in both `all` + `exact` and `all` + `ann`
 - the standard local live-validation path is `scripts/run-practical-eval.sh`
 - practical real-world eval design is defined in `PRACTICAL_EVAL.md`

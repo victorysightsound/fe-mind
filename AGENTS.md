@@ -29,6 +29,7 @@ session-context
 | `research/` | Competitive landscape research |
 | `eval/practical/` | Curated real-world validation scenarios |
 | `eval/live-library/` | Larger real-world follow-up validation library |
+| `eval/memloft-slice/` | Memloft-derived technical real-data validation slice |
 
 ---
 
@@ -88,7 +89,7 @@ task done <id>
 - Work from the current specs and task list; keep changes scoped and validate them before committing.
 - Prefer local compile, lint, and non-network test paths first.
 - Do not run real CLI/API LLM validation or benchmark paths without explicit user approval.
-- Treat `eval/practical/` as the primary live-validation target and `eval/live-library/` as the next real-world layer before larger benchmark work.
+- Treat `eval/practical/` as the primary live-validation target, `eval/live-library/` as the larger synthetic real-world layer, and `eval/memloft-slice/` as the real technical corpus layer before benchmark work.
 
 ---
 

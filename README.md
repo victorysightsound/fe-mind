@@ -33,8 +33,12 @@ The practical live-validation path is now established and repeatable:
 - larger real-world follow-up library now lives under `eval/live-library/`
 - larger real-world library now covers 18 scenarios and 66 checks
 - larger real-world library currently passes `66/66` in both `all` + `exact` and `all` + `ann`
+- memloft-derived real-data slice now lives under `eval/memloft-slice/`
+- memloft-derived real-data slice now covers 18 scenarios and 90 checks
+- memloft-derived real-data slice currently passes `90/90` in both `all` + `exact` and `all` + `ann`
 - standard local runner: `scripts/run-practical-eval.sh`
 - larger real-world runner: `scripts/run-live-library.sh`
+- memloft-derived real-data runner: `scripts/run-memloft-slice.sh`
 
 ## Migration
 
@@ -50,4 +54,5 @@ Key maintainer references:
 - `PRACTICAL_EVAL.md` — real-world validation plan and practical eval categories
 - `eval/practical/` — curated practical validation scenarios
 - `eval/live-library/` — larger real-world validation library
+- `eval/memloft-slice/` — memloft-derived technical real-data validation slice
 - `research/` — competitive landscape analysis

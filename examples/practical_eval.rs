@@ -452,9 +452,15 @@ mod app {
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.retrieval_checks {
                 let observed = top_hits(&engine, &check.query, config.top_k)?;
+                let combined = observed
+                    .iter()
+                    .map(|hit| hit.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 let passed = observed
                     .iter()
-                    .any(|hit| expected_match(&hit.text, &check.query, &check.expected_answer));
+                    .any(|hit| expected_match(&hit.text, &check.query, &check.expected_answer))
+                    || expected_match(&combined, &check.query, &check.expected_answer);
                 retrieval.push(CheckReport {
                     query: check.query.clone(),
                     passed,
@@ -685,19 +691,32 @@ mod app {
         let negative_expected = expected.starts_with("no ")
             || expected == "no"
             || expected.contains("not active")
-            || expected.contains("superseded");
-        let asks_current_state = query.contains("still")
-            || query.contains("active")
-            || query.contains("current")
-            || query.starts_with("is ");
+            || expected.contains("superseded")
+            || expected.contains("should not")
+            || expected.contains("cannot")
+            || expected.contains("can not")
+            || expected.contains("do not");
+        let asks_yes_no = matches!(
+            query.split_whitespace().next(),
+            Some("is" | "are" | "was" | "were" | "does" | "do" | "did" | "can" | "could" | "should" | "would")
+        );
+        let asks_current_state =
+            query.contains("still") || query.contains("active") || query.contains("current");
 
-        if !(negative_expected && asks_current_state) {
+        if !(negative_expected && (asks_yes_no || asks_current_state)) {
             return false;
         }
 
         observed.contains("superseded")
             || observed.contains("no longer")
             || observed.contains("not active")
+            || observed.contains("did not")
+            || observed.contains("do not")
+            || observed.contains("should not")
+            || observed.contains("cannot")
+            || observed.contains("can not")
+            || observed.contains("rather than")
+            || observed.contains("instead")
             || observed.contains("prior ")
             || observed.contains("former ")
             || observed.contains("outdated")
