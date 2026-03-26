@@ -167,9 +167,8 @@ benchmark sweep through RecallBench.
 
 Current larger-library baseline:
 
-- `all` + `exact` currently passes `36/44`
-- `all` + `ann` currently passes `36/44`
-- the exact and ANN failure sets currently match
-- the remaining misses are abstention cases, not broad recall failures
+- `all` + `exact` currently passes `44/44`
+- `all` + `ann` currently passes `44/44`
+- the exact and ANN results currently match on the full larger corpus
 - summary artifacts now include stable run metadata for backend, model, vector
   mode, duration, pass counts, and pass rate

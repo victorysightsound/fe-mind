@@ -116,14 +116,13 @@
       {
         "query": "What happens when vector search mode is off?",
         "expected_answer": "off uses FTS5 keyword search only."
-      }
-    ],
-    "abstention_checks": [
+      },
       {
         "query": "Does ann mode require a remote vector database?",
-        "expected_behavior": "abstain"
+        "expected_answer": "No. ann uses a shared in-memory index."
       }
-    ]
+    ],
+    "abstention_checks": []
   },
   {
     "id": "provider-defaults",
@@ -166,14 +165,13 @@
       {
         "query": "What is the default embedding model?",
         "expected_answer": "The default embedding model is all-MiniLM-L6-v2."
-      }
-    ],
-    "abstention_checks": [
+      },
       {
         "query": "Is Llama 3.3 the locked default extraction model for femind?",
-        "expected_behavior": "abstain"
+        "expected_answer": "No. gpt-oss-120b is the locked API default."
       }
-    ]
+    ],
+    "abstention_checks": []
   },
   {
     "id": "real-world-validation-order",
@@ -202,14 +200,13 @@
       {
         "query": "Are benchmark datasets the primary design target?",
         "expected_answer": "No, benchmark datasets are secondary."
-      }
-    ],
-    "abstention_checks": [
+      },
       {
         "query": "Should LongMemEval be the first gating step before any practical evaluation?",
-        "expected_behavior": "abstain"
+        "expected_answer": "No. Practical evaluation comes first and benchmarks are secondary."
       }
-    ]
+    ],
+    "abstention_checks": []
   },
   {
     "id": "current-baselines",
@@ -288,14 +285,13 @@
       {
         "query": "What are the standard non-LLM verification commands?",
         "expected_answer": "The standard non-LLM verification commands are cargo test, cargo test --features full, and cargo clippy --all-targets --all-features -- -D warnings."
-      }
-    ],
-    "abstention_checks": [
+      },
       {
         "query": "Is the standard validation entry point scripts/run-benchmark-suite.sh?",
-        "expected_behavior": "abstain"
+        "expected_answer": "No. The primary live-validation entry point is scripts/run-practical-eval.sh."
       }
-    ]
+    ],
+    "abstention_checks": []
   },
   {
     "id": "source-of-truth-docs",
@@ -324,14 +320,13 @@
       {
         "query": "Should markdown docs diverge from the spec database?",
         "expected_answer": "No, the markdown docs should stay aligned with the spec database."
-      }
-    ],
-    "abstention_checks": [
+      },
       {
         "query": "Is the primary local source of truth file femind_architecture.sql?",
-        "expected_behavior": "abstain"
+        "expected_answer": "No. The primary local source of truth is .docs/femind_spec.db."
       }
-    ]
+    ],
+    "abstention_checks": []
   },
   {
     "id": "migration-and-legacy-compatibility",
@@ -350,6 +345,12 @@
         "source": "ARCHITECTURE.md",
         "memory_type": "semantic",
         "text": "Legacy compatibility hooks remain so older .mindcore databases and mindcore_meta tables can still be opened safely."
+      },
+      {
+        "timestamp": "2026-03-26T00:00:00Z",
+        "source": "README.md",
+        "memory_type": "semantic",
+        "text": "The published mindcore crate remains the legacy package line; new work and future releases should target femind."
       }
     ],
     "retrieval_checks": [
@@ -360,14 +361,13 @@
       {
         "query": "Why do mindcore references still exist in some storage code?",
         "expected_answer": "Legacy compatibility hooks remain so older .mindcore databases and mindcore_meta tables can still be opened safely."
-      }
-    ],
-    "abstention_checks": [
+      },
       {
         "query": "Should new work still target the mindcore crate name?",
-        "expected_behavior": "abstain"
+        "expected_answer": "No. New work and future releases should target femind."
       }
-    ]
+    ],
+    "abstention_checks": []
   },
   {
     "id": "messy-maintainer-notes-extraction",

@@ -635,7 +635,9 @@ fn query_requires_strict_grounding(query: &str) -> bool {
         matches!(
             *token,
             "exact" | "precise" | "specific" | "total" | "cost" | "token" | "tokens"
-                | "price" | "version" | "number" | "id"
+                | "price" | "version" | "number" | "id" | "first" | "second"
+                | "third" | "fourth" | "fifth" | "reserved" | "removed"
+                | "remove" | "failed" | "fail"
         )
     });
     let asks_how_many = tokens.windows(2).any(|pair| pair == ["how", "many"]);
@@ -725,6 +727,17 @@ fn detail_tokens(value: &str) -> Vec<String> {
                     | "version"
                     | "number"
                     | "id"
+                    | "first"
+                    | "second"
+                    | "third"
+                    | "fourth"
+                    | "fifth"
+                    | "reserved"
+                    | "remove"
+                    | "removed"
+                    | "fail"
+                    | "failed"
+                    | "emotion"
                     | "publish"
                     | "published"
                     | "release"
@@ -937,6 +950,24 @@ mod tests {
         let query = "Which feature flag enables SQLCipher encryption and MCP server together?";
         let weak_hit = "Compile-time feature flags include api-embeddings for the DeepInfra embedding API, api-llm for the chat completions API, ann for HNSW approximate nearest neighbor, and full for everything except encryption and mcp-server.";
 
+        assert!(!lexical_grounding_ok(query, weak_hit));
+    }
+
+    #[test]
+    fn lexical_grounding_rejects_unsupported_ordinal_detail_query() {
+        let query = "What fourth cognitive memory type is reserved for emotions?";
+        let weak_hit = "The optimized memory model uses three cognitive memory types: episodic, semantic, and procedural.";
+
+        assert!(query_requires_strict_grounding(query));
+        assert!(!lexical_grounding_ok(query, weak_hit));
+    }
+
+    #[test]
+    fn lexical_grounding_rejects_removed_candidate_query_without_removal_evidence() {
+        let query = "Did Nemotron fail the broader live-usage sample and get removed from the candidate set?";
+        let weak_hit = "The broader live-usage sample passes 11/11 across four tested extraction models: openai/gpt-oss-120b, zai-org/GLM-4.7-Flash, gpt-5.4-mini, and gpt-5.1-codex-mini.";
+
+        assert!(query_requires_strict_grounding(query));
         assert!(!lexical_grounding_ok(query, weak_hit));
     }
 }

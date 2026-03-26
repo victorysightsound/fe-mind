@@ -134,6 +134,6 @@ As of 2026-03-26:
 - retrieval-only practical validation in `ann` mode passes `9/9`
 - broader live-usage validation from actual project docs passes `11/11` across all four tested extraction models
 - the larger real-world library under `eval/live-library/` is the next follow-up validation layer before benchmark work
-- the larger real-world library currently passes `36/44` in both `all` + `exact` and `all` + `ann`, with the remaining misses concentrated in abstention behavior
+- the larger real-world library currently passes `44/44` in both `all` + `exact` and `all` + `ann`
 - the standard local live-validation path is `scripts/run-practical-eval.sh`
 - practical real-world eval design is defined in `PRACTICAL_EVAL.md`
