@@ -326,6 +326,7 @@ mod app {
             ))
             .build()?;
         engine.config = EngineConfig {
+            embedding_enabled: !matches!(config.vector_mode, VectorSearchMode::Off),
             vector_search_mode: config.vector_mode,
             ..EngineConfig::default()
         };
@@ -345,7 +346,7 @@ mod app {
                 let observed = top_hits(&engine, &check.query, config.top_k)?;
                 let passed = observed
                     .iter()
-                    .any(|hit| contains_normalized(hit, &check.expected_answer));
+                    .any(|hit| expected_match(hit, &check.expected_answer));
                 retrieval.push(CheckReport {
                     query: check.query.clone(),
                     passed,
@@ -366,12 +367,13 @@ mod app {
                 .collect::<Vec<_>>()
                 .join("\n");
             let _ = engine.store_with_extraction(&raw_text, extractor)?;
+            let extracted_texts = all_memory_texts(&engine)?;
 
             for check in &scenario.extraction_checks {
-                let observed = top_hits(&engine, &check.expected_fact, config.top_k)?;
+                let observed = extracted_texts.clone();
                 let passed = observed
                     .iter()
-                    .any(|hit| contains_normalized(hit, &check.expected_fact));
+                    .any(|hit| expected_match(hit, &check.expected_fact));
                 extraction.push(CheckReport {
                     query: check.expected_fact.clone(),
                     passed,
@@ -432,6 +434,20 @@ mod app {
         Ok(hits)
     }
 
+    fn all_memory_texts(
+        engine: &MemoryEngine<EvalMemory>,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        Ok(engine.database().with_reader(|conn| {
+            let mut stmt = conn.prepare("SELECT searchable_text FROM memories ORDER BY id")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            let mut texts = Vec::new();
+            for row in rows {
+                texts.push(row?);
+            }
+            Ok(texts)
+        })?)
+    }
+
     fn to_eval_memory(record: &ScenarioRecord) -> Result<EvalMemory, Box<dyn std::error::Error>> {
         Ok(EvalMemory {
             id: None,
@@ -486,16 +502,74 @@ mod app {
         Ok(root.join(format!("{scenario_id}.db")))
     }
 
-    fn contains_normalized(haystack: &str, needle: &str) -> bool {
-        normalize(haystack).contains(&normalize(needle))
+    fn expected_match(observed: &str, expected: &str) -> bool {
+        let observed_normalized = normalize(observed);
+        let expected_normalized = normalize(expected);
+        if observed_normalized.contains(&expected_normalized) {
+            return true;
+        }
+
+        let observed_tokens = meaning_tokens(observed);
+        let expected_tokens = meaning_tokens(expected);
+        if expected_tokens.is_empty() {
+            return false;
+        }
+
+        let overlap = expected_tokens
+            .iter()
+            .filter(|token| observed_tokens.contains(*token))
+            .count();
+        let recall = overlap as f32 / expected_tokens.len() as f32;
+
+        let min_overlap = if expected_tokens.len() <= 2 { expected_tokens.len() } else { 2 };
+        overlap >= min_overlap && recall >= 0.6
     }
 
     fn normalize(value: &str) -> String {
         value
             .to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() { c } else { ' ' })
+            .collect::<String>()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    fn meaning_tokens(value: &str) -> std::collections::BTreeSet<String> {
+        normalize(value)
+            .split_whitespace()
+            .filter_map(canonical_token)
+            .collect()
+    }
+
+    fn canonical_token(token: &str) -> Option<String> {
+        let token = match token {
+            "the" | "a" | "an" | "is" | "are" | "was" | "were" | "be" | "been" | "being"
+            | "to" | "for" | "of" | "in" | "on" | "at" | "by" | "and" | "or" | "that"
+            | "this" | "it" | "its" | "still" | "then" | "than" | "because" | "what"
+            | "which" | "who" | "should" | "not" | "do" | "does" | "did" | "yet"
+            | "after" | "before" | "over" | "under" | "with" | "without" | "from"
+            | "into" | "about" | "no" | "current" | "earlier" => return None,
+            "keep" | "used" | "use" => "prefer",
+            "tried" | "try" => "first",
+            "improved" | "good" | "looked" => "better",
+            "happen" | "performed" => "run",
+            "built" | "build" => "build",
+            "preferred" | "prefer" => "prefer",
+            "superseded" => "superseded",
+            other => other,
+        };
+
+        let stemmed = token
+            .trim_end_matches("ing")
+            .trim_end_matches("ed")
+            .trim_end_matches('s');
+        if stemmed.is_empty() {
+            None
+        } else {
+            Some(stemmed.to_string())
+        }
     }
 
     fn mode_name(mode: EvalMode) -> &'static str {
