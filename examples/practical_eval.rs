@@ -231,11 +231,17 @@ mod app {
     }
 
     #[derive(Debug, Serialize)]
+    struct ObservedHit {
+        text: String,
+        score: f32,
+    }
+
+    #[derive(Debug, Serialize)]
     struct CheckReport {
         query: String,
         passed: bool,
         expected: String,
-        observed: Vec<String>,
+        observed: Vec<ObservedHit>,
     }
 
     #[derive(Debug, Serialize)]
@@ -348,7 +354,7 @@ mod app {
                 let observed = top_hits(&engine, &check.query, config.top_k)?;
                 let passed = observed
                     .iter()
-                    .any(|hit| expected_match(hit, &check.expected_answer));
+                    .any(|hit| expected_match(&hit.text, &check.expected_answer));
                 retrieval.push(CheckReport {
                     query: check.query.clone(),
                     passed,
@@ -380,7 +386,10 @@ mod app {
                     query: check.expected_fact.clone(),
                     passed,
                     expected: check.expected_fact.clone(),
-                    observed,
+                    observed: observed
+                        .into_iter()
+                        .map(|text| ObservedHit { text, score: 1.0 })
+                        .collect(),
                 });
             }
         }
@@ -414,7 +423,7 @@ mod app {
         engine: &MemoryEngine<EvalMemory>,
         query: &str,
         top_k: usize,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ObservedHit>, Box<dyn std::error::Error>> {
         let results = engine
             .search(query)
             .mode(SearchMode::Auto)
@@ -431,7 +440,10 @@ mod app {
                 )
                 .map_err(Into::into)
             })?;
-            hits.push(text);
+            hits.push(ObservedHit {
+                text,
+                score: result.score,
+            });
         }
         Ok(hits)
     }

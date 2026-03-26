@@ -325,6 +325,8 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         // Near-duplicate filtering: remove results >0.95 similar to higher-ranked ones
         deduplicate_by_vector_similarity(self.db, &mut results, model, 0.95);
 
+        apply_strict_detail_query_filter(self.db, &self.query, &mut results);
+
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
         }
@@ -595,6 +597,116 @@ fn deduplicate_by_vector_similarity(
     });
 }
 
+fn apply_strict_detail_query_filter(
+    db: &Database,
+    query: &str,
+    results: &mut Vec<SearchResult>,
+) {
+    if !query_requires_strict_grounding(query) || results.is_empty() {
+        return;
+    }
+
+    results.retain(|result| {
+        let text = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(crate::error::FemindError::Database)
+            })
+            .ok();
+
+        let Some(text) = text else { return false };
+        lexical_grounding_ok(query, &text)
+    });
+}
+
+fn query_requires_strict_grounding(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    let tokens: Vec<_> = normalized.split_whitespace().collect();
+
+    if tokens.is_empty() {
+        return false;
+    }
+
+    let has_exact_signal = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "exact" | "precise" | "specific" | "total" | "cost" | "token" | "tokens"
+                | "price" | "version" | "number" | "id"
+        )
+    });
+    let asks_how_many = tokens.windows(2).any(|pair| pair == ["how", "many"]);
+
+    has_exact_signal || asks_how_many
+}
+
+fn lexical_grounding_ok(query: &str, text: &str) -> bool {
+    let query_tokens = meaning_tokens(query);
+    let text_tokens = meaning_tokens(text);
+
+    if query_tokens.is_empty() || text_tokens.is_empty() {
+        return false;
+    }
+
+    let overlap = query_tokens
+        .iter()
+        .filter(|token| text_tokens.contains(*token))
+        .count();
+
+    let recall = overlap as f32 / query_tokens.len() as f32;
+    overlap >= 2 || recall >= 0.5
+}
+
+fn meaning_tokens(value: &str) -> Vec<String> {
+    normalize_text(value)
+        .split_whitespace()
+        .filter_map(canonical_token)
+        .collect()
+}
+
+fn canonical_token(token: &str) -> Option<String> {
+    let token = match token {
+        "the" | "a" | "an" | "is" | "are" | "was" | "were" | "be" | "been" | "being"
+        | "to" | "for" | "of" | "in" | "on" | "at" | "by" | "and" | "or" | "that"
+        | "this" | "it" | "its" | "still" | "then" | "than" | "because" | "what"
+        | "which" | "who" | "should" | "not" | "do" | "does" | "did" | "yet"
+        | "after" | "before" | "over" | "under" | "with" | "without" | "from"
+        | "into" | "about" | "no" | "current" | "earlier" => return None,
+        "keep" | "used" | "use" => "prefer",
+        "tried" | "try" => "first",
+        "improved" | "good" | "looked" => "better",
+        "happen" | "performed" => "run",
+        "built" | "build" => "build",
+        "preferred" | "prefer" => "prefer",
+        "superseded" => "superseded",
+        other => other,
+    };
+
+    let stemmed = token
+        .trim_end_matches("ing")
+        .trim_end_matches("ed")
+        .trim_end_matches('s');
+    if stemmed.is_empty() {
+        None
+    } else {
+        Some(stemmed.to_string())
+    }
+}
+
+fn normalize_text(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -739,5 +851,25 @@ mod tests {
             .execute()
             .expect("search failed");
         assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn strict_grounding_detects_exact_detail_queries() {
+        assert!(query_requires_strict_grounding(
+            "What was the exact total token cost of the last Nemotron run?"
+        ));
+        assert!(!query_requires_strict_grounding(
+            "Is desktop-first still the active plan?"
+        ));
+    }
+
+    #[test]
+    fn lexical_grounding_rejects_single_token_semantic_neighbor() {
+        let query = "What was the exact total token cost of the last Nemotron run?";
+        let weak_hit = "Need to compare extraction quality between gpt-oss-120b and Nemotron after the smoke test.";
+        let grounded_hit = "The last Nemotron run cost 1832 input tokens and 411 output tokens total.";
+
+        assert!(!lexical_grounding_ok(query, weak_hit));
+        assert!(lexical_grounding_ok(query, grounded_hit));
     }
 }
