@@ -23,6 +23,7 @@ Each scenario includes:
 - `category`
 - `goal`
 - `records`
+- `records[].memory_type` (`episodic`, `semantic`, or `procedural`)
 - `retrieval_checks`
 - optional `extraction_checks`
 - optional `abstention_checks`

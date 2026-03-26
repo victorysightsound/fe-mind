@@ -8,16 +8,19 @@
       {
         "timestamp": "2026-03-10T09:00:00Z",
         "source": "meeting-note",
+        "memory_type": "episodic",
         "text": "Initial thought: build the desktop shell before the memory engine so the UI can guide the API shape."
       },
       {
         "timestamp": "2026-03-12T15:30:00Z",
         "source": "decision-note",
+        "memory_type": "semantic",
         "text": "Decision: build the memory engine first. Desktop work stays downstream until the core retrieval and extraction behavior is stable."
       },
       {
         "timestamp": "2026-03-13T10:00:00Z",
         "source": "planning-note",
+        "memory_type": "semantic",
         "text": "The prior desktop-first idea is superseded. Current build order is femind first, then feloop."
       }
     ],
@@ -41,11 +44,13 @@
       {
         "timestamp": "2026-02-01T08:00:00Z",
         "source": "user-note",
+        "memory_type": "semantic",
         "text": "For quick experiments, prefer local embeddings because they keep everything offline."
       },
       {
         "timestamp": "2026-03-20T08:00:00Z",
         "source": "user-note",
+        "memory_type": "semantic",
         "text": "Update: for benchmark and evaluation workflows, prefer DeepInfra MiniLM embeddings because they are much faster and cheap enough."
       }
     ],
@@ -69,6 +74,7 @@
       {
         "timestamp": "2026-03-22T14:00:00Z",
         "source": "meeting-note",
+        "memory_type": "episodic",
         "text": "Wed sync notes. ANN looked good after rebuild fix. Still need live provider test. Keep DeepInfra for embeddings, try gpt-oss-120b first for extraction. Don't do large benchmark runs yet. Need to confirm stale facts lose to current facts before calling this production."
       }
     ],
@@ -102,11 +108,13 @@
       {
         "timestamp": "2026-03-01T09:00:00Z",
         "source": "status-note",
+        "memory_type": "semantic",
         "text": "The repo is still named mindcore and has not been moved into the suite yet."
       },
       {
         "timestamp": "2026-03-25T18:00:00Z",
         "source": "status-note",
+        "memory_type": "semantic",
         "text": "The repo is now fe-mind and the crate name is femind."
       }
     ],
@@ -130,16 +138,19 @@
       {
         "timestamp": "2026-03-15T11:00:00Z",
         "source": "ops-note",
+        "memory_type": "procedural",
         "text": "DeepInfra API key auth was verified for femind validation."
       },
       {
         "timestamp": "2026-03-15T11:05:00Z",
         "source": "ops-note",
+        "memory_type": "semantic",
         "text": "OpenRouter key remains available for unrelated experiments."
       },
       {
         "timestamp": "2026-03-15T11:10:00Z",
         "source": "ops-note",
+        "memory_type": "procedural",
         "text": "Anthropic CLI auth is configured locally but should not be used for the first DeepInfra validation pass."
       }
     ],
@@ -159,11 +170,13 @@
       {
         "timestamp": "2026-03-18T12:00:00Z",
         "source": "project-note",
+        "memory_type": "semantic",
         "text": "Need to compare extraction quality between gpt-oss-120b and Nemotron after the smoke test."
       },
       {
         "timestamp": "2026-03-18T12:05:00Z",
         "source": "project-note",
+        "memory_type": "procedural",
         "text": "Do not run large benchmark sweeps before the practical eval set looks good."
       }
     ],

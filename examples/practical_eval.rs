@@ -25,6 +25,7 @@ mod app {
         id: Option<i64>,
         text: String,
         source: String,
+        memory_type: MemoryType,
         created_at: DateTime<Utc>,
     }
 
@@ -38,7 +39,7 @@ mod app {
         }
 
         fn memory_type(&self) -> MemoryType {
-            MemoryType::Semantic
+            self.memory_type
         }
 
         fn importance(&self) -> u8 {
@@ -58,6 +59,7 @@ mod app {
     struct ScenarioRecord {
         timestamp: String,
         source: String,
+        memory_type: String,
         text: String,
     }
 
@@ -453,8 +455,14 @@ mod app {
             id: None,
             text: record.text.clone(),
             source: record.source.clone(),
+            memory_type: parse_memory_type(&record.memory_type)?,
             created_at: DateTime::parse_from_rfc3339(&record.timestamp)?.with_timezone(&Utc),
         })
+    }
+
+    fn parse_memory_type(value: &str) -> Result<MemoryType, Box<dyn std::error::Error>> {
+        MemoryType::from_str(&value.to_lowercase())
+            .ok_or_else(|| format!("unknown memory_type '{value}'").into())
     }
 
     fn load_scenarios(path: &Path) -> Result<Vec<Scenario>, Box<dyn std::error::Error>> {
