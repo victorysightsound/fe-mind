@@ -683,9 +683,56 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Graph filtering: demote results that have been superseded by newer facts.
-        // Only if graph is enabled (A6: EngineConfig master switch + AssemblyConfig depth)
         if self.config.graph_enabled && config.graph_depth > 0 {
+            use crate::memory::{GraphMemory, RelationType};
+
+            // Graph expansion: traverse from the strongest lexical/semantic hits and
+            // pull in connected memories with a depth-based score discount.
+            let seed_results: Vec<_> = merged.iter().take(limit.min(20)).cloned().collect();
+            let mut expanded: HashMap<i64, crate::search::builder::SearchResult> = merged
+                .into_iter()
+                .map(|result| (result.memory_id, result))
+                .collect();
+
+            for seed in &seed_results {
+                let Ok(nodes) = GraphMemory::traverse(&self.db, seed.memory_id, config.graph_depth) else {
+                    continue;
+                };
+
+                for node in nodes {
+                    let relation_boost = match node.relation {
+                        RelationType::SupersededBy => 1.2,
+                        RelationType::ValidatedBy => 1.0,
+                        RelationType::SolvedBy | RelationType::DependsOn => 0.9,
+                        RelationType::RelatedTo | RelationType::PartOf => 0.8,
+                        RelationType::CausedBy | RelationType::ConflictsWith => 0.75,
+                        RelationType::Custom(_) => 0.75,
+                    };
+                    let candidate_score =
+                        seed.score * GraphMemory::depth_boost(node.depth) * relation_boost;
+
+                    expanded
+                        .entry(node.memory_id)
+                        .and_modify(|existing| {
+                            if candidate_score > existing.score {
+                                existing.score = candidate_score;
+                            }
+                        })
+                        .or_insert(crate::search::builder::SearchResult {
+                            memory_id: node.memory_id,
+                            score: candidate_score,
+                        });
+                }
+            }
+
+            merged = expanded.into_values().collect();
+            merged.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            // Graph filtering: demote results that have been superseded by newer facts.
             let mut superseded_ids: std::collections::HashSet<i64> =
                 std::collections::HashSet::new();
 
@@ -1235,6 +1282,52 @@ mod tests {
         assert!(
             results.iter().any(|r| r.memory_id == old_id),
             "stale fact should still be retrievable, just not top-ranked"
+        );
+    }
+
+    #[test]
+    fn graph_depth_expands_to_connected_current_fact() {
+        use crate::context::{AssemblyConfig, ContextBudget};
+        use crate::memory::{GraphMemory, RelationType};
+        use chrono::Duration;
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        let old = TestMem {
+            id: None,
+            text: "Desktop-first is still the active plan.".into(),
+            created_at: Utc::now() - Duration::days(7),
+        };
+        let current = TestMem {
+            id: None,
+            text: "Desktop-first was superseded. Current build order starts with femind.".into(),
+            created_at: Utc::now(),
+        };
+
+        let StoreResult::Added(old_id) = engine.store(&old).expect("store old") else {
+            panic!("expected Added");
+        };
+        let StoreResult::Added(current_id) = engine.store(&current).expect("store current") else {
+            panic!("expected Added");
+        };
+        GraphMemory::relate(&engine.db, old_id, current_id, &RelationType::SupersededBy)
+            .expect("relate");
+
+        let assembly = engine
+            .assemble_context_with_config(
+                "Is desktop-first still the active plan?",
+                &ContextBudget::new(1024),
+                &AssemblyConfig {
+                    graph_depth: 1,
+                    max_per_session: 0,
+                    ..AssemblyConfig::default()
+                },
+            )
+            .expect("assemble");
+
+        let rendered = assembly.render().to_lowercase();
+        assert!(
+            rendered.contains("current build order starts with femind"),
+            "graph-expanded retrieval should include the connected current fact"
         );
     }
 

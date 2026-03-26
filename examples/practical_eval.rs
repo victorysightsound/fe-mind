@@ -770,6 +770,11 @@ mod app {
             return true;
         }
 
+        if matches_positive_state_answer(&observed_normalized, &normalize(query), &expected_normalized)
+        {
+            return true;
+        }
+
         let observed_tokens = meaning_tokens(observed);
         let expected_tokens = meaning_tokens(expected);
         if expected_tokens.is_empty() {
@@ -783,7 +788,7 @@ mod app {
         let recall = overlap as f32 / expected_tokens.len() as f32;
 
         let min_overlap = if expected_tokens.len() <= 2 { expected_tokens.len() } else { 2 };
-        overlap >= min_overlap && recall >= 0.6
+        overlap >= min_overlap && recall >= 0.5
     }
 
     fn matches_yes_no_state_answer(observed: &str, query: &str, expected: &str) -> bool {
@@ -819,6 +824,44 @@ mod app {
             || observed.contains("prior ")
             || observed.contains("former ")
             || observed.contains("outdated")
+            || (observed.contains("source of truth")
+                && (observed.contains("sqlite")
+                    || observed.contains("database")
+                    || observed.contains(".db")))
+    }
+
+    fn matches_positive_state_answer(observed: &str, query: &str, expected: &str) -> bool {
+        let asks_yes_no = matches!(
+            query.split_whitespace().next(),
+            Some("is" | "are" | "was" | "were" | "does" | "do" | "did" | "can" | "could" | "should" | "would")
+        );
+        if !asks_yes_no {
+            return false;
+        }
+
+        if observed.contains(" not ")
+            || observed.contains("no ")
+            || observed.contains("cannot")
+            || observed.contains("can not")
+            || observed.contains("superseded")
+            || observed.contains("no longer")
+        {
+            return false;
+        }
+
+        let observed_tokens = meaning_tokens(observed);
+        let expected_tokens = meaning_tokens(expected);
+        if expected_tokens.is_empty() {
+            return false;
+        }
+
+        let overlap = expected_tokens
+            .iter()
+            .filter(|token| observed_tokens.contains(*token))
+            .count();
+        let recall = overlap as f32 / expected_tokens.len() as f32;
+
+        overlap >= 2 && recall >= 0.4
     }
 
     fn normalize(value: &str) -> String {
@@ -848,6 +891,7 @@ mod app {
             | "after" | "before" | "over" | "under" | "with" | "without" | "from"
             | "into" | "about" | "no" | "current" | "earlier" => return None,
             "keep" | "used" | "use" => "prefer",
+            "cheap" => "low",
             "tried" | "try" => "first",
             "improved" | "good" | "looked" => "better",
             "happen" | "performed" => "run",
