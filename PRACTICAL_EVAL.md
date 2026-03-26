@@ -81,3 +81,18 @@ Before larger live runs or benchmark comparisons:
 
 `femind` should be treated as production-ready only when the practical eval
 set is directionally strong, repeatable, and free of obvious category failures.
+
+## Repeatable Command
+
+The primary live-validation entry point is:
+
+```bash
+cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+  --scenarios eval/practical/scenarios.json \
+  --mode all \
+  --vector-mode exact \
+  --summary target/practical-eval/summary.json
+```
+
+The example uses a runtime key command and does not require secrets to be
+written into source files or shell history.

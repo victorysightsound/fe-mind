@@ -34,6 +34,34 @@ Each scenario includes:
 3. compare the actual answer to the expected answer
 4. note whether the failure is extraction, storage, ranking, or abstention
 
+## Repeatable Runner
+
+The curated set is wired to the `practical_eval` example:
+
+```bash
+cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+  --scenarios eval/practical/scenarios.json \
+  --mode all \
+  --vector-mode exact \
+  --summary target/practical-eval/summary.json
+```
+
+Useful variants:
+
+```bash
+# Retrieval only
+cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+  --mode retrieval --vector-mode exact
+
+# Extraction only
+cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+  --mode extraction --vector-mode exact
+
+# ANN retrieval path
+cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+  --mode retrieval --vector-mode ann
+```
+
 ## Scope
 
 This is the primary real-world validation set for `femind`.

@@ -54,6 +54,16 @@ Goals:
 - verify `store_with_extraction()` metrics are sensible
 - verify retrieved context is coherent for follow-up questioning
 
+Repeatable command surface:
+
+```bash
+cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+  --scenarios eval/practical/scenarios.json \
+  --mode all \
+  --vector-mode exact \
+  --summary target/practical-eval/summary.json
+```
+
 ## Phase 3: Provider Comparison
 
 Only after Phase 2 succeeds:

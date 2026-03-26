@@ -1,4 +1,5 @@
 mod api;
+#[cfg(feature = "cli-llm")]
 mod cli;
 
 #[cfg(feature = "api-llm")]
