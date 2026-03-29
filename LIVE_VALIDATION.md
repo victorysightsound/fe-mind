@@ -1,4 +1,4 @@
-# femind Live Validation Plan
+# FeMind Live Validation Plan
 
 ## Purpose
 

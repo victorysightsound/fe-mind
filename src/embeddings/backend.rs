@@ -9,6 +9,7 @@ use crate::error::Result;
 /// - `FallbackBackend`: wraps an optional backend, degrades to FTS5-only
 /// - `CandleNativeBackend`: all-MiniLM-L6-v2 via BERT (feature: `local-embeddings`)
 /// - `ApiBackend`: OpenAI-compatible embedding API (feature: `api-embeddings`)
+/// - `RemoteEmbeddingBackend`: local-network MiniLM service (feature: `remote-embeddings`)
 pub trait EmbeddingBackend: Send + Sync {
     /// Generate embedding for a single text.
     fn embed(&self, text: &str) -> Result<Vec<f32>>;
@@ -46,6 +47,24 @@ pub trait EmbeddingBackend: Send + Sync {
     /// Used to filter stored vectors: only vectors from the same model
     /// are used in similarity search (Decision 020).
     fn model_name(&self) -> &str;
+
+    /// Explicit embedding-profile identifier for compatibility checks.
+    ///
+    /// This is broader than `model_name()`: it can encode preprocessing,
+    /// truncation, or other runtime-contract details that affect whether two
+    /// vector sets should be treated as equivalent.
+    fn embedding_profile(&self) -> String {
+        self.model_name().to_string()
+    }
+
+    /// Stored model-name aliases that should be considered compatible with the
+    /// current backend when reading existing vectors.
+    ///
+    /// New writes should use `model_name()`. This method exists so older local
+    /// labels can still match after a backend starts writing a canonical name.
+    fn compatibility_model_names(&self) -> Vec<String> {
+        vec![self.model_name().to_string()]
+    }
 }
 
 #[cfg(test)]

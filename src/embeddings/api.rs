@@ -19,6 +19,7 @@ mod inner {
         base_url: String,
         api_key: String,
         model: String,
+        canonical_model_name: String,
         dimensions: usize,
     }
 
@@ -30,11 +31,13 @@ mod inner {
             model: impl Into<String>,
             dimensions: usize,
         ) -> Self {
+            let model = model.into();
             Self {
                 agent: ureq::Agent::new(),
                 base_url: base_url.into().trim_end_matches('/').to_string(),
                 api_key: api_key.into(),
-                model: model.into(),
+                canonical_model_name: crate::embeddings::canonical_model_name(&model),
+                model,
                 dimensions,
             }
         }
@@ -145,7 +148,15 @@ mod inner {
         }
 
         fn model_name(&self) -> &str {
-            &self.model
+            &self.canonical_model_name
+        }
+
+        fn embedding_profile(&self) -> String {
+            crate::embeddings::embedding_profile_for_model(&self.model, self.dimensions)
+        }
+
+        fn compatibility_model_names(&self) -> Vec<String> {
+            crate::embeddings::compatibility_model_names(&self.model)
         }
     }
 }

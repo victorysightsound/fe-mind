@@ -28,8 +28,17 @@ local-embeddings = [
     "dep:hf-hub",
 ]
 
+# CUDA support for the local Candle MiniLM backend
+cuda = ["local-embeddings", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+
 # API embeddings — OpenAI-compatible /v1/embeddings endpoint (DeepInfra, etc.)
 api-embeddings = ["dep:ureq"]
+
+# Remote embeddings — local-network MiniLM embedding service
+remote-embeddings = ["dep:ureq"]
+
+# Embedded HTTP service for FeMind MiniLM remote execution
+embed-service = ["local-embeddings", "remote-embeddings", "dep:axum", "dep:tokio"]
 
 # API LLM — OpenAI-compatible /v1/chat/completions endpoint
 api-llm = ["dep:ureq"]
@@ -77,6 +86,8 @@ keychain = ["dep:keyring"]
 full = [
     "vector-search",
     "api-embeddings",
+    "remote-embeddings",
+    "embed-service",
     "api-llm",
     "cli-llm",
     "llm-ingest",
@@ -94,13 +105,14 @@ full = [
 rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 sha2 = "0.10"
 tracing = "0.1"
 
 # Async runtime (only for vector-search background indexer and embedding inference)
-tokio = { version = "1", features = ["rt", "sync"], optional = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "net", "signal"], optional = true }
 
 # Local embeddings (candle)
 candle-core = { version = "0.9", optional = true }
@@ -156,3 +168,8 @@ panic = "deny"
 should_implement_trait = "allow"
 if_same_then_else = "allow"
 type_complexity = "allow"
+
+[[bin]]
+name = "femind-embed-service"
+path = "src/bin/femind-embed-service.rs"
+required-features = ["embed-service"]

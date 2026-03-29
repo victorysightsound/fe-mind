@@ -1,4 +1,4 @@
-# femind Practical Evaluation
+# FeMind Practical Evaluation
 
 ## Purpose
 

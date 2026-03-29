@@ -16,9 +16,15 @@ mod inner {
     use crate::embeddings::EmbeddingBackend;
     use crate::error::{FemindError, Result};
 
-    const MODEL_REPO: &str = "sentence-transformers/all-MiniLM-L6-v2";
-    const MODEL_NAME: &str = "all-MiniLM-L6-v2";
-    const DIMENSIONS: usize = 384;
+    const MODEL_REPO: &str = crate::embeddings::MINILM_MODEL_REPO;
+    const DIMENSIONS: usize = crate::embeddings::MINILM_DIMENSIONS;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum LocalEmbeddingDevice {
+        Auto,
+        Cpu,
+        Cuda,
+    }
 
     /// Embedding backend using all-MiniLM-L6-v2 via candle's BERT.
     ///
@@ -31,13 +37,23 @@ mod inner {
         model: BertModel,
         tokenizer: Tokenizer,
         device: Device,
+        device_label: String,
         dimensions_override: Option<usize>,
     }
 
     impl CandleNativeBackend {
         /// Create with auto-downloaded model from HuggingFace.
         pub fn new() -> Result<Self> {
-            let device = Device::Cpu;
+            Self::new_with_device(LocalEmbeddingDevice::Cpu, 0)
+        }
+
+        /// Create with explicit runtime device selection.
+        pub fn new_with_device(
+            device_mode: LocalEmbeddingDevice,
+            cuda_ordinal: usize,
+        ) -> Result<Self> {
+            let device = select_device(device_mode, cuda_ordinal)?;
+            let device_label = describe_device(&device);
 
             let repo =
                 Repo::with_revision(MODEL_REPO.to_string(), RepoType::Model, "main".to_string());
@@ -55,7 +71,7 @@ mod inner {
                 .get("model.safetensors")
                 .map_err(|e| FemindError::ModelNotAvailable(format!("model.safetensors: {e}")))?;
 
-            Self::from_paths(&config_path, &tokenizer_path, &weights_path, device)
+            Self::from_paths(&config_path, &tokenizer_path, &weights_path, device, device_label)
         }
 
         /// Create from pre-downloaded model files.
@@ -76,7 +92,13 @@ mod inner {
                 }
             }
 
-            Self::from_paths(&config_path, &tokenizer_path, &weights_path, Device::Cpu)
+            Self::from_paths(
+                &config_path,
+                &tokenizer_path,
+                &weights_path,
+                Device::Cpu,
+                "cpu".to_string(),
+            )
         }
 
         /// Set Matryoshka dimension override (truncate vectors after embedding).
@@ -90,6 +112,7 @@ mod inner {
             tokenizer_path: &Path,
             weights_path: &Path,
             device: Device,
+            device_label: String,
         ) -> Result<Self> {
             let config_str = std::fs::read_to_string(config_path)?;
             let config: Config = serde_json::from_str(&config_str)
@@ -113,8 +136,17 @@ mod inner {
                 model,
                 tokenizer,
                 device,
+                device_label,
                 dimensions_override: None,
             })
+        }
+
+        pub fn device_label(&self) -> &str {
+            &self.device_label
+        }
+
+        pub fn execution_mode(&self) -> &'static str {
+            execution_mode_from_label(&self.device_label)
         }
 
         /// Mean pooling with attention mask weighting.
@@ -240,10 +272,76 @@ mod inner {
         }
 
         fn model_name(&self) -> &str {
-            MODEL_NAME
+            crate::embeddings::MINILM_CANONICAL_NAME
+        }
+
+        fn embedding_profile(&self) -> String {
+            crate::embeddings::embedding_profile_for_model(self.model_name(), self.dimensions())
+        }
+
+        fn compatibility_model_names(&self) -> Vec<String> {
+            crate::embeddings::compatibility_model_names(self.model_name())
+        }
+    }
+
+    fn select_device(device_mode: LocalEmbeddingDevice, cuda_ordinal: usize) -> Result<Device> {
+        match device_mode {
+            LocalEmbeddingDevice::Cpu => Ok(Device::Cpu),
+            LocalEmbeddingDevice::Auto => select_cuda_device(cuda_ordinal)
+                .map_err(|error| {
+                    FemindError::Embedding(format!(
+                        "failed to probe CUDA device {cuda_ordinal}: {error}"
+                    ))
+                })
+                .or(Ok(Device::Cpu)),
+            LocalEmbeddingDevice::Cuda => select_cuda_device(cuda_ordinal).map_err(|error| {
+                FemindError::ModelNotAvailable(format!(
+                    "CUDA device {cuda_ordinal} requested but unavailable: {error}"
+                ))
+            }),
+        }
+    }
+
+    #[cfg(feature = "cuda")]
+    fn select_cuda_device(ordinal: usize) -> std::result::Result<Device, candle_core::Error> {
+        Device::new_cuda(ordinal)
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    fn select_cuda_device(_ordinal: usize) -> std::result::Result<Device, String> {
+        Err("femind was built without the `cuda` feature".to_string())
+    }
+
+    fn describe_device(device: &Device) -> String {
+        format!("{device:?}").to_ascii_lowercase()
+    }
+
+    fn execution_mode_from_label(device_label: &str) -> &'static str {
+        if device_label.contains("cuda") {
+            "local-gpu"
+        } else {
+            "local-cpu"
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::execution_mode_from_label;
+
+        #[test]
+        fn cpu_like_labels_report_local_cpu() {
+            assert_eq!(execution_mode_from_label("cpu"), "local-cpu");
+            assert_eq!(execution_mode_from_label("metal"), "local-cpu");
+        }
+
+        #[test]
+        fn cuda_like_labels_report_local_gpu() {
+            assert_eq!(execution_mode_from_label("cuda"), "local-gpu");
+            assert_eq!(execution_mode_from_label("cuda:0"), "local-gpu");
+            assert_eq!(execution_mode_from_label("device(cuda,0)"), "local-gpu");
         }
     }
 }
 
 #[cfg(feature = "local-embeddings")]
-pub use inner::CandleNativeBackend;
+pub use inner::{CandleNativeBackend, LocalEmbeddingDevice};

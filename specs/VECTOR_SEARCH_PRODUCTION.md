@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make femind's vector search and embedding pipeline production-ready: correct,
+Make FeMind's vector search and embedding pipeline production-ready: correct,
 efficient, well-tested, and performant enough for real workloads (LongMemEval-S:
 ~800 memories per question, 10 questions = 8000 embeddings + searches).
 

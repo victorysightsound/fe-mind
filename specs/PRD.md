@@ -1,4 +1,4 @@
-# femind — Product Requirements Document
+# FeMind — Product Requirements Document
 
 **Version:** 1.0
 **Date:** 2026-03-19
@@ -14,7 +14,7 @@ AI agent applications in Rust need persistent memory — SQLite + FTS5 + scoring
 
 ### 1.2 Solution
 
-femind is a standalone Rust library crate providing a pluggable, feature-gated memory engine. Consumers implement `MemoryRecord` for their types and get storage, search, decay, consolidation, and context assembly — from a 2MB FTS5-only build to a 40MB full-featured engine.
+FeMind is a standalone Rust library crate providing a pluggable, feature-gated memory engine. Consumers implement `MemoryRecord` for their types and get storage, search, decay, consolidation, and context assembly — from a 2MB FTS5-only build to a 40MB full-featured engine.
 
 ### 1.3 Success Criteria
 
@@ -53,7 +53,7 @@ Full architecture, traits, schemas, and search pipeline are defined in `ARCHITEC
 
 ### Phase 1: Foundation (Storage + FTS5 + CRUD)
 
-The core that everything else builds on. After this phase, femind is a functional keyword-search memory engine.
+The core that everything else builds on. After this phase, FeMind is a functional keyword-search memory engine.
 
 **Deliverables:**
 - `Cargo.toml` with crate metadata, `default = ["fts5"]`
@@ -94,7 +94,7 @@ The core that everything else builds on. After this phase, femind is a functiona
 
 ### Phase 2: Scoring + Context Assembly
 
-Post-search scoring and token-budget context assembly. After this phase, femind can rank results intelligently and produce LLM-ready context.
+Post-search scoring and token-budget context assembly. After this phase, FeMind can rank results intelligently and produce LLM-ready context.
 
 **Deliverables:**
 - `ScoringStrategy` trait (takes `&MemoryMeta`)
@@ -124,7 +124,7 @@ Post-search scoring and token-budget context assembly. After this phase, femind 
 
 ### Phase 3: Consolidation + Hierarchy
 
-Hash-based dedup on store, three-tier memory hierarchy, and basic consolidation. After this phase, femind prevents duplicates and supports tiered memory.
+Hash-based dedup on store, three-tier memory hierarchy, and basic consolidation. After this phase, FeMind prevents duplicates and supports tiered memory.
 
 **Deliverables:**
 - `ConsolidationStrategy` trait (takes `&MemoryMeta`)
@@ -182,7 +182,7 @@ ACT-R cognitive decay model. After this phase, memories naturally fade or streng
 
 ### Phase 5: Vector Search + Hybrid RRF
 
-Candle embedding backend, brute-force vector search, and RRF hybrid merge. After this phase, femind has semantic search.
+Candle embedding backend, brute-force vector search, and RRF hybrid merge. After this phase, FeMind has semantic search.
 
 **Deliverables:**
 - `EmbeddingBackend` trait (async fn embed, embed_batch, dimensions, model_name)
@@ -225,7 +225,7 @@ Candle embedding backend, brute-force vector search, and RRF hybrid merge. After
 
 ### Phase 6: Graph Memory
 
-SQLite relationship tables with recursive CTE traversal. After this phase, femind supports memory relationships and multi-hop queries.
+SQLite relationship tables with recursive CTE traversal. After this phase, FeMind supports memory relationships and multi-hop queries.
 
 **Deliverables:**
 - `memory_relations` table with indexes

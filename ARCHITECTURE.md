@@ -1,4 +1,4 @@
-# femind: Universal Memory Engine Architecture
+# FeMind: Universal Memory Engine Architecture
 
 **Version:** 0.2.0
 **Updated:** 2026-03-25
@@ -133,13 +133,13 @@ full               # Everything except encryption/mcp-server
 
 ## Overview
 
-**femind** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications. It handles persistent storage, keyword search (FTS5), vector search (candle), hybrid retrieval (RRF), graph relationships, memory consolidation, cognitive decay modeling, and token-budget-aware context assembly.
+**FeMind** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications. It handles persistent storage, keyword search (FTS5), vector search (candle), hybrid retrieval (RRF), graph relationships, memory consolidation, cognitive decay modeling, and token-budget-aware context assembly.
 
 ### Design Principles
 
-1. **Library, not framework** — projects call into femind, they are not structured around it
+1. **Library, not framework** — projects call into FeMind, they are not structured around it
 2. **Feature-gated everything** — heavy dependencies behind compile-time flags, zero cost when unused
-3. **Opinionated about mechanics, unopinionated about schema** — femind handles how to store/search/decay; the consumer defines what a "memory" is
+3. **Opinionated about mechanics, unopinionated about schema** — FeMind handles how to store/search/decay; the consumer defines what a "memory" is
 4. **Local-first** — SQLite-backed, single-file databases, no cloud dependency
 5. **Pure Rust where possible** — candle over ort, SQLite over Postgres
 6. **Proven patterns only** — every component is backed by published research or established open-source practice
@@ -518,6 +518,7 @@ pub trait EmbeddingBackend: Send + Sync {
 | Backend | Feature Flag | Default Model | Target | Use Case |
 |---------|-------------|---------------|--------|----------|
 | `CandleNativeBackend` | `local-embeddings` | `all-MiniLM-L6-v2` (BERT, 384-dim, 8K ctx) | Native | **Primary.** Pure Rust. Auto-downloads safetensors on first use. |
+| `RemoteEmbeddingBackend` | `remote-embeddings` | `all-MiniLM-L6-v2` (BERT, 384-dim) | Native | **Remote execution.** Local-network embedding service with profile verification and optional local fallback. |
 | `CandleWasmBackend` | `local-embeddings` | `all-MiniLM-L6-v2` (BERT, 384-dim, 512 ctx) | WASM | **Browser.** Standard BERT, smaller model, proven in candle WASM demos. |
 | `NoopBackend` | (always available) | N/A | Any | Testing, returns zero vectors |
 | `FallbackBackend` | (always available) | N/A | Any | Wraps `Option<Box<dyn EmbeddingBackend>>`, degrades gracefully to FTS5-only |
@@ -536,10 +537,26 @@ pub trait EmbeddingBackend: Send + Sync {
 
 **One model everywhere:** all-MiniLM-L6-v2 uses standard BERT architecture which compiles to native and WASM. The same model is available on DeepInfra and other API providers. Vectors from local Candle and API are identical — fully interchangeable with zero quality degradation.
 
-**Three backend options:**
+**Embedding identity:**
+- canonical model label: `local-minilm`
+- strict compatibility key: embedding profile (`provider|repo|dimensions|preprocessing|truncation`)
+
+**Backend and runtime options:**
 - `CandleNativeBackend` — local CPU inference (offline, free)
 - `ApiBackend` — OpenAI-compatible API endpoint like DeepInfra (fast, cheap)
+- `RemoteEmbeddingBackend` — local-network MiniLM execution with strict profile verification
 - `FallbackBackend::api_with_local_fallback(api, local)` — tries API first, falls back to local
+- target runtime modes: `local-cpu`, `local-gpu`, `remote-cpu`, `remote-gpu`, `off`
+- `femind-embed-service` selects `auto`, `cpu`, or `cuda` on the host and reports the
+  resolved execution mode via `/status`
+- `femind-embed-service` also exposes a FeMind-native operator surface:
+  - `serve` for the host process
+  - `status` for resolved embedding runtime/config status
+  - `verify-remote` for profile/auth verification against a configured remote host
+- WSL/Windows host lifecycle is handled by:
+  - `scripts/remote/install-femind-embed-systemd.sh`
+  - `scripts/remote/configure-windows-wsl-autostart.ps1`
+  with `off`, `status`, `logon`, and `startup` modes for autostart behavior
 
 **Model isolation (Decision 020):** When the `model_name` stored alongside a vector differs from the current backend's `model_name()`, vector search is skipped and the engine falls back to FTS5-only. This prevents cross-model comparison issues if the model is ever changed.
 
@@ -645,7 +662,7 @@ impl RerankerBackend for CandleReranker {
 }
 ```
 
-**Reranking is optional and applied after RRF merge, before final scoring.** For femind's scale (<100K memories, search returns top 20-50 candidates), reranking adds ~50-100ms per query. Whether this is worthwhile depends on the consumer — it's behind the `reranking` feature flag.
+**Reranking is optional and applied after RRF merge, before final scoring.** For FeMind's scale (<100K memories, search returns top 20-50 candidates), reranking adds ~50-100ms per query. Whether this is worthwhile depends on the consumer — it's behind the `reranking` feature flag.
 
 ### ScoringStrategy
 
@@ -820,7 +837,7 @@ pub struct PruningPolicy {
 
 ### Error Types
 
-All fallible femind operations return `femind::Result<T>`, backed by a unified error enum:
+All fallible FeMind operations return `femind::Result<T>`, backed by a unified error enum:
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -1013,7 +1030,7 @@ Both databases share the same schema. The engine queries both and merges results
 
 ### Schema Migrations
 
-femind uses a simple version-based migration system. The database stores its schema version in a `femind_meta` table, while retaining compatibility reads from older metadata tables:
+FeMind uses a simple version-based migration system. The database stores its schema version in a `femind_meta` table, while retaining compatibility reads from older metadata tables:
 
 ```sql
 CREATE TABLE IF NOT EXISTS femind_meta (
@@ -1350,7 +1367,7 @@ fn compute_activation(&self, memory_id: i64) -> Result<f32> {
 
 The ACT-R activation model replaces several ad-hoc mechanisms commonly found in agent memory systems:
 
-| Previous Approach | femind Equivalent |
+| Previous Approach | FeMind Equivalent |
 |-------------------|-------------------|
 | Manual trust/confidence scores | Activation + `ValidatedBy` relations |
 | Tier-based multipliers (working/long-term/archive) | Activation naturally creates tiers |
@@ -1362,7 +1379,7 @@ One model replaces five separate mechanisms.
 
 ### Access Log Maintenance
 
-The `memory_access_log` table grows with every search retrieval. Without maintenance, it becomes an unbounded append-only log. femind uses two strategies to keep it manageable:
+The `memory_access_log` table grows with every search retrieval. Without maintenance, it becomes an unbounded append-only log. FeMind uses two strategies to keep it manageable:
 
 **Compaction:** Accesses older than 90 days are aggregated into summary records. A periodic maintenance pass replaces individual access rows with a single summary row per memory:
 
@@ -1774,7 +1791,7 @@ sha2 = "0.10"         # Content hashing
 tracing = "0.1"       # Structured logging
 ```
 
-**Note:** femind requires **Rust 1.85+** (edition 2024).
+**Note:** FeMind requires **Rust 1.85+** (edition 2024).
 
 ### Feature-Gated
 
@@ -1805,7 +1822,7 @@ keyring = { version = "3", optional = true }
 
 ## Summary
 
-femind is a **composable, feature-gated memory engine** that unifies proven patterns from published research and the 2025-2026 agent memory landscape into a single Rust crate. It provides:
+FeMind is a **composable, feature-gated memory engine** that unifies proven patterns from published research and the 2025-2026 agent memory landscape into a single Rust crate. It provides:
 
 **Core (always on):**
 - **FTS5 keyword search** with Porter stemming and BM25 ranking

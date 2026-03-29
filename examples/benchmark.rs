@@ -135,7 +135,8 @@ fn main() {
 
     let query_vec = normalize_l2(&[1.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
     let start = Instant::now();
-    let results = VectorSearch::search(db, &query_vec, "bench-model", 10).expect("vector search");
+    let results = VectorSearch::search(db, &query_vec, &[String::from("bench-model")], 10)
+        .expect("vector search");
     let vec_elapsed = start.elapsed();
     println!(
         "   Vector scan: {:?} ({} results)",

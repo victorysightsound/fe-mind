@@ -47,6 +47,8 @@ pub struct StoreExtractionResult {
 /// - `graph_enabled` — whether store_with_extraction() creates graph edges, and search uses them
 /// - `dedup_enabled` — whether store operations check content hash for duplicates
 /// - `vector_search_mode` — "exact" (brute-force), "ann" (approximate), or "off" (FTS5 only)
+/// - `strict_grounding_enabled` — whether exact-detail lexical grounding filters run after retrieval
+/// - `query_alignment_enabled` — whether query-shape reranking heuristics run after retrieval
 ///
 /// ## Query-time tuning (AssemblyConfig)
 /// - `max_per_session` — diversification limit (1 for multi-session, 0 for single-document)
@@ -68,6 +70,10 @@ pub struct EngineConfig {
     pub assembly: crate::context::AssemblyConfig,
     /// Vector search mode: exact (brute-force), ann (approximate), or off.
     pub vector_search_mode: VectorSearchMode,
+    /// Enable strict post-search grounding filters for exact-detail queries.
+    pub strict_grounding_enabled: bool,
+    /// Enable query-shape-aware reranking heuristics after search.
+    pub query_alignment_enabled: bool,
 }
 
 /// Runtime vector retrieval mode.
@@ -106,6 +112,8 @@ impl Default for EngineConfig {
             dedup_enabled: true,
             assembly: crate::context::AssemblyConfig::default(),
             vector_search_mode: VectorSearchMode::Exact,
+            strict_grounding_enabled: true,
+            query_alignment_enabled: true,
         }
     }
 }
@@ -341,7 +349,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     pub fn search(&self, query: &str) -> SearchBuilder<'_, T> {
         let mut builder = SearchBuilder::new(&self.db, query)
             .with_scoring(Arc::clone(&self.scoring))
-            .with_vector_search_mode(self.config.vector_search_mode);
+            .with_vector_search_mode(self.config.vector_search_mode)
+            .with_strict_grounding(self.config.strict_grounding_enabled)
+            .with_query_alignment(self.config.query_alignment_enabled);
         if self.config.vector_search_mode != VectorSearchMode::Off {
             if let Some(ref embedding) = self.embedding {
                 builder = builder.with_embedding(Arc::clone(embedding));
@@ -800,8 +810,12 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             }
         }
 
-        crate::search::builder::apply_strict_detail_query_filter(&self.db, query, &mut merged);
-        crate::search::builder::rerank_for_query_alignment(&self.db, query, &mut merged);
+        if self.config.strict_grounding_enabled {
+            crate::search::builder::apply_strict_detail_query_filter(&self.db, query, &mut merged);
+        }
+        if self.config.query_alignment_enabled {
+            crate::search::builder::rerank_for_query_alignment(&self.db, query, &mut merged);
+        }
 
         // Diversification: limit chunks per session (0 = unlimited)
         let max_per = config.max_per_session;

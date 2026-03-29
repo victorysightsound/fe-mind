@@ -1,12 +1,12 @@
-# femind Decisions
+# FeMind Decisions
 
-This document records key architectural and design decisions for femind.
+This document records key architectural and design decisions for FeMind.
 
-Decisions 001-007 originated during initial research (2026-03-16) and were carried forward into the current femind release line.
+Decisions 001-007 originated during initial research (2026-03-16) and were carried forward into the current FeMind release line.
 
 ---
 
-## Decision 001: femind Shared Memory Engine
+## Decision 001: FeMind Shared Memory Engine
 
 **Date:** 2026-03-16
 
@@ -22,7 +22,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Consequences:**
 - New standalone crate: `femind`
-- Any Rust project can depend on femind for persistent agent memory
+- Any Rust project can depend on FeMind for persistent agent memory
 - See `ARCHITECTURE.md` for full specification
 
 ---
@@ -179,7 +179,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - 5-15% overhead on I/O operations, negligible for agent memory workloads
 - rusqlite has first-class support via `bundled-sqlcipher` and `bundled-sqlcipher-vendored-openssl`
 - BSD-3-Clause license, battle-tested (Signal, Mozilla, Adobe)
-- Consumer provides the key — femind doesn't manage key storage
+- Consumer provides the key — FeMind doesn't manage key storage
 
 **Consequences:**
 - Feature-gated behind `encryption` (replaces bundled SQLite with bundled SQLCipher)
@@ -196,12 +196,12 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Target LongMemEval as primary benchmark, with MemoryAgentBench and AMA-Bench as secondary targets. Ship benchmark harness as a separate workspace member.
 
-**Context:** LongMemEval (ICLR 2025) is the de facto standard — 500 questions testing 5 core memory abilities. OMEGA claims 95.4% (marketing) but their own repo shows 76.8%. Hindsight scores 91.4%. femind achieved 95.6% on LongMemEval Oracle.
+**Context:** LongMemEval (ICLR 2025) is the de facto standard — 500 questions testing 5 core memory abilities. OMEGA claims 95.4% (marketing) but their own repo shows 76.8%. Hindsight scores 91.4%. FeMind achieved 95.6% on LongMemEval Oracle.
 
 **Rationale:**
 - LongMemEval is the standard leaderboard that competitors report against
 - MemoryAgentBench (ICLR 2026) tests selective forgetting — directly validates ACT-R decay
-- AMA-Bench tests agentic (non-dialogue) applications — femind's primary use case
+- AMA-Bench tests agentic (non-dialogue) applications — FeMind's primary use case
 - Benchmark harness must be separate from the library (large data, LLM judge dependency)
 - Three specific additions drive the score from 88-93% to 93-96%: fact extraction at ingest, time-aware query expansion, exhaustive retrieval mode
 
@@ -243,13 +243,13 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Support WASM compilation with a hybrid architecture — SQLite+FTS5 in browser WASM, embeddings server-side, with full-WASM candle as opt-in.
 
-**Context:** rusqlite has official WASM support since v0.38.0 (Dec 2025) via `sqlite-wasm-rs`. Candle has a working all-MiniLM-L6-v2 WASM demo. No known project combines rusqlite + FTS5 + candle in WASM — femind would be novel.
+**Context:** rusqlite has official WASM support since v0.38.0 (Dec 2025) via `sqlite-wasm-rs`. Candle has a working all-MiniLM-L6-v2 WASM demo. No known project combines rusqlite + FTS5 + candle in WASM — FeMind would be novel.
 
 **Rationale:**
 - All pieces work today: rusqlite WASM, FTS5 enabled in WASM build, OPFS/IndexedDB persistence
 - Hybrid recommended: SQLite+FTS5 in Web Worker (fast local queries, offline), embeddings via server API (native speed)
 - Full-WASM candle is opt-in for offline/privacy use cases (~300-500MB browser memory)
-- Same femind API surface via `cfg(target_family = "wasm")` conditional compilation
+- Same FeMind API surface via `cfg(target_family = "wasm")` conditional compilation
 - Aligns with user's Solid.js web stack
 
 **Consequences:**
@@ -335,13 +335,13 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Decision:** Define a single `LlmCallback` trait for all LLM-assisted operations. Consumer provides the implementation, controlling model choice, cost, and retry logic.
 
-**Context:** Multiple features need LLM assistance: consolidation (LLMConsolidation), fact extraction (LlmIngest), memory evolution, and reflection. femind should never call an LLM directly — the consumer controls cost.
+**Context:** Multiple features need LLM assistance: consolidation (LLMConsolidation), fact extraction (LlmIngest), memory evolution, and reflection. FeMind should never call an LLM directly — the consumer controls cost.
 
 **Rationale:**
 - Single trait avoids proliferation of callback types
 - Consumer decides model (Claude, GPT, local Llama), token budget, retry behavior
 - `Option<&dyn LlmCallback>` — when None, all features degrade gracefully to non-LLM paths
-- Library, not framework — femind provides operations, consumer provides intelligence
+- Library, not framework — FeMind provides operations, consumer provides intelligence
 
 **Consequences:**
 - `LlmCallback` trait with `complete(prompt: &str) -> Result<String>`
@@ -354,7 +354,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 **Date:** 2026-03-17 (updated: 2026-03-18 — replaced fastembed with custom candle)
 
-**Decision:** Build a custom embedding module (~100-130 lines) inside femind using candle-transformers' native ModernBERT implementation. Drop fastembed-rs entirely.
+**Decision:** Build a custom embedding module (~100-130 lines) inside FeMind using candle-transformers' native ModernBERT implementation. Drop fastembed-rs entirely.
 
 **Context:** fastembed-rs stability assessment (March 2026) revealed: single maintainer (Anush008/Qdrant, bus factor 1), pinned to pre-release `ort =2.0.0-rc.11`, ships 50-150MB C++ ONNX Runtime shared library, uses `anyhow` in library crate, yearly breaking major versions. candle-transformers already has native ModernBERT support (PR #2791, merged March 2025), and all-MiniLM-L6-v2 ships safetensors weights that candle loads directly.
 
@@ -375,7 +375,7 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 - Cross-model vectors are isolated: different models produce incomparable embedding spaces despite same dimensionality — see Decision 020
 - Dependencies: `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`, `hf-hub`
 - Model cached at `~/.cache/femind/models/`, auto-downloaded on first use
-- No `FastembedBackend` in femind — removed from codebase
+- No `FastembedBackend` in FeMind — removed from codebase
 
 ---
 
@@ -494,7 +494,47 @@ Decisions 001-007 originated during initial research (2026-03-16) and were carri
 
 ---
 
-## Decision 022: Initial Public Naming Direction
+## Decision 022: Remote MiniLM Is The Same Profile, Not A New Model Family
+
+**Date:** 2026-03-29
+
+**Decision:** FeMind will treat local CPU MiniLM and remote/local-network GPU
+MiniLM as execution modes of the same embedding profile when the model assets,
+dimensions, preprocessing, truncation, pooling, and normalization match.
+
+**Context:** FeMind and Memloft both use `sentence-transformers/all-MiniLM-L6-v2`
+at `384` dimensions for local embeddings. The next production step is to let
+applications offload that same profile to a CUDA-capable machine on the local
+network without invalidating existing vectors or turning RecallBench-specific
+infrastructure into product architecture.
+
+**Rationale:**
+- Remote execution should not force a model-family split when the underlying
+  embedding profile is unchanged
+- Existing Memloft vectors can remain valid if profile identity is preserved
+- Profile verification is safer than trusting a remote service by model label
+  alone
+- A narrow embedding-only service is reusable across production apps and
+  benchmark tooling
+
+**Consequences:**
+- Canonical logical model label should be `local-minilm`
+- Full repo/dimension/preprocessing identity belongs in the embedding profile
+- FeMind should add a first-class `RemoteEmbeddingBackend`
+- Remote service verification must check profile identity, not just dimensions
+- Local fallback remains valid as long as both sides implement the same profile
+- If the profile changes, vectors must be treated as reindex candidates rather
+  than as cross-compatible data
+- The service host should report resolved runtime mode (`local-cpu` or
+  `local-gpu`) independently from the stable profile identity
+- The remote host should be operated through a FeMind-native CLI and deployment
+  path, not a RecallBench-only or app-specific wrapper
+- Service lifecycle should default to a warm `systemd` process with Windows/WSL
+  autostart controls for `off`, `status`, `logon`, and `startup`
+
+---
+
+## Decision 023: Initial Public Naming Direction
 
 **Date:** 2026-03-19
 

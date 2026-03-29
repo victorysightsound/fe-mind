@@ -35,6 +35,10 @@ impl EmbeddingBackend for NoopBackend {
     fn model_name(&self) -> &str {
         "noop"
     }
+
+    fn embedding_profile(&self) -> String {
+        "noop".to_string()
+    }
 }
 
 #[cfg(test)]

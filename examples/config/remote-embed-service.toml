@@ -1,0 +1,20 @@
+[embedding_service]
+enabled = true
+bind_host = "127.0.0.1"
+bind_port = 8899
+path_prefix = "/embed"
+auth_token_env = "FEMIND_EMBED_AUTH_TOKEN"
+# auth_token_env_file = "/home/remote/.femind-embedding-service.env"
+request_timeout_secs = 60
+max_batch_texts = 32
+device = "auto"
+cuda_ordinal = 0
+
+[embeddings]
+enabled = true
+model = "local-minilm"
+dimensions = 384
+
+[embeddings.local]
+execution_mode = "embedded"
+device = "auto"

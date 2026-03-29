@@ -1,4 +1,4 @@
-# Project: femind
+# Project: FeMind
 
 ## On Entry (MANDATORY)
 
@@ -11,7 +11,9 @@ session-context
 
 ## Project Overview
 
-**femind** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
+**FeMind** is the branded display name for this project. Use `FeMind` in prose and human-facing documentation, and keep `fe-mind` / `femind` for repo, path, package, and code contexts.
+
+**FeMind** is a standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
 
 **Status:** local repo/crate rename to `fe-mind` / `femind` is complete. External publication work is still pending.
 
@@ -58,7 +60,7 @@ The Markdown docs in this repo should stay aligned with `.docs/femind_spec.db`.
 
 ## Design Principles
 
-1. **Library, not framework** — projects call into femind
+1. **Library, not framework** — projects call into FeMind
 2. **Feature-gated everything** — heavy deps behind compile-time flags
 3. **Local-first** — SQLite-backed, no cloud dependency
 4. **Pure Rust where possible** — candle over ort
@@ -97,4 +99,4 @@ task done <id>
 
 - Keep README files, architecture docs, changelogs, commit messages, PR text, and code comments in normal developer voice.
 - Do not describe implementation work in process language that reads like internal automation or prompt transcripts.
-- Mention AI, LLMs, embeddings, or memory orchestration only when they are part of the actual femind product surface being documented.
+- Mention AI, LLMs, embeddings, or memory orchestration only when they are part of the actual FeMind product surface being documented.

@@ -1,4 +1,4 @@
-# femind Production Pipeline — Complete Build Spec
+# FeMind Production Pipeline — Complete Build Spec
 
 ## Goal
 
@@ -20,6 +20,13 @@ until the build is complete and approved.
 - Graph infrastructure — memory_relations table, GraphMemory CRUD, traversal
 - Hybrid search — FTS5 OR-mode + vector + RRF + multi-query
 - Embedding backends — CandleNativeBackend, ApiBackend, FallbackBackend
+- Remote MiniLM backend design now tracked in `specs/REMOTE_MINILM_BACKEND.md`
+- FeMind-owned remote MiniLM service host and operator commands
+  - `femind-embed-service serve`
+  - `femind-embed-service status`
+  - `femind-embed-service verify-remote`
+- Windows/WSL autostart and Linux/WSL `systemd` deployment helpers for the
+  remote MiniLM service
 - Retrieval test harness — zero-cost search quality measurement
 - Extraction test harness — LLM extraction quality measurement
 - ANN runtime modes — exact, ann, and off now select real runtime behavior

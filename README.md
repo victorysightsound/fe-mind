@@ -1,4 +1,4 @@
-# femind
+# FeMind
 
 A standalone Rust crate providing a pluggable, feature-gated memory engine for AI agent applications.
 
@@ -6,7 +6,7 @@ Handles persistent storage, keyword search (FTS5), vector search (candle), hybri
 
 ## Design Principles
 
-- **Library, not framework** — projects call into femind, not the other way around
+- **Library, not framework** — projects call into FeMind, not the other way around
 - **Feature-gated everything** — heavy dependencies behind compile-time flags
 - **Local-first** — SQLite-backed, single-file databases, no cloud dependency
 - **Pure Rust where possible** — candle over ort, SQLite over Postgres
@@ -51,8 +51,57 @@ Key maintainer references:
 - `ARCHITECTURE.md` — full crate structure and API design
 - `RESEARCH.md` — research, landscape analysis, and specification
 - `DECISIONS.md` — architectural decisions log
+- `specs/REMOTE_MINILM_BACKEND.md` — remote/local-network MiniLM backend contract
 - `PRACTICAL_EVAL.md` — real-world validation plan and practical eval categories
 - `eval/practical/` — curated practical validation scenarios
 - `eval/live-library/` — larger real-world validation library
 - `eval/memloft-slice/` — memloft-derived technical real-data validation slice
 - `research/` — competitive landscape analysis
+
+Current MiniLM direction:
+
+- canonical logical model label: `local-minilm`
+- strict compatibility identity lives in the embedding profile
+- remote execution is treated as a runtime mode for the same MiniLM profile, not
+  as a different model family
+- supported runtime targets are `local-cpu`, `local-gpu`, `remote-cpu`,
+  `remote-gpu`, and `off`
+- `femind-embed-service` can now host MiniLM in `auto`, `cpu`, or `cuda` mode
+  and reports the resulting execution mode through `/status`
+- `--device cuda` requires a FeMind build with the `cuda` feature on a host
+  that actually has CUDA available
+
+Remote deployment helpers:
+
+- `scripts/remote/install-femind-embed-systemd.sh`
+- `scripts/remote/configure-windows-wsl-autostart.ps1`
+- example host config: `examples/config/remote-embed-service.toml`
+- example client config: `examples/config/remote-embedding-client.toml`
+
+Recommended host pattern:
+
+- keep `femind-embed-service` bound to `127.0.0.1` on the remote host
+- run it under `systemd` on Linux or inside WSL
+- use the Windows helper only to start the WSL service at logon/startup
+- reach the remote host through SSH over ZeroTier instead of exposing the port
+  directly on the LAN
+
+Remote service operator surface:
+
+- `femind-embed-service serve`
+  - runs the FeMind-owned embedding host
+  - accepts direct flags or `--config examples/config/remote-embed-service.toml`
+- `femind-embed-service status --config <path>`
+  - resolves the configured embedding mode and reports remote-service status when
+    `execution_mode = "remote_service"`
+- `femind-embed-service verify-remote --config <path>`
+  - checks auth, model identity, dimensions, and embedding profile against a
+    configured remote MiniLM service
+
+Lifecycle defaults:
+
+- the remote host should run `femind-embed-service` warm under `systemd`
+- the provided unit uses `Restart=always` and `RestartSec=2`
+- the WSL helper supports `off`, `status`, `logon`, and `startup` modes
+- idle CPU should stay low because the service only responds to requests; the
+  tradeoff is that MiniLM stays resident in memory for fast warm responses

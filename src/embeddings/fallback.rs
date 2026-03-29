@@ -115,6 +115,22 @@ impl EmbeddingBackend for FallbackBackend {
             .or_else(|| self.fallback.as_ref().map(|b| b.model_name()))
             .unwrap_or("none")
     }
+
+    fn embedding_profile(&self) -> String {
+        self.primary
+            .as_ref()
+            .map(|b| b.embedding_profile())
+            .or_else(|| self.fallback.as_ref().map(|b| b.embedding_profile()))
+            .unwrap_or_else(|| "none".to_string())
+    }
+
+    fn compatibility_model_names(&self) -> Vec<String> {
+        self.primary
+            .as_ref()
+            .map(|b| b.compatibility_model_names())
+            .or_else(|| self.fallback.as_ref().map(|b| b.compatibility_model_names()))
+            .unwrap_or_else(|| vec!["none".to_string()])
+    }
 }
 
 #[cfg(test)]

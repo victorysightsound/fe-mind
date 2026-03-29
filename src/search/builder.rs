@@ -78,6 +78,8 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     scoring: Option<Arc<dyn ScoringStrategy>>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
     vector_search_mode: VectorSearchMode,
+    strict_grounding_enabled: bool,
+    query_alignment_enabled: bool,
     #[cfg(feature = "ann")]
     ann_index: Option<Arc<crate::search::AnnIndex>>,
     _phantom: PhantomData<T>,
@@ -100,6 +102,8 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             scoring: None,
             embedding: None,
             vector_search_mode: VectorSearchMode::default(),
+            strict_grounding_enabled: true,
+            query_alignment_enabled: true,
             #[cfg(feature = "ann")]
             ann_index: None,
             _phantom: PhantomData,
@@ -121,6 +125,18 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Attach the engine's vector search mode.
     pub fn with_vector_search_mode(mut self, mode: VectorSearchMode) -> Self {
         self.vector_search_mode = mode;
+        self
+    }
+
+    /// Enable or disable strict post-search grounding filters.
+    pub fn with_strict_grounding(mut self, enabled: bool) -> Self {
+        self.strict_grounding_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable query-shape-aware reranking heuristics.
+    pub fn with_query_alignment(mut self, enabled: bool) -> Self {
+        self.query_alignment_enabled = enabled;
         self
     }
 
@@ -270,8 +286,8 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         }
 
         let query_vec = embedding.embed_query(&self.query)?;
-        let model = embedding.model_name();
-        let vector_results = self.vector_results(&query_vec, model, self.limit * 3)?;
+        let model_names = embedding.compatibility_model_names();
+        let vector_results = self.vector_results(&query_vec, &model_names, self.limit * 3)?;
 
         let mut results = self.apply_filters(vector_results);
         if let Some(threshold) = self.min_score {
@@ -311,8 +327,8 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         // Vector similarity search (over-fetch 3x)
         let query_vec = embedding.embed_query(&self.query)?;
-        let model = embedding.model_name();
-        let vector_results = self.vector_results(&query_vec, model, self.limit * 3)?;
+        let model_names = embedding.compatibility_model_names();
+        let vector_results = self.vector_results(&query_vec, &model_names, self.limit * 3)?;
 
         // Merge via RRF
         let merged = rrf_merge(&fts_results, &vector_results, &self.query, self.limit * 2);
@@ -323,10 +339,14 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         // rerank_results(self.db, &mut results, &self.query);
 
         // Near-duplicate filtering: remove results >0.95 similar to higher-ranked ones
-        deduplicate_by_vector_similarity(self.db, &mut results, model, 0.95);
+        deduplicate_by_vector_similarity(self.db, &mut results, &model_names, 0.95);
 
-        apply_strict_detail_query_filter(self.db, &self.query, &mut results);
-        rerank_for_query_alignment(self.db, &self.query, &mut results);
+        if self.strict_grounding_enabled {
+            apply_strict_detail_query_filter(self.db, &self.query, &mut results);
+        }
+        if self.query_alignment_enabled {
+            rerank_for_query_alignment(self.db, &self.query, &mut results);
+        }
 
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
@@ -338,13 +358,13 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     fn vector_results(
         &self,
         query_vec: &[f32],
-        model: &str,
+        model_names: &[String],
         limit: usize,
     ) -> Result<Vec<FtsResult>> {
         match self.vector_search_mode {
             VectorSearchMode::Off => Ok(Vec::new()),
-            VectorSearchMode::Exact => VectorSearch::search(self.db, query_vec, model, limit),
-            VectorSearchMode::Ann => self.execute_ann_vector_search(query_vec, model, limit),
+            VectorSearchMode::Exact => VectorSearch::search(self.db, query_vec, model_names, limit),
+            VectorSearchMode::Ann => self.execute_ann_vector_search(query_vec, model_names, limit),
         }
     }
 
@@ -352,29 +372,31 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     fn execute_ann_vector_search(
         &self,
         query_vec: &[f32],
-        model: &str,
+        model_names: &[String],
         limit: usize,
     ) -> Result<Vec<FtsResult>> {
         let Some(ref ann_index) = self.ann_index else {
-            return VectorSearch::search(self.db, query_vec, model, limit);
+            return VectorSearch::search(self.db, query_vec, model_names, limit);
         };
 
-        let expected_count = VectorSearch::count_vectors(self.db, model)?;
+        let canonical_model = model_names.first().map_or("", String::as_str);
+
+        let expected_count = VectorSearch::count_vectors_for_models(self.db, model_names)?;
         if expected_count == 0 {
             return Ok(Vec::new());
         }
 
         let needs_rebuild = !ann_index.is_built()
             || ann_index.len() != expected_count
-            || ann_index.model_name().as_deref() != Some(model);
+            || ann_index.model_name().as_deref() != Some(canonical_model);
 
         if needs_rebuild {
-            ann_index.build(self.db, model)?;
+            ann_index.build(self.db, canonical_model, model_names)?;
         }
 
         let results = ann_index.search(query_vec, limit)?;
         if results.is_empty() {
-            VectorSearch::search(self.db, query_vec, model, limit)
+            VectorSearch::search(self.db, query_vec, model_names, limit)
         } else {
             Ok(results)
         }
@@ -384,10 +406,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     fn execute_ann_vector_search(
         &self,
         query_vec: &[f32],
-        model: &str,
+        model_names: &[String],
         limit: usize,
     ) -> Result<Vec<FtsResult>> {
-        VectorSearch::search(self.db, query_vec, model, limit)
+        VectorSearch::search(self.db, query_vec, model_names, limit)
     }
 
     /// Convert search depth to minimum tier filter.
@@ -544,14 +566,26 @@ fn rerank_results(db: &Database, results: &mut [SearchResult], query: &str) {
 fn deduplicate_by_vector_similarity(
     db: &Database,
     results: &mut Vec<SearchResult>,
-    model_name: &str,
+    model_names: &[String],
     threshold: f32,
 ) {
     use crate::embeddings::pooling::{bytes_to_vec, cosine_similarity};
+    use rusqlite::params_from_iter;
 
     if results.len() < 2 {
         return;
     }
+
+    if model_names.is_empty() {
+        return;
+    }
+
+    let placeholders = std::iter::repeat_n("?", model_names.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT embedding FROM memory_vectors WHERE memory_id = ? AND model_name IN ({placeholders})"
+    );
 
     // Load vectors for all results
     let vectors: Vec<Option<Vec<f32>>> = results
@@ -559,8 +593,10 @@ fn deduplicate_by_vector_similarity(
         .map(|r| {
             db.with_reader(|conn| {
                 let blob = conn.query_row(
-                    "SELECT embedding FROM memory_vectors WHERE memory_id = ?1 AND model_name = ?2",
-                    rusqlite::params![r.memory_id, model_name],
+                    &sql,
+                    params_from_iter(
+                        std::iter::once(r.memory_id.to_string()).chain(model_names.iter().cloned()),
+                    ),
                     |row| row.get::<_, Vec<u8>>(0),
                 );
                 match blob {

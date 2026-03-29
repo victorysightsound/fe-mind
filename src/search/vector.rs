@@ -1,4 +1,5 @@
 use rusqlite::params;
+use rusqlite::params_from_iter;
 
 use crate::embeddings::pooling::{bytes_to_vec, cosine_similarity};
 use crate::error::Result;
@@ -18,15 +19,25 @@ impl VectorSearch {
     pub fn search(
         db: &Database,
         query_vector: &[f32],
-        model_name: &str,
+        model_names: &[String],
         limit: usize,
     ) -> Result<Vec<FtsResult>> {
+        if model_names.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let placeholders = std::iter::repeat_n("?", model_names.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT memory_id, embedding FROM memory_vectors WHERE model_name IN ({placeholders})"
+        );
+
         db.with_reader(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT memory_id, embedding FROM memory_vectors WHERE model_name = ?1")?;
+            let mut stmt = conn.prepare(&sql)?;
 
             let mut scored: Vec<(i64, f32)> = stmt
-                .query_map(params![model_name], |row| {
+                .query_map(params_from_iter(model_names.iter()), |row| {
                     let id: i64 = row.get(0)?;
                     let blob: Vec<u8> = row.get(1)?;
                     Ok((id, blob))
@@ -88,12 +99,23 @@ impl VectorSearch {
 
     /// Count vectors stored for the given model.
     pub fn count_vectors(db: &Database, model_name: &str) -> Result<usize> {
+        Self::count_vectors_for_models(db, &[model_name.to_string()])
+    }
+
+    /// Count vectors stored for any of the compatible model labels.
+    pub fn count_vectors_for_models(db: &Database, model_names: &[String]) -> Result<usize> {
+        if model_names.is_empty() {
+            return Ok(0);
+        }
+
+        let placeholders = std::iter::repeat_n("?", model_names.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT COUNT(*) FROM memory_vectors WHERE model_name IN ({placeholders})");
+
         db.with_reader(|conn| {
-            let count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM memory_vectors WHERE model_name = ?1",
-                [model_name],
-                |row| row.get(0),
-            )?;
+            let count: i64 =
+                conn.query_row(&sql, params_from_iter(model_names.iter()), |row| row.get(0))?;
             Ok(count as usize)
         })
     }
@@ -151,7 +173,8 @@ mod tests {
 
         // Search with a query similar to v1
         let query = normalize_l2(&[1.0, 0.0, 0.0]);
-        let results = VectorSearch::search(&db, &query, "test-model", 10).expect("search");
+        let results = VectorSearch::search(&db, &query, &[String::from("test-model")], 10)
+            .expect("search");
 
         assert_eq!(results.len(), 3);
         // v1 should be most similar (identical)
@@ -169,7 +192,8 @@ mod tests {
         VectorSearch::store_vector(&db, 1, &v, "model-a", "h1").expect("store");
         VectorSearch::store_vector(&db, 2, &v, "model-b", "h2").expect("store");
 
-        let results = VectorSearch::search(&db, &v, "model-a", 10).expect("search");
+        let results = VectorSearch::search(&db, &v, &[String::from("model-a")], 10)
+            .expect("search");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].memory_id, 1);
     }
@@ -192,7 +216,7 @@ mod tests {
             VectorSearch::store_vector(&db, i, &v, "test", &format!("h{i}")).expect("store");
         }
 
-        let results = VectorSearch::search(&db, &v, "test", 2).expect("search");
+        let results = VectorSearch::search(&db, &v, &[String::from("test")], 2).expect("search");
         assert_eq!(results.len(), 2);
     }
 }

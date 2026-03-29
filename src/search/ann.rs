@@ -49,13 +49,28 @@ mod inner {
         }
 
         /// Build the HNSW index from all vectors in the database for a given model.
-        pub fn build(&self, db: &Database, model_name: &str) -> Result<usize> {
+        pub fn build(
+            &self,
+            db: &Database,
+            model_name: &str,
+            compatibility_model_names: &[String],
+        ) -> Result<usize> {
+            if compatibility_model_names.is_empty() {
+                return Ok(0);
+            }
+
+            let placeholders = std::iter::repeat_n("?", compatibility_model_names.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT memory_id, embedding FROM memory_vectors WHERE model_name IN ({placeholders})"
+            );
             let vectors = db.with_reader(|conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT memory_id, embedding FROM memory_vectors WHERE model_name = ?1",
-                )?;
+                let mut stmt = conn.prepare(&sql)?;
                 let rows: Vec<(i64, Vec<u8>)> = stmt
-                    .query_map([model_name], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .query_map(rusqlite::params_from_iter(compatibility_model_names.iter()), |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })?
                     .filter_map(|r| r.ok())
                     .collect();
                 Ok::<_, crate::error::FemindError>(rows)
@@ -230,7 +245,9 @@ mod tests {
         let db = setup();
         let index = AnnIndex::new();
 
-        let count = index.build(&db, "test").expect("build");
+        let count = index
+            .build(&db, "test", &[String::from("test")])
+            .expect("build");
         assert_eq!(count, 5);
         assert!(index.is_built());
         assert_eq!(index.len(), 5);
