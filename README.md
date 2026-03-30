@@ -75,6 +75,7 @@ Remote deployment helpers:
 
 - `scripts/remote/install-femind-embed-systemd.sh`
 - `scripts/remote/configure-windows-wsl-autostart.ps1`
+- `scripts/remote/configure-windows-native-autostart.ps1`
 - example host config: `examples/config/remote-embed-service.toml`
 - example client config: `examples/config/remote-embedding-client.toml`
 
@@ -82,7 +83,9 @@ Recommended host pattern:
 
 - keep `femind-embed-service` bound to `127.0.0.1` on the remote host
 - run it under `systemd` on Linux or inside WSL
-- use the Windows helper only to start the WSL service at logon/startup
+- use the Windows WSL helper only to start the WSL service at logon/startup
+- native Windows CUDA hosts can run `femind-embed-service.exe` directly under a
+  scheduled task using the native helper
 - reach the remote host through SSH over ZeroTier instead of exposing the port
   directly on the LAN
 
@@ -103,5 +106,9 @@ Lifecycle defaults:
 - the remote host should run `femind-embed-service` warm under `systemd`
 - the provided unit uses `Restart=always` and `RestartSec=2`
 - the WSL helper supports `off`, `status`, `logon`, and `startup` modes
+- the native Windows helper supports `off`, `status`, `logon`, and `startup`
+  modes and prepares the MSVC/CUDA environment before launch
 - idle CPU should stay low because the service only responds to requests; the
   tradeoff is that MiniLM stays resident in memory for fast warm responses
+- native Windows CUDA hosts should keep toolkit and driver lines aligned
+  (for example toolkit `12.9` with a `12.9` driver line)

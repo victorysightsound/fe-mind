@@ -148,11 +148,13 @@ client-side `status` and `verify-remote` commands should resolve:
 
 The recommended deployment shape should mirror the proven Librona pattern:
 
-- build `femind-embed-service` on the remote Linux or WSL host
+- build `femind-embed-service` on the remote Linux, WSL, or native Windows host
 - bind the service to `127.0.0.1`
 - keep the process warm under `systemd`
 - use a Windows scheduled task only to bring the WSL service up at logon or
   startup when the host is Windows-based
+- native Windows hosts may also run `femind-embed-service.exe` directly through
+  a scheduled task that prepares MSVC and CUDA environment variables first
 - reach the service over SSH on top of ZeroTier instead of exposing the raw port
   directly on the network
 
@@ -162,9 +164,13 @@ Recommended defaults for lifecycle and operator behavior:
 - use `Restart=always` and a short restart delay
 - provide a Windows/WSL helper with explicit `off`, `status`, `logon`, and
   `startup` modes
+- provide a native Windows helper with the same operator modes and explicit
+  CUDA root configuration
 - keep the service bound to loopback and authenticate with a bearer token
 - keep idle CPU near zero; do not add background polling by default
 - accept the warm-memory tradeoff so first-request latency stays low
+- on native Windows CUDA hosts, keep toolkit and driver lines aligned
+  (for example toolkit `12.9` with a `12.9` driver line)
 
 This keeps idle CPU usage low while preserving fast first-request latency by
 leaving the MiniLM model resident in memory.
@@ -197,6 +203,7 @@ Reference example configs:
 
 - `examples/config/remote-embed-service.toml`
 - `examples/config/remote-embedding-client.toml`
+- `scripts/remote/configure-windows-native-autostart.ps1`
 
 ## Validation Requirements
 
