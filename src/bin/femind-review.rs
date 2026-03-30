@@ -94,12 +94,25 @@ fn cmd_list(args: &[String]) -> femind::error::Result<()> {
                 .as_deref()
                 .map(|value| format!(" note={value:?}"))
                 .unwrap_or_default();
+            let reviewer = item
+                .reviewer
+                .as_deref()
+                .map(|value| format!(" reviewer={value}"))
+                .unwrap_or_default();
+            let scope = item
+                .scope
+                .map(|value| format!(" scope={value}"))
+                .unwrap_or_default();
+            let policy_class = item
+                .policy_class
+                .map(|value| format!(" class={value}"))
+                .unwrap_or_default();
             let expires = item
                 .expires_at
                 .map(|value| format!(" expires_at={}", value.to_rfc3339()))
                 .unwrap_or_default();
             println!(
-                "#{id} [{status}] severity={severity} created_at={created_at} updated_at={updated_at}{expires}{note}\n  reason={reason}\n  tags={tags}\n  text={text}",
+                "#{id} [{status}] severity={severity} created_at={created_at} updated_at={updated_at}{expires}{scope}{policy_class}{reviewer}{note}\n  reason={reason}\n  tags={tags}\n  text={text}",
                 id = item.memory_id,
                 status = item.status,
                 severity = item.severity,
@@ -129,13 +142,30 @@ fn cmd_resolve(args: &[String]) -> femind::error::Result<()> {
         .map_err(|_| FemindError::Migration("invalid --memory-id".to_string()))?;
     let status = parse_status_filter(&required_arg(args, "--status")?)?;
     let note = optional_arg(args, "--note");
+    let reviewer = optional_arg(args, "--reviewer");
+    let scope = optional_arg(args, "--scope")
+        .map(|value| parse_scope("--scope", &value))
+        .transpose()?;
+    let policy_class = optional_arg(args, "--class")
+        .map(|value| parse_policy_class("--class", &value))
+        .transpose()?;
     let expires_at = optional_arg(args, "--expires-at")
         .map(|value| parse_datetime("--expires-at", &value))
         .transpose()?;
     let format = optional_arg(args, "--format").unwrap_or_else(|| "text".to_string());
 
     let engine = open_engine(&database)?;
-    let item = engine.resolve_review_item(memory_id, status, note.as_deref(), expires_at)?;
+    let item = engine.resolve_review_item_with_resolution(
+        memory_id,
+        femind::engine::ReviewResolution {
+            status,
+            note,
+            reviewer,
+            scope,
+            policy_class,
+            expires_at,
+        },
+    )?;
 
     if format.eq_ignore_ascii_case("json") {
         println!("{}", serde_json::to_string_pretty(&item)?);
@@ -209,6 +239,22 @@ fn parse_status_filter(value: &str) -> femind::error::Result<ReviewStatus> {
     })
 }
 
+fn parse_scope(flag: &str, value: &str) -> femind::error::Result<ReviewScope> {
+    ReviewScope::from_str(value).ok_or_else(|| {
+        FemindError::Migration(format!(
+            "invalid {flag} value '{value}'. Expected general|production|staging|lab|migration."
+        ))
+    })
+}
+
+fn parse_policy_class(flag: &str, value: &str) -> femind::error::Result<ReviewPolicyClass> {
+    ReviewPolicyClass::from_str(value).ok_or_else(|| {
+        FemindError::Migration(format!(
+            "invalid {flag} value '{value}'. Expected operational-exception|network-exposure-exception|destructive-maintenance|secret-handling-exception|migration-exception."
+        ))
+    })
+}
+
 fn parse_datetime(flag: &str, value: &str) -> femind::error::Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
         .map(|value| value.with_timezone(&Utc))
@@ -228,7 +274,7 @@ femind-review
 
 Usage:
   femind-review list --database <path> [--status <pending|allowed|denied|expired>] [--limit <n>] [--format <text|json>]
-  femind-review resolve --database <path> --memory-id <id> --status <pending|allowed|denied|expired> [--note <text>] [--expires-at <rfc3339>] [--format <text|json>]
+  femind-review resolve --database <path> --memory-id <id> --status <pending|allowed|denied|expired> [--note <text>] [--reviewer <name>] [--scope <general|production|staging|lab|migration>] [--class <policy-class>] [--expires-at <rfc3339>] [--format <text|json>]
   femind-review expire-due --database <path> [--now <rfc3339>] [--format <text|json>]
 "
     );

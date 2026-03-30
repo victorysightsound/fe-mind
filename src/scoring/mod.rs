@@ -18,9 +18,12 @@ pub use memory_type::MemoryTypeScorer;
 pub use procedural_safety::ProceduralSafetyScorer;
 pub(crate) use procedural_safety::query_requests_procedural_guidance;
 pub use recency::RecencyScorer;
-pub use review_safety::{ReviewSafetyScorer, ReviewSeverity, ReviewStatus};
+pub use review_safety::{
+    ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity, ReviewStatus,
+};
 pub(crate) use review_safety::{
-    detect_review_flag, effective_review_status, review_denied, review_expires_at, review_required,
+    detect_review_flag, effective_review_status, review_denied, review_expires_at,
+    review_policy_class, review_required, review_scope_matches_query,
 };
 pub use secret_policy::{
     SecretClass, evidence_contains_secret_material, query_requests_secret_location_or_reference,

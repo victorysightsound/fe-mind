@@ -27,8 +27,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `24/24`
-- retrieval-only practical eval in `ann` mode currently passes `24/24`
+- retrieval-only practical eval in `exact` mode currently passes `25/25`
+- retrieval-only practical eval in `ann` mode currently passes `25/25`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
@@ -51,7 +51,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `24/24` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `25/25` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
@@ -110,12 +110,20 @@ The practical live-validation path is now established and repeatable:
   - `allowed`
   - `denied`
   - `expired`
+- review resolutions can now also carry:
+  - `review_scope`
+  - `review_policy_class`
+  - `review_reviewer`
 - temporary review allowances can now carry `review_expires_at` timestamps and
   be normalized back to `expired` automatically when the allowance window ends
 - `femind-review` now provides an operator CLI for:
   - listing review items by status
-  - resolving them with notes and optional expiry timestamps
+  - resolving them with notes, reviewer, scope, policy class, and optional
+    expiry timestamps
   - expiring due temporary allowances
+- retrieval now enforces review scope for allowed procedural exceptions, so a
+  `staging` or `migration` exception does not surface as general production
+  guidance
 - procedural guidance queries now keep review-state semantics through the
   original routed query instead of broadening into stripped variants that can
   reintroduce denied or expired guidance
@@ -199,7 +207,8 @@ Remote service operator surface:
 - `femind-review list --database <path>`
   - lists review items from a FeMind database, optionally filtered by status
 - `femind-review resolve --database <path> --memory-id <id> --status <state>`
-  - resolves a review item with optional note and expiry timestamp
+  - resolves a review item with optional note, reviewer, scope, policy class,
+    and expiry timestamp
 - `femind-review expire-due --database <path>`
   - marks temporary allowances as expired when their expiry timestamp has passed
 

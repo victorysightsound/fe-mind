@@ -155,6 +155,8 @@ Current status after the 2026-03-30 trust/safety pass:
   - `review_expires_at` timestamps for temporary allowances
   - a FeMind-native `femind-review` operator CLI
   - surfaced-evidence redaction for safe secret-location queries
+- scoped procedural approvals are now part of the policy surface, so
+  environment-specific exceptions stay confined to the matching query context
 - the next safety step is to deepen policy automation and approval classes, not
   just add more raw review hooks
 

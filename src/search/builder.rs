@@ -8,8 +8,8 @@ use crate::engine::VectorSearchMode;
 use crate::error::Result;
 use crate::memory::GraphMemory;
 use crate::scoring::{
-    SourceTrustLevel, query_requests_procedural_guidance, review_denied, review_required,
-    source_trust_level,
+    SourceTrustLevel, query_requests_procedural_guidance, review_denied, review_policy_class,
+    review_required, review_scope_matches_query, source_trust_level,
 };
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
@@ -1050,6 +1050,7 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
     let mut unsafe_ids = std::collections::HashSet::new();
     let mut review_pending_ids = std::collections::HashSet::new();
     let mut denied_ids = std::collections::HashSet::new();
+    let mut scope_mismatch_ids = std::collections::HashSet::new();
     let mut has_safe_procedural = false;
 
     for result in results.iter() {
@@ -1098,10 +1099,12 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
         };
         let pending_review = review_required(&meta);
         let denied_review = review_denied(&meta);
+        let scope_matches_query = review_scope_matches_query(&meta, query);
+        let policy_class = review_policy_class(&meta);
 
         match source_trust_level(&meta) {
             SourceTrustLevel::Trusted | SourceTrustLevel::Normal
-                if !pending_review && !denied_review =>
+                if !pending_review && !denied_review && scope_matches_query =>
             {
                 has_safe_procedural = true;
             }
@@ -1117,10 +1120,17 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
         if denied_review {
             denied_ids.insert(result.memory_id);
         }
+        if !scope_matches_query && policy_class.is_some() {
+            scope_mismatch_ids.insert(result.memory_id);
+        }
     }
 
     if !denied_ids.is_empty() {
         results.retain(|result| !denied_ids.contains(&result.memory_id));
+    }
+
+    if !scope_mismatch_ids.is_empty() {
+        results.retain(|result| !scope_mismatch_ids.contains(&result.memory_id));
     }
 
     if has_safe_procedural && (!unsafe_ids.is_empty() || !review_pending_ids.is_empty()) {
@@ -3270,6 +3280,85 @@ mod tests {
         apply_procedural_safety_isolation(
             &db,
             "Should the production service be exposed directly?",
+            &mut results,
+        );
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].memory_id, safe_id);
+    }
+
+    #[test]
+    fn procedural_isolation_filters_scope_mismatched_allowances() {
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let safe = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "Keep the production service on 127.0.0.1 behind the audited tunnel."
+                        .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store safe");
+        let staged = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text:
+                        "For the audited staging lab only, the approved bridge host is 10.44.0.12."
+                            .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store staged");
+
+        let safe_id = match safe {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let staged_id = match staged {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        db.with_writer(|conn| {
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![safe_id, r#"{"source_trust":"trusted"}"#],
+            )?;
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![staged_id, r#"{"source_trust":"trusted","review_required":"true","review_status":"allowed","review_scope":"staging","review_policy_class":"network-exposure-exception"}"#],
+            )?;
+            Ok::<(), crate::error::FemindError>(())
+        })
+        .expect("update metadata");
+
+        let mut results = vec![
+            SearchResult {
+                memory_id: staged_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: safe_id,
+                score: 0.9,
+            },
+        ];
+
+        apply_procedural_safety_isolation(
+            &db,
+            "What host should be used for the production service?",
             &mut results,
         );
 

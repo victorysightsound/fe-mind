@@ -727,6 +727,12 @@ mod app {
         tags: Vec<String>,
         status: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        policy_class: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reviewer: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         updated_at: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         expires_at: Option<String>,
@@ -1191,6 +1197,9 @@ mod app {
                         reason: item.reason.clone(),
                         tags: item.tags.clone(),
                         status: item.status.to_string(),
+                        scope: item.scope.map(|value| value.to_string()),
+                        policy_class: item.policy_class.map(|value| value.to_string()),
+                        reviewer: item.reviewer.clone(),
                         updated_at: item.updated_at.map(|value| value.to_rfc3339()),
                         expires_at: item.expires_at.map(|value| value.to_rfc3339()),
                         note: item.note.clone(),

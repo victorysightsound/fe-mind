@@ -121,6 +121,92 @@ impl std::fmt::Display for ReviewStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ReviewScope {
+    General,
+    Production,
+    Staging,
+    Lab,
+    Migration,
+}
+
+impl ReviewScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::Production => "production",
+            Self::Staging => "staging",
+            Self::Lab => "lab",
+            Self::Migration => "migration",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "general" | "default" => Some(Self::General),
+            "production" | "prod" => Some(Self::Production),
+            "staging" | "stage" => Some(Self::Staging),
+            "lab" | "internal-lab" | "internal_lab" => Some(Self::Lab),
+            "migration" | "temporary-migration" | "temporary_migration" => Some(Self::Migration),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ReviewScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ReviewPolicyClass {
+    OperationalException,
+    NetworkExposureException,
+    DestructiveMaintenance,
+    SecretHandlingException,
+    MigrationException,
+}
+
+impl ReviewPolicyClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OperationalException => "operational-exception",
+            Self::NetworkExposureException => "network-exposure-exception",
+            Self::DestructiveMaintenance => "destructive-maintenance",
+            Self::SecretHandlingException => "secret-handling-exception",
+            Self::MigrationException => "migration-exception",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "operational-exception" | "operational_exception" | "operational" => {
+                Some(Self::OperationalException)
+            }
+            "network-exposure-exception" | "network_exposure_exception" | "network-exposure" => {
+                Some(Self::NetworkExposureException)
+            }
+            "destructive-maintenance" | "destructive_maintenance" | "destructive" => {
+                Some(Self::DestructiveMaintenance)
+            }
+            "secret-handling-exception" | "secret_handling_exception" | "secret-handling" => {
+                Some(Self::SecretHandlingException)
+            }
+            "migration-exception" | "migration_exception" | "migration" => {
+                Some(Self::MigrationException)
+            }
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ReviewPolicyClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ReviewFlag {
     pub severity: ReviewSeverity,
@@ -174,6 +260,52 @@ pub(crate) fn review_expires_at(metadata: &HashMap<String, String>) -> Option<Da
         .get("review_expires_at")
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc))
+}
+
+pub(crate) fn review_scope(record: &MemoryMeta) -> Option<ReviewScope> {
+    record
+        .metadata
+        .get("review_scope")
+        .and_then(|value| ReviewScope::from_str(value))
+}
+
+pub(crate) fn review_policy_class(record: &MemoryMeta) -> Option<ReviewPolicyClass> {
+    record
+        .metadata
+        .get("review_policy_class")
+        .and_then(|value| ReviewPolicyClass::from_str(value))
+}
+
+pub(crate) fn query_scope(query: &str) -> ReviewScope {
+    let normalized = query.to_lowercase();
+    if normalized.contains("production") || normalized.contains("prod ") {
+        ReviewScope::Production
+    } else if normalized.contains("staging") {
+        ReviewScope::Staging
+    } else if normalized.contains(" lab") || normalized.contains("lab ") {
+        ReviewScope::Lab
+    } else if normalized.contains("migration")
+        || normalized.contains("temporary")
+        || normalized.contains("bridge")
+    {
+        ReviewScope::Migration
+    } else {
+        ReviewScope::General
+    }
+}
+
+pub(crate) fn review_scope_matches_query(record: &MemoryMeta, query: &str) -> bool {
+    let Some(scope) = review_scope(record) else {
+        return true;
+    };
+    let query_scope = query_scope(query);
+    match scope {
+        ReviewScope::General => true,
+        ReviewScope::Production => matches!(query_scope, ReviewScope::Production),
+        ReviewScope::Staging => matches!(query_scope, ReviewScope::Staging | ReviewScope::Lab),
+        ReviewScope::Lab => matches!(query_scope, ReviewScope::Lab | ReviewScope::Staging),
+        ReviewScope::Migration => matches!(query_scope, ReviewScope::Migration),
+    }
 }
 
 pub(crate) fn review_severity(record: &MemoryMeta) -> ReviewSeverity {

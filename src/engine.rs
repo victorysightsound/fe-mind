@@ -13,16 +13,16 @@ use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{
     CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
-    ReviewSafetyScorer, ReviewSeverity, ReviewStatus, SecretClass, SourceProvenanceScorer,
-    SourceTrustScorer, detect_review_flag, effective_review_status,
+    ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity, ReviewStatus, SecretClass,
+    SourceProvenanceScorer, SourceTrustScorer, detect_review_flag, effective_review_status,
     evidence_contains_secret_material, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
-    secret_class_from_metadata,
+    secret_class_from_metadata, source_trust_level,
 };
 use crate::search::builder::SearchBuilder;
 use crate::storage::Database;
 use crate::storage::migrations;
-use crate::traits::{MemoryRecord, RerankerBackend, ScoringStrategy};
+use crate::traits::{MemoryMeta, MemoryRecord, RerankerBackend, ScoringStrategy};
 
 /// Result of a store_with_extraction() operation.
 #[derive(Debug, Clone)]
@@ -103,6 +103,12 @@ pub struct ReviewItem {
     pub tags: Vec<String>,
     /// Review status.
     pub status: ReviewStatus,
+    /// Review scope for temporary or environment-specific allowances.
+    pub scope: Option<ReviewScope>,
+    /// High-level policy class for the review decision.
+    pub policy_class: Option<ReviewPolicyClass>,
+    /// Human reviewer or maintainer who resolved the item.
+    pub reviewer: Option<String>,
     /// When the review state was last updated.
     pub updated_at: Option<DateTime<Utc>>,
     /// Optional expiry for temporary allowances.
@@ -113,6 +119,17 @@ pub struct ReviewItem {
     pub text: String,
     /// Creation timestamp from the stored memory row.
     pub created_at: DateTime<Utc>,
+}
+
+/// Operator-supplied review resolution metadata.
+#[derive(Debug, Clone)]
+pub struct ReviewResolution {
+    pub status: ReviewStatus,
+    pub note: Option<String>,
+    pub reviewer: Option<String>,
+    pub scope: Option<ReviewScope>,
+    pub policy_class: Option<ReviewPolicyClass>,
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 /// Confidence label for deterministic composed answers.
@@ -524,6 +541,13 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
+                let scope = metadata
+                    .get("review_scope")
+                    .and_then(|value| ReviewScope::from_str(value));
+                let policy_class = metadata
+                    .get("review_policy_class")
+                    .and_then(|value| ReviewPolicyClass::from_str(value));
+                let reviewer = metadata.get("review_reviewer").cloned();
                 let updated_at = metadata
                     .get("review_updated_at")
                     .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
@@ -540,6 +564,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     reason,
                     tags,
                     status: effective_status,
+                    scope,
+                    policy_class,
+                    reviewer,
                     updated_at,
                     expires_at,
                     note,
@@ -586,6 +613,25 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         note: Option<&str>,
         expires_at: Option<DateTime<Utc>>,
     ) -> Result<ReviewItem> {
+        self.resolve_review_item_with_resolution(
+            memory_id,
+            ReviewResolution {
+                status,
+                note: note.map(ToString::to_string),
+                reviewer: None,
+                scope: None,
+                policy_class: None,
+                expires_at,
+            },
+        )
+    }
+
+    /// Resolve a stored review item with explicit reviewer, scope, and policy metadata.
+    pub fn resolve_review_item_with_resolution(
+        &self,
+        memory_id: i64,
+        resolution: ReviewResolution,
+    ) -> Result<ReviewItem> {
         self.db
             .with_writer(|conn| {
                 let existing = conn.query_row(
@@ -602,16 +648,31 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     .unwrap_or_default();
 
                 metadata.insert("review_required".to_string(), "true".to_string());
-                metadata.insert("review_status".to_string(), status.to_string());
+                metadata.insert("review_status".to_string(), resolution.status.to_string());
                 metadata.insert("review_updated_at".to_string(), Utc::now().to_rfc3339());
-                if let Some(note) = note {
+                if let Some(note) = resolution.note.as_deref() {
                     metadata.insert("review_note".to_string(), note.to_string());
                 } else {
                     metadata.remove("review_note");
                 }
-                if let Some(expires_at) = expires_at {
+                if let Some(reviewer) = resolution.reviewer.as_deref() {
+                    metadata.insert("review_reviewer".to_string(), reviewer.to_string());
+                } else {
+                    metadata.remove("review_reviewer");
+                }
+                if let Some(scope) = resolution.scope {
+                    metadata.insert("review_scope".to_string(), scope.to_string());
+                } else {
+                    metadata.remove("review_scope");
+                }
+                if let Some(policy_class) = resolution.policy_class {
+                    metadata.insert("review_policy_class".to_string(), policy_class.to_string());
+                } else {
+                    metadata.remove("review_policy_class");
+                }
+                if let Some(expires_at) = resolution.expires_at {
                     metadata.insert("review_expires_at".to_string(), expires_at.to_rfc3339());
-                } else if !matches!(status, ReviewStatus::Allowed) {
+                } else if !matches!(resolution.status, ReviewStatus::Allowed) {
                     metadata.remove("review_expires_at");
                 }
 
@@ -1483,7 +1544,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
 
         let results = self.search_with_config(query, config)?;
-        let evidence = self.collect_distinct_aggregated_matches(results, max_matches)?;
+        let mut evidence = self.collect_distinct_aggregated_matches(results, max_matches)?;
+        filter_secret_guidance_evidence(query, &mut evidence);
 
         if query_requests_sensitive_secret_detail(query) {
             return Ok(ComposedAnswerResult {
@@ -2086,6 +2148,51 @@ fn has_conflicting_state_evidence(query: &str, evidence: &[AggregatedMatch]) -> 
     }
 
     query.is_empty() || is_yes_no_query(query)
+}
+
+fn filter_secret_guidance_evidence(query: &str, evidence: &mut Vec<AggregatedMatch>) {
+    if !query_requests_secret_location_or_reference(query) || evidence.len() < 2 {
+        return;
+    }
+
+    let has_safe_trusted_evidence = evidence.iter().any(|candidate| {
+        secret_class_from_metadata(&candidate.metadata).is_some()
+            && matches!(
+                source_trust_level(&MemoryMeta {
+                    id: Some(candidate.memory_id),
+                    searchable_text: candidate.text.clone(),
+                    memory_type: crate::traits::MemoryType::Procedural,
+                    importance: 5,
+                    category: candidate.category.clone(),
+                    created_at: Utc::now(),
+                    metadata: candidate.metadata.clone(),
+                }),
+                crate::scoring::SourceTrustLevel::Trusted
+                    | crate::scoring::SourceTrustLevel::Normal
+            )
+    });
+
+    if !has_safe_trusted_evidence {
+        return;
+    }
+
+    evidence.retain(|candidate| {
+        if secret_class_from_metadata(&candidate.metadata).is_none() {
+            return true;
+        }
+        matches!(
+            source_trust_level(&MemoryMeta {
+                id: Some(candidate.memory_id),
+                searchable_text: candidate.text.clone(),
+                memory_type: crate::traits::MemoryType::Procedural,
+                importance: 5,
+                category: candidate.category.clone(),
+                created_at: Utc::now(),
+                metadata: candidate.metadata.clone(),
+            }),
+            crate::scoring::SourceTrustLevel::Trusted | crate::scoring::SourceTrustLevel::Normal
+        )
+    });
 }
 
 fn evidence_explicitly_lacks_requested_detail(query: &str, evidence: &[AggregatedMatch]) -> bool {
@@ -3099,14 +3206,26 @@ mod tests {
         assert_eq!(engine.pending_review_count().expect("pending count"), 1);
 
         engine
-            .set_review_status(
+            .resolve_review_item_with_resolution(
                 memory_id,
-                ReviewStatus::Allowed,
-                Some("Temporary human-reviewed exception"),
+                ReviewResolution {
+                    status: ReviewStatus::Allowed,
+                    note: Some("Temporary human-reviewed exception".to_string()),
+                    reviewer: Some("ops-maintainer".to_string()),
+                    scope: Some(ReviewScope::Staging),
+                    policy_class: Some(ReviewPolicyClass::NetworkExposureException),
+                    expires_at: None,
+                },
             )
             .expect("allow");
         let items = engine.review_items(10).expect("review items");
         assert_eq!(items[0].status, ReviewStatus::Allowed);
+        assert_eq!(items[0].scope, Some(ReviewScope::Staging));
+        assert_eq!(
+            items[0].policy_class,
+            Some(ReviewPolicyClass::NetworkExposureException)
+        );
+        assert_eq!(items[0].reviewer.as_deref(), Some("ops-maintainer"));
         assert_eq!(engine.pending_review_count().expect("pending count"), 0);
 
         engine

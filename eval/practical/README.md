@@ -56,6 +56,9 @@ Useful review metadata keys for scenario records:
 - `review_reason`
 - `review_tags`
 - `review_note`
+- `review_scope`
+- `review_policy_class`
+- `review_reviewer`
 - `review_expires_at`
 
 ## Review Workflow
@@ -118,6 +121,7 @@ The summary artifact now includes:
 - per-check retrieval criteria diagnostics
 - per-check review-queue diagnostics when present
 - review-item `updated_at`, `expires_at`, and `note` when review checks are present
+- review-item `scope`, `policy_class`, and `reviewer` when scoped review policy is present
 - pass-rate breakdowns by:
   - check type
   - scenario category
@@ -144,8 +148,8 @@ Current local baseline:
   aggregation, graph-connected, provenance/abstention, and
   trust/procedural-safety, provenance/secret-guardrail, and
   review-policy-transition scenarios
-- reranker-aware remote-fallback regression is currently green at `24/24`
-- reranker-aware remote-fallback ANN regression is also green at `24/24`
+- reranker-aware remote-fallback regression is currently green at `25/25`
+- reranker-aware remote-fallback ANN regression is also green at `25/25`
 - latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

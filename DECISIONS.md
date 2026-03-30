@@ -1076,6 +1076,13 @@ observed evidence list.
   - listing review items
   - resolving review items with notes and optional expiry timestamps
   - expiring due temporary allowances
+- review resolutions can now also carry:
+  - `review_scope`
+  - `review_policy_class`
+  - `review_reviewer`
+- allowed procedural exceptions now honor review scope during retrieval so a
+  staging or migration-only exception does not surface as general production
+  guidance
 - Secret sensitivity is now modeled with explicit classes such as:
   - `credential-material`
   - `credential-location`
@@ -1083,8 +1090,51 @@ observed evidence list.
 - Surfaced evidence and composed answers now redact raw credential material for
   safe location/reference questions instead of relying only on abstention for
   exact-value requests
+- trusted secret-location guidance now suppresses untrusted secret-location
+  alternatives when a safe source of truth is available
 - Remote-GPU validation remains green after the change:
-  practical `24/24` exact, `24/24` ANN, live-library `58/58`,
+  practical `25/25` exact, `25/25` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
+## Decision 037: Allowed Procedural Exceptions Must Carry Scope
+
+**Date:** 2026-03-30
+
+**Decision:** Extend review resolution metadata so allowed high-impact
+procedural memories can carry explicit scope, reviewer, and policy-class
+information, and enforce that scope during retrieval.
+
+**Context:** FeMind could already mark dangerous procedural guidance as
+`allowed`, `denied`, or `expired`, but an allowed exception still had no
+structured answer to "allowed for what?" A reviewed staging-only bridge note
+should not surface as general production guidance just because it is trusted and
+semantically close to the query.
+
+**Rationale:**
+- Human review needs structured context, not just a status bit
+- Environment-specific exceptions should stay bound to their intended context
+- Operator workflows should capture who resolved an exception and what class of
+  exception it belongs to
+- Secret/provenance safety is stronger when trusted location guidance can
+  suppress low-trust alternatives
+
+**Consequences:**
+- Review resolutions can now carry:
+  - `review_scope`
+  - `review_policy_class`
+  - `review_reviewer`
+- `femind-review resolve` now supports reviewer, scope, and class flags
+- Procedural retrieval now filters scope-mismatched allowed exceptions instead
+  of treating every allowed item as globally valid guidance
+- Trusted secret-location guidance now suppresses untrusted secret-location
+  alternatives when a safe source exists
+- Practical review-policy coverage now includes a production-host check that
+  proves a staging-only approved bridge host does not bleed into production
+  answers
+- Remote-GPU validation remains green after the change:
+  practical `25/25` exact, `25/25` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
 ---

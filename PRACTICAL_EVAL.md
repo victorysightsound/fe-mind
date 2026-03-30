@@ -263,8 +263,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `24/24`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `24/24`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `25/25`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `25/25`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
@@ -279,6 +279,8 @@ Current validated baseline:
   dangerous procedural memories alongside ordinary retrieval/abstention checks
 - review-state policy coverage now includes explicit `allowed`, `denied`, and
   `expired` transitions for high-impact procedural memories
+- review-state policy coverage now also includes scoped allowed exceptions, so
+  environment-specific overrides do not leak into general production answers
 - temporary review allowances can now be modeled with `review_expires_at`
   timestamps and inspected through the operator review CLI
 - the trust/procedural-safety scenario now proves FeMind will prefer the
@@ -288,8 +290,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `24/24`
-- latest reranker-aware `remote-fallback` ANN run passes `24/24`
+- latest reranker-aware `remote-fallback` exact run passes `25/25`
+- latest reranker-aware `remote-fallback` ANN run passes `25/25`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`
