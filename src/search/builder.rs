@@ -131,6 +131,7 @@ pub struct QueryRoute {
     pub intent: QueryIntent,
     pub mode: SearchMode,
     pub depth: SearchDepth,
+    pub graph_depth: u32,
     pub temporal_policy: TemporalPolicy,
     pub state_conflict_policy: StateConflictPolicy,
     pub strict_grounding: bool,
@@ -357,6 +358,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                 intent,
                 mode: self.mode.clone(),
                 depth: self.depth,
+                graph_depth: 0,
                 temporal_policy: TemporalPolicy::Neutral,
                 state_conflict_policy: StateConflictPolicy::Neutral,
                 strict_grounding: self.strict_grounding_enabled,
@@ -385,6 +387,12 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                 QueryIntent::HistoricalState | QueryIntent::Aggregation => SearchDepth::Deep,
                 _ => self.depth,
             }
+        };
+
+        let graph_depth = if query_requests_graph_lookup(&self.query) {
+            2
+        } else {
+            0
         };
 
         let strict_grounding = if self.strict_grounding_overridden {
@@ -457,6 +465,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             intent,
             mode,
             depth,
+            graph_depth,
             temporal_policy,
             state_conflict_policy,
             strict_grounding,
@@ -1929,6 +1938,44 @@ fn query_requests_aggregation(query: &str) -> bool {
         || (tokens.contains(&"all") && tokens.contains(&"sessions"))
 }
 
+fn query_requests_graph_lookup(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    let tokens: Vec<_> = normalized.split_whitespace().collect();
+    let asks_how = tokens.windows(2).any(|pair| {
+        matches!(
+            pair,
+            ["how", "does"] | ["how", "do"] | ["how", "did"] | ["how", "is"] | ["how", "are"]
+        )
+    });
+    let has_graph_signal = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "reach"
+                | "reaches"
+                | "connect"
+                | "connected"
+                | "connection"
+                | "via"
+                | "through"
+                | "link"
+                | "linked"
+                | "bridge"
+                | "bridges"
+                | "path"
+                | "depends"
+                | "dependency"
+        )
+    });
+
+    (asks_how && has_graph_signal)
+        || tokens.windows(2).any(|pair| pair == ["what", "connects"])
+        || tokens.windows(2).any(|pair| pair == ["what", "links"])
+        || tokens.windows(2).any(|pair| pair == ["depends", "on"])
+        || tokens.windows(2).any(|pair| pair == ["linked", "to"])
+        || tokens.windows(2).any(|pair| pair == ["through", "what"])
+        || tokens.windows(2).any(|pair| pair == ["via", "what"])
+}
+
 fn query_requests_abstention_risk(query: &str) -> bool {
     let normalized = normalize_text(query);
     normalized.contains("ever mention")
@@ -2472,6 +2519,18 @@ mod tests {
         ));
         assert_eq!(route.rerank_limit, 0);
         assert_eq!(route.depth, SearchDepth::Deep);
+    }
+
+    #[test]
+    fn query_route_enables_graph_depth_for_multi_hop_questions() {
+        let db = setup();
+        let route = SearchBuilder::<TestMem>::new(
+            &db,
+            "How does Librona reach the stable GPU embedding service now?",
+        )
+        .query_route();
+        assert_eq!(route.intent, QueryIntent::General);
+        assert_eq!(route.graph_depth, 2);
     }
 
     #[test]

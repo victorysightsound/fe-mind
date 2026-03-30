@@ -255,7 +255,6 @@
     "title": "Graph-linked retrieval should bridge client, tunnel, and host notes",
     "category": "multi-hop-graph",
     "goal": "Answer a connectivity question that spans several linked records rather than one self-contained note.",
-    "graph_depth": 2,
     "records": [
       {
         "key": "librona-client",

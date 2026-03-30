@@ -17,10 +17,10 @@ mod app {
     #[cfg(feature = "api-embeddings")]
     use femind::embeddings::ApiBackend;
     use femind::embeddings::EmbeddingBackend;
-    #[cfg(feature = "api-embeddings")]
-    use femind::embeddings::MINILM_DIMENSIONS;
     #[cfg(feature = "remote-embeddings")]
     use femind::embeddings::RemoteEmbeddingBackend;
+    #[cfg(feature = "api-embeddings")]
+    use femind::embeddings::MINILM_DIMENSIONS;
     #[cfg(feature = "local-embeddings")]
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
     use femind::engine::{EngineConfig, MemoryEngine, VectorSearchMode};
@@ -36,7 +36,7 @@ mod app {
     use femind::reranking::CandleReranker;
     #[cfg(feature = "remote-reranking")]
     use femind::reranking::RemoteRerankerBackend;
-    use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
+    use femind::reranking::{RerankerRuntime, RERANKER_CANONICAL_NAME};
     use femind::search::{QueryRoute, SearchMode};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
@@ -631,6 +631,7 @@ mod app {
         intent: String,
         mode: String,
         depth: String,
+        graph_depth: u32,
         temporal_policy: String,
         state_conflict_policy: String,
         strict_grounding: bool,
@@ -645,6 +646,7 @@ mod app {
                 intent: value.intent.to_string(),
                 mode: value.mode_name().to_string(),
                 depth: value.depth_name().to_string(),
+                graph_depth: value.graph_depth,
                 temporal_policy: value.temporal_policy_name().to_string(),
                 state_conflict_policy: value.state_conflict_policy_name().to_string(),
                 strict_grounding: value.strict_grounding,
@@ -951,11 +953,12 @@ mod app {
         let mut retrieval = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.retrieval_checks {
-                let graph_depth = check
-                    .graph_depth
-                    .or(scenario.graph_depth)
-                    .unwrap_or(config.graph_depth);
-                let route = Some(routed_search_plan(&engine, &check.query));
+                let route = routed_query_route(&engine, &check.query);
+                let graph_depth = effective_graph_depth(
+                    route.graph_depth,
+                    check.graph_depth.or(scenario.graph_depth),
+                    config.graph_depth,
+                );
                 let observed = top_hits(&engine, &check.query, config.top_k, graph_depth)?;
                 let (passed, criteria) = evaluate_retrieval_check(&observed, &check.query, check);
                 let explain = if !passed && config.explain_failures {
@@ -969,7 +972,7 @@ mod app {
                     expected: check.expected_answer.clone(),
                     observed,
                     graph_depth,
-                    route,
+                    route: Some(route.into()),
                     criteria: Some(criteria),
                     explain,
                 });
@@ -1015,11 +1018,12 @@ mod app {
         let mut abstention = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.abstention_checks {
-                let graph_depth = check
-                    .graph_depth
-                    .or(scenario.graph_depth)
-                    .unwrap_or(config.graph_depth);
-                let route = Some(routed_search_plan(&engine, &check.query));
+                let route = routed_query_route(&engine, &check.query);
+                let graph_depth = effective_graph_depth(
+                    route.graph_depth,
+                    check.graph_depth.or(scenario.graph_depth),
+                    config.graph_depth,
+                );
                 let observed = top_hits(&engine, &check.query, config.top_k, graph_depth)?;
                 let passed = check.expected_behavior == "abstain" && observed.is_empty();
                 abstention.push(CheckReport {
@@ -1028,7 +1032,7 @@ mod app {
                     expected: check.expected_behavior.clone(),
                     observed,
                     graph_depth,
-                    route,
+                    route: Some(route.into()),
                     criteria: None,
                     explain: None,
                 });
@@ -1046,8 +1050,16 @@ mod app {
         })
     }
 
-    fn routed_search_plan(engine: &MemoryEngine<EvalMemory>, query: &str) -> RoutedSearchPlan {
-        engine.search(query).query_route().into()
+    fn routed_query_route(engine: &MemoryEngine<EvalMemory>, query: &str) -> QueryRoute {
+        engine.search(query).query_route()
+    }
+
+    fn effective_graph_depth(
+        routed_graph_depth: u32,
+        scenario_override: Option<u32>,
+        default_graph_depth: u32,
+    ) -> u32 {
+        scenario_override.unwrap_or_else(|| routed_graph_depth.max(default_graph_depth))
     }
 
     fn summarize_reports(

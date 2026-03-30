@@ -184,8 +184,8 @@ The summary now also records:
 - state/conflict-policy pass-rate breakdowns
 - graph-depth pass-rate breakdowns
 - per-check routed search plans showing inferred intent, mode, depth,
-  temporal policy, state/conflict policy, grounding, query-alignment, and
-  rerank settings
+  graph depth, temporal policy, state/conflict policy, grounding,
+  query-alignment, and rerank settings
 - per-check retrieval criteria reports showing whether the expected answer
   matched, whether required fragments were present, whether forbidden fragments
   leaked in, and whether enough hits surfaced for coverage-sensitive checks
@@ -238,6 +238,8 @@ Current validated baseline:
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, and provenance/abstention scenarios
+- graph-connected practical coverage now passes with routed graph expansion
+  even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
 - latest reranker-aware `remote-fallback` exact run passes `15/15`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`

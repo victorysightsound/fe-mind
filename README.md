@@ -65,6 +65,9 @@ The practical live-validation path is now established and repeatable:
   current-state queries mildly favor newer evidence, historical-state queries
   mildly favor older evidence, and exact-detail / abstention routes stay
   temporally neutral unless the caller overrides them
+- routed retrieval now also carries graph depth:
+  graph-connected queries can trigger graph expansion through the engine path
+  even when the global assembly config leaves `graph_depth` at `0`
 - routed retrieval now also includes an explicit state/conflict policy:
   current-state routes demote superseded memories and can walk forward to the
   replacement fact, while historical-state routes can walk backward to prior

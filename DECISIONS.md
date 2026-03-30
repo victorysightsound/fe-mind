@@ -735,6 +735,40 @@ grounded to the right artifact detail.
 
 ---
 
+## Decision 029: Graph-Assisted Retrieval Is Part of the Routed Plan
+
+**Date:** 2026-03-30
+
+**Decision:** Treat graph expansion as a routed query behavior instead of only
+an external assembly knob.
+
+**Context:** FeMind already had graph traversal in `search_with_config`, but it
+only activated when callers forced a nonzero `AssemblyConfig.graph_depth`. That
+meant graph-aware behavior lived mostly in the eval harness instead of the
+engine’s own routed plan.
+
+**Rationale:**
+- Multi-hop questions should trigger graph expansion because of query shape, not
+  only because a caller knew to force graph depth ahead of time
+- Engine-first evaluation is more trustworthy when the routed plan itself owns
+  graph behavior
+- Graph-connected questions can need a simpler seed query than the original
+  natural-language phrasing, so the engine should generate one when routing says
+  the query is graph-shaped
+
+**Consequences:**
+- `QueryRoute` now carries a routed `graph_depth`
+- `search_with_config` and context assembly can apply routed graph expansion
+  when callers leave `AssemblyConfig.graph_depth` at `0`
+- The engine now derives a graph-seed query variant for routed graph questions
+  so multi-hop expansion can start from stronger lexical/semantic anchors
+- Practical summaries now show routed graph depth explicitly
+- The graph-connected practical scenario now passes with global graph depth `0`,
+  proving that graph expansion is being selected by the route rather than by a
+  scenario-specific override
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

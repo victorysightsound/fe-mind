@@ -106,6 +106,10 @@ The summary artifact now includes:
   - state/conflict policy
   - graph depth
 
+The graph-connected scenario now relies on routed graph depth rather than a
+scenario-level forced graph override, so the practical set checks that the
+engine can infer when multi-hop expansion is needed.
+
 ## Scope
 
 This is the primary real-world validation set for `femind`.

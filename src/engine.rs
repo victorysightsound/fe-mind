@@ -7,13 +7,13 @@ use sha2::Digest;
 use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
 use crate::embeddings::EmbeddingBackend;
 use crate::error::{FemindError, Result};
-use crate::memory::MemoryStore;
 use crate::memory::store::StoreResult;
+use crate::memory::MemoryStore;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{CompositeScorer, ImportanceScorer, MemoryTypeScorer, RecencyScorer};
 use crate::search::builder::SearchBuilder;
-use crate::storage::Database;
 use crate::storage::migrations;
+use crate::storage::Database;
 use crate::traits::{MemoryRecord, RerankerBackend, ScoringStrategy};
 
 /// Result of a store_with_extraction() operation.
@@ -637,6 +637,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         use std::collections::HashMap;
 
         let route = self.search(query).limit(limit).query_route();
+        let effective_graph_depth = routed_graph_depth(config, &route);
 
         // Query variant 1: original
         let results1 = self.search(query).limit(limit).execute()?;
@@ -668,12 +669,32 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             }
         }
 
+        let graph_seed = graph_seed_query_variant(query, &route);
+        let mut results4 = if let Some(ref variant) = graph_seed {
+            let duplicates_existing = variant == query
+                || variant == &key_phrases
+                || supplemental.as_ref().is_some_and(|value| value == variant);
+            if duplicates_existing {
+                Vec::new()
+            } else {
+                self.search(variant).limit(limit).execute()?
+            }
+        } else {
+            Vec::new()
+        };
+        if !results4.is_empty() {
+            for result in &mut results4 {
+                result.score *= 1.35;
+            }
+        }
+
         // Merge: keep highest score per memory_id
         let mut best: HashMap<i64, crate::search::builder::SearchResult> = HashMap::new();
         for r in results1
             .into_iter()
             .chain(results2.into_iter())
             .chain(results3.into_iter())
+            .chain(results4.into_iter())
         {
             best.entry(r.memory_id)
                 .and_modify(|existing| {
@@ -739,7 +760,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        if self.config.graph_enabled && config.graph_depth > 0 {
+        if self.config.graph_enabled && effective_graph_depth > 0 {
             use crate::memory::{GraphMemory, RelationType};
             use crate::search::StateConflictPolicy;
 
@@ -752,7 +773,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 .collect();
 
             for seed in &seed_results {
-                let Ok(nodes) = GraphMemory::traverse(&self.db, seed.memory_id, config.graph_depth)
+                let Ok(nodes) =
+                    GraphMemory::traverse(&self.db, seed.memory_id, effective_graph_depth)
                 else {
                     continue;
                 };
@@ -1068,6 +1090,79 @@ fn supplemental_query_variant(query: &str) -> Option<String> {
     }
 
     None
+}
+
+fn graph_seed_query_variant(query: &str, route: &crate::search::QueryRoute) -> Option<String> {
+    if route.graph_depth == 0 {
+        return None;
+    }
+
+    let normalized = query
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+
+    let variant = normalized
+        .split_whitespace()
+        .filter(|token| {
+            !matches!(
+                *token,
+                "how"
+                    | "does"
+                    | "do"
+                    | "did"
+                    | "is"
+                    | "are"
+                    | "the"
+                    | "a"
+                    | "an"
+                    | "to"
+                    | "through"
+                    | "via"
+                    | "reach"
+                    | "reaches"
+                    | "connect"
+                    | "connected"
+                    | "connection"
+                    | "link"
+                    | "linked"
+                    | "bridge"
+                    | "bridges"
+                    | "path"
+                    | "depends"
+                    | "dependency"
+                    | "now"
+                    | "current"
+                    | "currently"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if variant.is_empty() || variant == normalized.split_whitespace().collect::<Vec<_>>().join(" ")
+    {
+        None
+    } else {
+        Some(variant)
+    }
+}
+
+fn routed_graph_depth(
+    config: &crate::context::AssemblyConfig,
+    route: &crate::search::QueryRoute,
+) -> u32 {
+    if config.graph_depth > 0 {
+        config.graph_depth
+    } else {
+        route.graph_depth
+    }
 }
 
 impl<T: MemoryRecord> std::fmt::Debug for MemoryEngine<T> {
@@ -1612,6 +1707,32 @@ mod tests {
             results.first().map(|result| result.memory_id) == Some(old_id),
             "historical route should rank the prior state ahead of the current one"
         );
+    }
+
+    #[test]
+    fn graph_queries_resolve_routed_graph_depth_and_seed_variant() {
+        use crate::context::AssemblyConfig;
+        let route = SearchBuilder::<TestMem>::new(
+            &Database::open_in_memory().expect("db"),
+            "How does Librona reach the stable GPU embedding service now?",
+        )
+        .query_route();
+
+        assert_eq!(route.graph_depth, 2);
+        assert_eq!(routed_graph_depth(&AssemblyConfig::default(), &route), 2);
+        assert_eq!(
+            graph_seed_query_variant(
+                "How does Librona reach the stable GPU embedding service now?",
+                &route,
+            ),
+            Some("librona stable gpu embedding service".to_string())
+        );
+
+        let explicit = AssemblyConfig {
+            graph_depth: 1,
+            ..AssemblyConfig::default()
+        };
+        assert_eq!(routed_graph_depth(&explicit, &route), 1);
     }
 
     #[test]
