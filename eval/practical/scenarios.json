@@ -162,6 +162,57 @@
     ]
   },
   {
+    "id": "linked-supersession-history",
+    "title": "Linked supersession should resolve current and prior states cleanly",
+    "category": "linked-state-history",
+    "goal": "Use explicit supersession links to answer current-state and historical-state questions over the same fact family.",
+    "records": [
+      {
+        "key": "wsl-host",
+        "timestamp": "2026-03-24T09:00:00Z",
+        "source": "ops-note",
+        "memory_type": "semantic",
+        "text": "The remote embedding service is hosted in WSL on calvaryav."
+      },
+      {
+        "key": "windows-host",
+        "timestamp": "2026-03-29T09:00:00Z",
+        "source": "ops-note",
+        "memory_type": "semantic",
+        "text": "The remote embedding service is now hosted natively on Windows on calvaryav so the GPU path stays stable."
+      },
+      {
+        "key": "tunnel-note",
+        "timestamp": "2026-03-29T09:15:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "text": "Mac clients still reach the service through an SSH tunnel to Windows localhost."
+      }
+    ],
+    "relations": [
+      {
+        "from": "wsl-host",
+        "to": "windows-host",
+        "relation": "superseded_by"
+      },
+      {
+        "from": "wsl-host",
+        "to": "windows-host",
+        "relation": "conflicts_with"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "Where should the remote embedding service run now?",
+        "expected_answer": "It should run natively on Windows on calvaryav."
+      },
+      {
+        "query": "Where was the remote embedding service hosted before the native Windows move?",
+        "expected_answer": "It was hosted in WSL on calvaryav."
+      }
+    ]
+  },
+  {
     "id": "abstention-missing-info",
     "title": "System should abstain when the answer is not present",
     "category": "abstention",

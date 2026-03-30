@@ -7,6 +7,6 @@ pub mod store;
 
 pub use hash_dedup::HashDedup;
 pub use pruning::{PruneReport, PruningPolicy};
-pub use relations::{GraphMemory, GraphNode, RelationType};
+pub use relations::{GraphMemory, GraphNode, RelationType, StateConflictSnapshot};
 pub use similarity_dedup::SimilarityDedup;
 pub use store::MemoryStore;

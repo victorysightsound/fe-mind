@@ -31,6 +31,8 @@ As of the current FeMind pass, the first layer of that roadmap is already in pla
 - route-level temporal policy is live
 - route-level state/conflict policy is live
 - `valid_at(...)` now enforces validity windows during retrieval
+- practical scenarios can now seed explicit supersession/conflict links, so
+  linked state-history behavior is part of the real regression loop
 
 That means the next temporal work should focus on deeper state modeling, not on
 re-adding the basic routing layer.

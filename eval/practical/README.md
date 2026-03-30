@@ -23,7 +23,12 @@ Each scenario includes:
 - `category`
 - `goal`
 - `records`
+- optional `records[].key` for explicit graph-linked scenarios
 - `records[].memory_type` (`episodic`, `semantic`, or `procedural`)
+- optional `records[].valid_from` / `records[].valid_until` (RFC3339)
+- optional `relations` for explicit source-record graph links
+- `relations[].from` / `relations[].to` refer to `records[].key`
+- `relations[].relation` uses the stored relation name such as `superseded_by` or `conflicts_with`
 - `retrieval_checks`
 - optional `extraction_checks`
 - optional `abstention_checks`
@@ -90,7 +95,9 @@ Current local baseline:
 
 - retrieval-only `exact` mode is the standard regression path
 - latest fully green summary: `target/practical-eval/retrieval-exact.json`
-- reranker-aware remote-fallback regression is wired and currently passes `9/9`
+- the practical set now includes an explicit linked supersession/history
+  scenario seeded through graph relations
+- reranker-aware local-cpu regression is currently green at `11/11`
 - latest reranker-aware summary: `target/practical-eval/retrieval-exact-remote-rerank.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

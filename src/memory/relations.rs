@@ -225,6 +225,29 @@ impl GraphMemory {
         })
     }
 
+    /// Get directly conflicting neighbors for a memory.
+    pub fn conflict_neighbors(db: &Database, memory_id: i64) -> Result<Vec<i64>> {
+        db.with_reader(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT CASE
+                        WHEN source_id = ?1 THEN target_id
+                        ELSE source_id
+                    END AS neighbor_id
+                 FROM memory_relations
+                 WHERE (source_id = ?1 OR target_id = ?1)
+                   AND relation = 'conflicts_with'
+                   AND (valid_until IS NULL OR valid_until > datetime('now'))",
+            )?;
+
+            let ids: Vec<i64> = stmt
+                .query_map([memory_id], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok(ids)
+        })
+    }
+
     /// Load the current state/conflict markers for a memory.
     pub fn state_conflict_snapshot(
         db: &Database,
@@ -442,6 +465,18 @@ mod tests {
         assert!(!old.supersedes_other);
         assert!(!current.is_superseded);
         assert!(current.supersedes_other);
+    }
+
+    #[test]
+    fn conflict_neighbors_include_both_directions() {
+        let db = setup();
+        GraphMemory::relate(&db, 2, 4, &RelationType::ConflictsWith).expect("2↔4");
+
+        let from_source = GraphMemory::conflict_neighbors(&db, 2).expect("neighbors");
+        let from_target = GraphMemory::conflict_neighbors(&db, 4).expect("neighbors");
+
+        assert_eq!(from_source, vec![4]);
+        assert_eq!(from_target, vec![2]);
     }
 
     #[test]

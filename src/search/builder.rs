@@ -548,6 +548,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let mut results = self.apply_filters(fts_results);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
+        apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
 
         // Apply min_score filter
         if let Some(threshold) = self.min_score {
@@ -577,6 +578,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let mut results = self.apply_filters(fts_results);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
+        apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
         results.retain(|r| r.score >= min_score);
         Ok(results)
     }
@@ -604,6 +606,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let mut results = self.apply_filters(vector_results);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
+        apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
         if route.strict_grounding {
             apply_strict_detail_query_filter(self.db, &self.query, &mut results);
         }
@@ -657,6 +660,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let mut results = self.apply_filters(merged);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
+        apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
 
         // Reranking disabled — RRF + vector weighting provides better ranking
         // rerank_results(self.db, &mut results, &self.query);
@@ -1146,6 +1150,209 @@ fn apply_state_conflict_route_bias(
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+}
+
+fn apply_linked_state_conflict_bias(
+    db: &Database,
+    results: &mut [SearchResult],
+    policy: StateConflictPolicy,
+) {
+    use std::collections::{HashMap, HashSet};
+
+    if results.len() < 2 || matches!(policy, StateConflictPolicy::Neutral) {
+        return;
+    }
+
+    let mut index_by_id = HashMap::with_capacity(results.len());
+    let mut created_at_by_id = HashMap::with_capacity(results.len());
+    let mut snapshot_by_id = HashMap::with_capacity(results.len());
+
+    for (index, result) in results.iter().enumerate() {
+        index_by_id.insert(result.memory_id, index);
+        created_at_by_id.insert(
+            result.memory_id,
+            load_created_at_timestamp(db, result.memory_id),
+        );
+        snapshot_by_id.insert(
+            result.memory_id,
+            GraphMemory::state_conflict_snapshot(db, result.memory_id)
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+        );
+    }
+
+    let mut seen_pairs = HashSet::new();
+    let mut multipliers = vec![1.0_f32; results.len()];
+
+    for result in results.iter() {
+        let mut peers = Vec::new();
+        if let Ok(successors) = GraphMemory::superseded_successors(db, result.memory_id) {
+            peers.extend(successors);
+        }
+        if let Ok(predecessors) = GraphMemory::superseded_predecessors(db, result.memory_id) {
+            peers.extend(predecessors);
+        }
+        if let Ok(conflicts) = GraphMemory::conflict_neighbors(db, result.memory_id) {
+            peers.extend(conflicts);
+        }
+
+        for peer_id in peers {
+            let Some(&peer_index) = index_by_id.get(&peer_id) else {
+                continue;
+            };
+            let pair = if result.memory_id < peer_id {
+                (result.memory_id, peer_id)
+            } else {
+                (peer_id, result.memory_id)
+            };
+            if !seen_pairs.insert(pair) {
+                continue;
+            }
+
+            let left_id = pair.0;
+            let right_id = pair.1;
+            let left_snapshot = snapshot_by_id.get(&left_id).cloned().unwrap_or_default();
+            let right_snapshot = snapshot_by_id.get(&right_id).cloned().unwrap_or_default();
+            let left_created = created_at_by_id.get(&left_id).copied().flatten();
+            let right_created = created_at_by_id.get(&right_id).copied().flatten();
+
+            let preferred_id = choose_preferred_linked_state(
+                policy,
+                left_id,
+                &left_snapshot,
+                left_created,
+                right_id,
+                &right_snapshot,
+                right_created,
+            );
+            let demoted_id = if preferred_id == left_id {
+                right_id
+            } else {
+                left_id
+            };
+            let demoted_index = if demoted_id == result.memory_id {
+                index_by_id[&demoted_id]
+            } else {
+                peer_index
+            };
+            multipliers[demoted_index] *= 0.72;
+        }
+    }
+
+    for (result, multiplier) in results.iter_mut().zip(multipliers.into_iter()) {
+        result.score *= multiplier;
+    }
+
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
+fn choose_preferred_linked_state(
+    policy: StateConflictPolicy,
+    left_id: i64,
+    left_snapshot: &crate::memory::StateConflictSnapshot,
+    left_created_at: Option<i64>,
+    right_id: i64,
+    right_snapshot: &crate::memory::StateConflictSnapshot,
+    right_created_at: Option<i64>,
+) -> i64 {
+    let current_now = Utc::now();
+
+    let choose_newer = |left: Option<i64>, right: Option<i64>| match (left, right) {
+        (Some(left), Some(right)) if left != right => {
+            if left > right {
+                left_id
+            } else {
+                right_id
+            }
+        }
+        _ => right_id.max(left_id),
+    };
+
+    let choose_older = |left: Option<i64>, right: Option<i64>| match (left, right) {
+        (Some(left), Some(right)) if left != right => {
+            if left < right {
+                left_id
+            } else {
+                right_id
+            }
+        }
+        _ => left_id.min(right_id),
+    };
+
+    match policy {
+        StateConflictPolicy::Neutral => choose_newer(left_created_at, right_created_at),
+        StateConflictPolicy::PreferCurrent => {
+            let left_current = left_snapshot.is_valid_at(current_now);
+            let right_current = right_snapshot.is_valid_at(current_now);
+            if left_current != right_current {
+                return if left_current { left_id } else { right_id };
+            }
+            if left_snapshot.is_superseded != right_snapshot.is_superseded {
+                return if !left_snapshot.is_superseded {
+                    left_id
+                } else {
+                    right_id
+                };
+            }
+            if left_snapshot.supersedes_other != right_snapshot.supersedes_other {
+                return if left_snapshot.supersedes_other {
+                    left_id
+                } else {
+                    right_id
+                };
+            }
+            choose_newer(left_created_at, right_created_at)
+        }
+        StateConflictPolicy::PreferHistorical => {
+            if left_snapshot.is_superseded != right_snapshot.is_superseded {
+                return if left_snapshot.is_superseded {
+                    left_id
+                } else {
+                    right_id
+                };
+            }
+            let left_current = left_snapshot.is_valid_at(current_now);
+            let right_current = right_snapshot.is_valid_at(current_now);
+            if left_current != right_current {
+                return if !left_current { left_id } else { right_id };
+            }
+            if left_snapshot.supersedes_other != right_snapshot.supersedes_other {
+                return if !left_snapshot.supersedes_other {
+                    left_id
+                } else {
+                    right_id
+                };
+            }
+            choose_older(left_created_at, right_created_at)
+        }
+    }
+}
+
+fn load_created_at_timestamp(db: &Database, memory_id: i64) -> Option<i64> {
+    db.with_reader(|conn| {
+        conn.query_row(
+            "SELECT created_at FROM memories WHERE id = ?1",
+            [memory_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(crate::error::FemindError::Database)
+    })
+    .ok()
+    .and_then(|value| {
+        chrono::DateTime::parse_from_rfc3339(&value)
+            .ok()
+            .map(|dt| dt.timestamp())
+            .or_else(|| {
+                chrono::NaiveDateTime::parse_from_str(&value, "%Y-%m-%d %H:%M:%S")
+                    .ok()
+                    .map(|dt| dt.and_utc().timestamp())
+            })
+    })
 }
 
 pub(crate) fn apply_strict_detail_query_filter(
@@ -2524,6 +2731,130 @@ mod tests {
             },
         ];
         apply_state_conflict_route_bias(&db, &mut results, StateConflictPolicy::PreferHistorical);
+        assert_eq!(results[0].memory_id, older_id);
+    }
+
+    #[test]
+    fn linked_state_conflict_bias_demotes_superseded_result_for_current_queries() {
+        use crate::memory::{GraphMemory, RelationType};
+
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let older = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "the remote embedding service ran in WSL".to_string(),
+                    category: None,
+                    created_at: Utc::now() - chrono::Duration::days(5),
+                },
+            )
+            .expect("store old");
+        let newer = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "the remote embedding service now runs natively on windows".to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store new");
+
+        let older_id = match older {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let newer_id = match newer {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        GraphMemory::relate(&db, older_id, newer_id, &RelationType::SupersededBy).expect("relate");
+        GraphMemory::relate(&db, older_id, newer_id, &RelationType::ConflictsWith)
+            .expect("conflict");
+
+        let mut results = vec![
+            SearchResult {
+                memory_id: older_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: newer_id,
+                score: 0.95,
+            },
+        ];
+        apply_linked_state_conflict_bias(&db, &mut results, StateConflictPolicy::PreferCurrent);
+        assert_eq!(results[0].memory_id, newer_id);
+    }
+
+    #[test]
+    fn linked_state_conflict_bias_promotes_prior_state_for_historical_queries() {
+        use crate::memory::{GraphMemory, RelationType};
+
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let older = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "before the move the service ran in WSL".to_string(),
+                    category: None,
+                    created_at: Utc::now() - chrono::Duration::days(5),
+                },
+            )
+            .expect("store old");
+        let newer = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "after the move the service ran natively on windows".to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store new");
+
+        let older_id = match older {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let newer_id = match newer {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        GraphMemory::relate(&db, older_id, newer_id, &RelationType::SupersededBy).expect("relate");
+        GraphMemory::relate(&db, older_id, newer_id, &RelationType::ConflictsWith)
+            .expect("conflict");
+
+        let mut results = vec![
+            SearchResult {
+                memory_id: newer_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: older_id,
+                score: 0.95,
+            },
+        ];
+        apply_linked_state_conflict_bias(&db, &mut results, StateConflictPolicy::PreferHistorical);
         assert_eq!(results[0].memory_id, older_id);
     }
 

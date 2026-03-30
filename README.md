@@ -27,15 +27,18 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `9/9`
-- retrieval-only practical eval in `ann` mode currently passes `9/9`
-- broader live-usage sample built from actual project docs currently passes `11/11`
+- retrieval-only practical eval in `exact` mode currently passes `11/11`
+- retrieval-only practical eval in `ann` mode currently passes `11/11`
+- practical eval now includes explicit graph-linked state-history coverage, not
+  just text-only changed-fact scenarios
 - larger real-world follow-up library now lives under `eval/live-library/`
-- larger real-world library now covers 18 scenarios and 66 checks
-- larger real-world library currently passes `66/66` in both `all` + `exact` and `all` + `ann`
+- larger real-world library now covers 18 scenarios and 58 retrieval checks
+- larger real-world library currently passes `58/58` in the standard
+  retrieval-only `exact` path
 - memloft-derived real-data slice now lives under `eval/memloft-slice/`
 - memloft-derived real-data slice now covers 18 scenarios and 90 checks
-- memloft-derived real-data slice currently passes `90/90` in both `all` + `exact` and `all` + `ann`
+- memloft-derived real-data slice currently passes `90/90` in the standard
+  retrieval-only `exact` path
 - standard local runner: `scripts/run-practical-eval.sh`
 - larger real-world runner: `scripts/run-live-library.sh`
 - memloft-derived real-data runner: `scripts/run-memloft-slice.sh`
@@ -44,8 +47,8 @@ The practical live-validation path is now established and repeatable:
 - the recommended high-precision retrieval path is remote MiniLM plus remote
   MiniLM reranking with local fallback when the Windows GPU service is
   available
-- current remote-fallback retrieval baselines are `9/9` practical, `58/58`
-  live-library, and `90/90` memloft-slice
+- this pass revalidated the engine-first suites on local CPU at `11/11`
+  practical, `58/58` live-library, and `90/90` memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
   benchmark-style evaluation is deferred to milestone checkpoints after
@@ -61,6 +64,9 @@ The practical live-validation path is now established and repeatable:
   current-state routes demote superseded memories and can walk forward to the
   replacement fact, while historical-state routes can walk backward to prior
   states through supersession links
+- linked conflict sets now get pairwise demotion inside the retrieved result
+  set, so current/historical routes can prefer the right state even when both
+  competing records remain textually relevant enough to surface together
 - `SearchBuilder::valid_at(...)` is now enforced against stored `valid_from` /
   `valid_until` windows instead of being a no-op
 

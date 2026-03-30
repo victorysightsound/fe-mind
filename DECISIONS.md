@@ -660,6 +660,41 @@ builder also exposed `valid_at(...)` without actually enforcing it.
 
 ---
 
+## Decision 027: Practical Scenarios Can Seed Explicit Graph Relations
+
+**Date:** 2026-03-30
+
+**Decision:** Allow the practical eval harness to seed explicit graph links
+between source records, and use that path to keep linked current-vs-historical
+state behavior under regression.
+
+**Context:** Query routing, temporal bias, and state/conflict policy were in
+place, but the practical suite still seeded only standalone records. That meant
+the most important linked-state behaviors were covered by unit tests more than
+by the real engine-first regression loop.
+
+**Rationale:**
+- FeMind needs real-world regression coverage for supersession chains and
+  conflict sets, not only isolated unit tests
+- Some state-history questions should be answered because the memory graph is
+  explicit, not because the prose itself happens to contain words like
+  "superseded"
+- The practical harness is the right place to preserve this coverage because it
+  stays deterministic and cheap to debug
+
+**Consequences:**
+- `eval/practical/scenarios.json` can now define `records[].key` and a
+  `relations[]` block
+- The practical runner maps those record keys to stored memory IDs and creates
+  graph edges during corpus seeding
+- The practical suite now includes a linked supersession/history scenario that
+  exercises current-state and historical-state retrieval over the same fact
+  family
+- Linked conflict-set bias is now validated by both unit tests and the
+  engine-first practical regression loop
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

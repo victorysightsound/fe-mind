@@ -208,16 +208,18 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `9/9`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `9/9`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `11/11`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `11/11`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
+- practical coverage now includes an explicit linked supersession/history
+  scenario that seeds graph relations directly through the eval harness
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `9/9`
+- latest reranker-aware `local-cpu` exact run passes `11/11`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact-remote-rerank.json`
-- broader live-usage sample from actual project docs currently passes `11/11` for all four tested extraction models
-- live-usage summary artifact: `target/practical-eval/live-usage-exact.json`
-- retrieval-only `remote-fallback` live-library exact run passes `58/58`
-- retrieval-only `remote-fallback` memloft-slice exact run passes `90/90`
+- broader live-library retrieval sample from actual project docs currently
+  passes `58/58`
+- live-library summary artifact: `target/live-library/live-library-exact.json`
+- retrieval-only memloft-slice exact run passes `90/90`
 
 This exact-mode practical run is the standard local regression check before
 trying wider live usage samples or ANN comparisons.

@@ -17,10 +17,10 @@ mod app {
     #[cfg(feature = "api-embeddings")]
     use femind::embeddings::ApiBackend;
     use femind::embeddings::EmbeddingBackend;
-    #[cfg(feature = "api-embeddings")]
-    use femind::embeddings::MINILM_DIMENSIONS;
     #[cfg(feature = "remote-embeddings")]
     use femind::embeddings::RemoteEmbeddingBackend;
+    #[cfg(feature = "api-embeddings")]
+    use femind::embeddings::MINILM_DIMENSIONS;
     #[cfg(feature = "local-embeddings")]
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
     use femind::engine::{EngineConfig, MemoryEngine, VectorSearchMode};
@@ -28,13 +28,15 @@ mod app {
     use femind::llm::ApiLlmCallback;
     #[cfg(feature = "cli-llm")]
     use femind::llm::CliLlmCallback;
+    use femind::memory::store::StoreResult;
+    use femind::memory::{GraphMemory, RelationType};
     #[cfg(feature = "api-reranking")]
     use femind::reranking::ApiRerankerBackend;
     #[cfg(feature = "reranking")]
     use femind::reranking::CandleReranker;
     #[cfg(feature = "remote-reranking")]
     use femind::reranking::RemoteRerankerBackend;
-    use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
+    use femind::reranking::{RerankerRuntime, RERANKER_CANONICAL_NAME};
     use femind::search::{QueryRoute, SearchMode};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
@@ -58,6 +60,8 @@ mod app {
         source: String,
         memory_type: MemoryType,
         created_at: DateTime<Utc>,
+        valid_from: Option<DateTime<Utc>>,
+        valid_until: Option<DateTime<Utc>>,
     }
 
     impl MemoryRecord for EvalMemory {
@@ -84,14 +88,37 @@ mod app {
         fn category(&self) -> Option<&str> {
             Some(&self.source)
         }
+
+        #[cfg(feature = "temporal")]
+        fn valid_from(&self) -> Option<DateTime<Utc>> {
+            self.valid_from
+        }
+
+        #[cfg(feature = "temporal")]
+        fn valid_until(&self) -> Option<DateTime<Utc>> {
+            self.valid_until
+        }
     }
 
     #[derive(Debug, Deserialize)]
     struct ScenarioRecord {
+        #[serde(default)]
+        key: Option<String>,
         timestamp: String,
         source: String,
         memory_type: String,
         text: String,
+        #[serde(default)]
+        valid_from: Option<String>,
+        #[serde(default)]
+        valid_until: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ScenarioRelation {
+        from: String,
+        to: String,
+        relation: String,
     }
 
     #[derive(Debug, Deserialize)]
@@ -118,6 +145,8 @@ mod app {
         category: String,
         goal: String,
         records: Vec<ScenarioRecord>,
+        #[serde(default)]
+        relations: Vec<ScenarioRelation>,
         #[serde(default)]
         retrieval_checks: Vec<RetrievalCheck>,
         #[serde(default)]
@@ -1432,9 +1461,17 @@ mod app {
                     .iter()
                     .map(to_eval_memory)
                     .collect::<Result<Vec<_>, _>>()?;
-                let _ = engine.store_batch(&records)?;
+                let store_results = engine.store_batch(&records)?;
+                apply_scenario_relations(engine, scenario, &store_results)?;
             }
             RetrievalIngest::Extraction => {
+                if !scenario.relations.is_empty() {
+                    return Err(format!(
+                        "scenario '{}' defines explicit relations, but retrieval ingest 'extraction' does not create addressable source-record IDs",
+                        scenario.id
+                    )
+                    .into());
+                }
                 let extractor = extractor
                     .ok_or("retrieval ingest 'extraction' requires an extraction backend")?;
                 let raw_text = scenario
@@ -1453,7 +1490,8 @@ mod app {
                     .iter()
                     .map(to_eval_memory)
                     .collect::<Result<Vec<_>, _>>()?;
-                let _ = engine.store_batch(&records)?;
+                let store_results = engine.store_batch(&records)?;
+                apply_scenario_relations(engine, scenario, &store_results)?;
 
                 let raw_text = scenario
                     .records
@@ -1463,6 +1501,47 @@ mod app {
                     .join("\n");
                 let _ = engine.store_with_extraction(&raw_text, extractor)?;
             }
+        }
+
+        Ok(())
+    }
+
+    fn apply_scenario_relations(
+        engine: &MemoryEngine<EvalMemory>,
+        scenario: &Scenario,
+        store_results: &[StoreResult],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if scenario.relations.is_empty() {
+            return Ok(());
+        }
+
+        let mut ids_by_key = std::collections::HashMap::new();
+        for (record, result) in scenario.records.iter().zip(store_results.iter()) {
+            let Some(key) = &record.key else {
+                continue;
+            };
+
+            let id = match result {
+                StoreResult::Added(id) | StoreResult::Duplicate(id) => *id,
+            };
+            ids_by_key.insert(key.clone(), id);
+        }
+
+        for relation in &scenario.relations {
+            let source_id = *ids_by_key.get(&relation.from).ok_or_else(|| {
+                format!(
+                    "scenario '{}' relation references unknown source key '{}'",
+                    scenario.id, relation.from
+                )
+            })?;
+            let target_id = *ids_by_key.get(&relation.to).ok_or_else(|| {
+                format!(
+                    "scenario '{}' relation references unknown target key '{}'",
+                    scenario.id, relation.to
+                )
+            })?;
+            let relation_type = parse_relation_type(&relation.relation);
+            GraphMemory::relate(engine.database(), source_id, target_id, &relation_type)?;
         }
 
         Ok(())
@@ -1489,12 +1568,30 @@ mod app {
             source: record.source.clone(),
             memory_type: parse_memory_type(&record.memory_type)?,
             created_at: DateTime::parse_from_rfc3339(&record.timestamp)?.with_timezone(&Utc),
+            valid_from: parse_optional_timestamp(record.valid_from.as_deref())?,
+            valid_until: parse_optional_timestamp(record.valid_until.as_deref())?,
         })
+    }
+
+    fn parse_optional_timestamp(
+        value: Option<&str>,
+    ) -> Result<Option<DateTime<Utc>>, Box<dyn std::error::Error>> {
+        value
+            .map(|timestamp| {
+                DateTime::parse_from_rfc3339(timestamp)
+                    .map(|value| value.with_timezone(&Utc))
+                    .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })
+            })
+            .transpose()
     }
 
     fn parse_memory_type(value: &str) -> Result<MemoryType, Box<dyn std::error::Error>> {
         MemoryType::from_str(&value.to_lowercase())
             .ok_or_else(|| format!("unknown memory_type '{value}'").into())
+    }
+
+    fn parse_relation_type(value: &str) -> RelationType {
+        RelationType::from_str(&value.to_lowercase())
     }
 
     fn load_scenarios(path: &Path) -> Result<Vec<Scenario>, Box<dyn std::error::Error>> {
