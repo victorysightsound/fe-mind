@@ -284,7 +284,10 @@ mod inner {
         }
     }
 
-    fn select_device(device_mode: LocalEmbeddingDevice, cuda_ordinal: usize) -> Result<Device> {
+    pub(crate) fn select_device(
+        device_mode: LocalEmbeddingDevice,
+        cuda_ordinal: usize,
+    ) -> Result<Device> {
         match device_mode {
             LocalEmbeddingDevice::Cpu => Ok(Device::Cpu),
             LocalEmbeddingDevice::Auto => select_cuda_device(cuda_ordinal)
@@ -312,11 +315,11 @@ mod inner {
         Err("femind was built without the `cuda` feature".to_string())
     }
 
-    fn describe_device(device: &Device) -> String {
+    pub(crate) fn describe_device(device: &Device) -> String {
         format!("{device:?}").to_ascii_lowercase()
     }
 
-    fn execution_mode_from_label(device_label: &str) -> &'static str {
+    pub(crate) fn execution_mode_from_label(device_label: &str) -> &'static str {
         if device_label.contains("cuda") {
             "local-gpu"
         } else {
@@ -343,5 +346,7 @@ mod inner {
     }
 }
 
+#[cfg(feature = "local-embeddings")]
+pub(crate) use inner::{describe_device, execution_mode_from_label, select_device};
 #[cfg(feature = "local-embeddings")]
 pub use inner::{CandleNativeBackend, LocalEmbeddingDevice};

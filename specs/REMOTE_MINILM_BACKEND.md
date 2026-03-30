@@ -134,6 +134,7 @@ The FeMind-owned operator surface should expose:
 - `femind-embed-service serve`
 - `femind-embed-service status --config <path>`
 - `femind-embed-service verify-remote --config <path>`
+- `femind-embed-service verify-remote-reranker --config <path>`
 
 The host command should accept either direct flags or a TOML config file. The
 client-side `status` and `verify-remote` commands should resolve:
@@ -143,6 +144,14 @@ client-side `status` and `verify-remote` commands should resolve:
 - timeout
 - local fallback preference
 - profile verification preference
+
+When reranking is enabled, the same host process should also expose:
+
+- `/rerank/status`
+- `/rerank/rerank`
+
+This keeps deployment to one warm model service per host while leaving
+embeddings and reranking as separate client-side backends.
 
 ## Remote Host Pattern
 
@@ -185,6 +194,8 @@ later remote GPU execution on another machine.
 New backend:
 
 - `RemoteEmbeddingBackend`
+- `RemoteRerankerBackend`
+- `ApiRerankerBackend`
 
 New constructor pattern:
 
@@ -198,6 +209,8 @@ Expected behavior:
 - optionally degrade to local if configured
 - report the same `model_name()` as the local MiniLM backend when the profile
   matches
+- for reranking, verify the reranker profile and expose the host execution mode
+  independently from embeddings
 
 Reference example configs:
 
@@ -215,6 +228,8 @@ Minimum validation before rollout:
 4. Remote backend reports `384` dimensions and the same model name/profile as
    the local backend
 5. Existing vector-search tests still pass with the new backend present
+6. Rerank host returns a stable `/rerank/status` payload and ordered relevance
+   scores from `/rerank/rerank`
 
 ## Non-Goals
 

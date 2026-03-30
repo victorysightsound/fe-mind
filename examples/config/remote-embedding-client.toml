@@ -14,3 +14,19 @@ auth_token_env = "FEMIND_REMOTE_EMBED_TOKEN"
 timeout_secs = 30
 fallback_to_local = true
 verify_profile = true
+
+[reranking]
+enabled = true
+model = "local-minilm-reranker"
+
+[reranking.local]
+execution_mode = "remote_service"
+device = "auto"
+
+[reranking.local.remote_service]
+base_url = "http://127.0.0.1:8899/rerank"
+auth_token_env = "FEMIND_REMOTE_EMBED_TOKEN"
+# auth_token_env_file = "/path/to/femind-remote.env"
+timeout_secs = 30
+fallback_to_local = true
+verify_profile = true

@@ -9,5 +9,5 @@ pub use consolidation::{ConsolidationAction, ConsolidationStrategy};
 pub use evolution::{EvolutionAction, EvolutionStrategy};
 pub use llm::LlmCallback;
 pub use record::{MemoryMeta, MemoryRecord, MemoryType};
-pub use reranker::RerankerBackend;
+pub use reranker::{RerankCandidate, RerankerBackend};
 pub use scoring::{ScoredResult, ScoringStrategy};

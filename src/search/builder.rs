@@ -10,7 +10,9 @@ use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
 use crate::search::vector::VectorSearch;
 use crate::storage::Database;
-use crate::traits::{MemoryMeta, MemoryRecord, MemoryType, ScoringStrategy};
+use crate::traits::{
+    MemoryMeta, MemoryRecord, MemoryType, RerankCandidate, RerankerBackend, ScoringStrategy,
+};
 
 /// Search mode determines which retrieval strategies are used.
 #[derive(Debug, Clone)]
@@ -77,6 +79,8 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     valid_at: Option<DateTime<Utc>>,
     scoring: Option<Arc<dyn ScoringStrategy>>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
+    reranker: Option<Arc<dyn RerankerBackend>>,
+    rerank_limit: usize,
     vector_search_mode: VectorSearchMode,
     strict_grounding_enabled: bool,
     query_alignment_enabled: bool,
@@ -101,6 +105,8 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             valid_at: None,
             scoring: None,
             embedding: None,
+            reranker: None,
+            rerank_limit: 20,
             vector_search_mode: VectorSearchMode::default(),
             strict_grounding_enabled: true,
             query_alignment_enabled: true,
@@ -119,6 +125,18 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Attach an embedding backend for vector search (called by MemoryEngine).
     pub fn with_embedding(mut self, embedding: Arc<dyn EmbeddingBackend>) -> Self {
         self.embedding = Some(embedding);
+        self
+    }
+
+    /// Attach a reranker backend for second-stage candidate refinement.
+    pub fn with_reranker(mut self, reranker: Arc<dyn RerankerBackend>) -> Self {
+        self.reranker = Some(reranker);
+        self
+    }
+
+    /// Set the maximum number of candidates to pass through the reranker.
+    pub fn with_rerank_limit(mut self, limit: usize) -> Self {
+        self.rerank_limit = limit;
         self
     }
 
@@ -238,6 +256,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             type_filter,
             min_tier,
         )?;
+        let fts_results = self.maybe_rerank_results(fts_results)?;
 
         let mut results = self.apply_filters(fts_results);
 
@@ -264,6 +283,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             type_filter,
             min_tier,
         )?;
+        let fts_results = self.maybe_rerank_results(fts_results)?;
 
         let mut results = self.apply_filters(fts_results);
         results.retain(|r| r.score >= min_score);
@@ -288,6 +308,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let query_vec = embedding.embed_query(&self.query)?;
         let model_names = embedding.compatibility_model_names();
         let vector_results = self.vector_results(&query_vec, &model_names, self.limit * 3)?;
+        let vector_results = self.maybe_rerank_results(vector_results)?;
 
         let mut results = self.apply_filters(vector_results);
         if let Some(threshold) = self.min_score {
@@ -332,6 +353,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         // Merge via RRF
         let merged = rrf_merge(&fts_results, &vector_results, &self.query, self.limit * 2);
+        let merged = self.maybe_rerank_results(merged)?;
 
         let mut results = self.apply_filters(merged);
 
@@ -419,6 +441,46 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             SearchDepth::Deep => Some(0),     // All tiers including raw episodes
             SearchDepth::Forensic => None, // No filter (same as Deep, but conceptually includes archived)
         }
+    }
+
+    fn maybe_rerank_results(&self, results: Vec<FtsResult>) -> Result<Vec<FtsResult>> {
+        let Some(reranker) = self.reranker.as_ref() else {
+            return Ok(results);
+        };
+        if self.rerank_limit == 0 || results.len() < 2 {
+            return Ok(results);
+        }
+
+        let rerank_count = self.rerank_limit.min(results.len());
+        let mut candidates = Vec::with_capacity(rerank_count);
+        for result in results.iter().take(rerank_count) {
+            let text = self.db.with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(crate::error::FemindError::Database)
+            })?;
+            candidates.push(RerankCandidate {
+                memory_id: result.memory_id,
+                text,
+                score: result.score,
+                raw_score: result.score,
+                score_multiplier: 1.0,
+            });
+        }
+
+        let reranked = reranker.rerank(&self.query, candidates)?;
+        let mut reranked_results = reranked
+            .into_iter()
+            .map(|result| FtsResult {
+                memory_id: result.memory_id,
+                score: result.score,
+            })
+            .collect::<Vec<_>>();
+        reranked_results.extend(results.into_iter().skip(rerank_count));
+        Ok(reranked_results)
     }
 
     /// Apply scoring and filters to FTS results.

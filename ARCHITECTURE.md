@@ -553,6 +553,8 @@ pub trait EmbeddingBackend: Send + Sync {
   - `serve` for the host process
   - `status` for resolved embedding runtime/config status
   - `verify-remote` for profile/auth verification against a configured remote host
+  - when `reranking` is enabled, `/rerank/status` and `/rerank/rerank` plus
+    `verify-remote-reranker` for the cross-encoder role
 - WSL/Windows host lifecycle is handled by:
   - `scripts/remote/install-femind-embed-systemd.sh`
   - `scripts/remote/configure-windows-wsl-autostart.ps1`
@@ -663,6 +665,15 @@ impl RerankerBackend for CandleReranker {
 ```
 
 **Reranking is optional and applied after RRF merge, before final scoring.** For FeMind's scale (<100K memories, search returns top 20-50 candidates), reranking adds ~50-100ms per query. Whether this is worthwhile depends on the consumer — it's behind the `reranking` feature flag.
+
+The current implementation ships these reranker runtime options:
+
+| Backend | Feature Flag | Model / Contract |
+|---------|-------------|------------------|
+| `CandleReranker` | `reranking` | `cross-encoder/ms-marco-MiniLM-L6-v2` via candle |
+| `RemoteRerankerBackend` | `remote-reranking` | FeMind `/rerank` service with optional local fallback |
+| `ApiRerankerBackend` | `api-reranking` | Generic HTTPS `/rerank` endpoint |
+| `FallbackRerankerBackend` | (always available) | Remote/API primary with local fallback |
 
 ### ScoringStrategy
 

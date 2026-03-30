@@ -9,11 +9,12 @@ use crate::embeddings::EmbeddingBackend;
 use crate::error::{FemindError, Result};
 use crate::memory::store::StoreResult;
 use crate::memory::MemoryStore;
+use crate::reranking::RerankerRuntime;
 use crate::scoring::{CompositeScorer, ImportanceScorer, MemoryTypeScorer, RecencyScorer};
 use crate::search::builder::SearchBuilder;
 use crate::storage::migrations;
 use crate::storage::Database;
-use crate::traits::{MemoryRecord, ScoringStrategy};
+use crate::traits::{MemoryRecord, RerankerBackend, ScoringStrategy};
 
 /// Result of a store_with_extraction() operation.
 #[derive(Debug, Clone)]
@@ -49,6 +50,8 @@ pub struct StoreExtractionResult {
 /// - `vector_search_mode` — "exact" (brute-force), "ann" (approximate), or "off" (FTS5 only)
 /// - `strict_grounding_enabled` — whether exact-detail lexical grounding filters run after retrieval
 /// - `query_alignment_enabled` — whether query-shape reranking heuristics run after retrieval
+/// - `reranking_runtime` — whether a configured reranker backend should run
+/// - `rerank_candidate_limit` — max number of first-stage candidates to rerank
 ///
 /// ## Query-time tuning (AssemblyConfig)
 /// - `max_per_session` — diversification limit (1 for multi-session, 0 for single-document)
@@ -74,6 +77,10 @@ pub struct EngineConfig {
     pub strict_grounding_enabled: bool,
     /// Enable query-shape-aware reranking heuristics after search.
     pub query_alignment_enabled: bool,
+    /// Runtime mode for cross-encoder reranking.
+    pub reranking_runtime: RerankerRuntime,
+    /// Maximum number of candidates to send to the reranker.
+    pub rerank_candidate_limit: usize,
 }
 
 /// Runtime vector retrieval mode.
@@ -114,6 +121,8 @@ impl Default for EngineConfig {
             vector_search_mode: VectorSearchMode::Exact,
             strict_grounding_enabled: true,
             query_alignment_enabled: true,
+            reranking_runtime: RerankerRuntime::Off,
+            rerank_candidate_limit: 20,
         }
     }
 }
@@ -139,6 +148,7 @@ pub struct MemoryEngine<T: MemoryRecord> {
     store: MemoryStore<T>,
     scoring: Arc<dyn ScoringStrategy>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
+    reranker: Option<Arc<dyn RerankerBackend>>,
     #[cfg(feature = "ann")]
     ann_index: Arc<crate::search::AnnIndex>,
     /// Runtime feature configuration.
@@ -357,6 +367,13 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 builder = builder.with_embedding(Arc::clone(embedding));
             }
         }
+        if self.config.reranking_runtime != RerankerRuntime::Off {
+            if let Some(ref reranker) = self.reranker {
+                builder = builder
+                    .with_reranker(Arc::clone(reranker))
+                    .with_rerank_limit(self.config.rerank_candidate_limit);
+            }
+        }
         #[cfg(feature = "ann")]
         if self.config.vector_search_mode == VectorSearchMode::Ann {
             builder = builder.with_ann_index(Arc::clone(&self.ann_index));
@@ -367,6 +384,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// Access the embedding backend (if configured).
     pub fn embedding_backend(&self) -> Option<&dyn EmbeddingBackend> {
         self.embedding.as_deref()
+    }
+
+    /// Access the reranker backend (if configured).
+    pub fn reranker_backend(&self) -> Option<&dyn RerankerBackend> {
+        self.reranker.as_deref()
     }
 
     /// Count total memories in the database.
@@ -996,6 +1018,7 @@ pub struct MemoryEngineBuilder<T: MemoryRecord> {
     global_database_path: Option<String>,
     scoring: Option<Arc<dyn ScoringStrategy>>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
+    reranker: Option<Arc<dyn RerankerBackend>>,
     config: EngineConfig,
     _phantom: PhantomData<T>,
 }
@@ -1007,6 +1030,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             global_database_path: None,
             scoring: None,
             embedding: None,
+            reranker: None,
             config: EngineConfig::default(),
             _phantom: PhantomData,
         }
@@ -1053,6 +1077,18 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
     /// (e.g., to avoid re-loading model weights on reset).
     pub fn embedding_backend_arc(mut self, backend: Arc<dyn EmbeddingBackend>) -> Self {
         self.embedding = Some(backend);
+        self
+    }
+
+    /// Set the reranker backend for second-stage candidate refinement.
+    pub fn reranker_backend(mut self, backend: impl RerankerBackend + 'static) -> Self {
+        self.reranker = Some(Arc::new(backend));
+        self
+    }
+
+    /// Set the reranker backend from an existing `Arc`.
+    pub fn reranker_backend_arc(mut self, backend: Arc<dyn RerankerBackend>) -> Self {
+        self.reranker = Some(backend);
         self
     }
 
@@ -1123,6 +1159,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             store: MemoryStore::new(),
             scoring,
             embedding: self.embedding,
+            reranker: self.reranker,
             #[cfg(feature = "ann")]
             ann_index: Arc::new(crate::search::AnnIndex::default()),
             config: self.config,
@@ -1178,7 +1215,7 @@ fn prepend_date_from_metadata(text: &str, metadata_json: Option<&str>) -> String
 mod tests {
     use super::*;
     use crate::embeddings::EmbeddingBackend;
-    use crate::traits::MemoryType;
+    use crate::traits::{MemoryType, RerankCandidate, RerankerBackend, ScoredResult};
     use chrono::Utc;
 
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1212,6 +1249,7 @@ mod tests {
     }
 
     struct ModeTestEmbedder;
+    struct KeywordFlipReranker;
 
     impl ModeTestEmbedder {
         fn encode(text: &str) -> Vec<f32> {
@@ -1246,6 +1284,37 @@ mod tests {
 
         fn model_name(&self) -> &str {
             "mode-test"
+        }
+    }
+
+    impl RerankerBackend for KeywordFlipReranker {
+        fn rerank(
+            &self,
+            _query: &str,
+            candidates: Vec<RerankCandidate>,
+        ) -> Result<Vec<ScoredResult>> {
+            let mut reranked = candidates
+                .into_iter()
+                .map(|candidate| {
+                    let score = if candidate.text.to_lowercase().contains("banana") {
+                        0.99
+                    } else {
+                        0.10
+                    };
+                    ScoredResult {
+                        memory_id: candidate.memory_id,
+                        score,
+                        raw_score: score,
+                        score_multiplier: 1.0,
+                    }
+                })
+                .collect::<Vec<_>>();
+            reranked.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            Ok(reranked)
         }
     }
 
@@ -1551,6 +1620,37 @@ mod tests {
             .expect("search");
 
         assert_eq!(results.first().map(|r| r.memory_id), Some(apple_id));
+    }
+
+    #[test]
+    fn reranker_reorders_keyword_candidates() {
+        let mut engine = MemoryEngine::<TestMem>::builder()
+            .reranker_backend(KeywordFlipReranker)
+            .build()
+            .expect("build");
+        engine.config.reranking_runtime = crate::reranking::RerankerRuntime::LocalCpu;
+        engine.config.rerank_candidate_limit = 2;
+
+        let StoreResult::Added(apple_id) = engine
+            .store(&mem("apple fruit apple fruit apple fruit"))
+            .expect("store apple")
+        else {
+            panic!("expected Added");
+        };
+        let StoreResult::Added(banana_id) = engine.store(&mem("banana fruit")).expect("store banana")
+        else {
+            panic!("expected Added");
+        };
+
+        let results = engine
+            .search("fruit")
+            .mode(crate::search::SearchMode::Keyword)
+            .limit(2)
+            .execute()
+            .expect("search");
+
+        assert_eq!(results.first().map(|r| r.memory_id), Some(banana_id));
+        assert_ne!(results.first().map(|r| r.memory_id), Some(apple_id));
     }
 
     #[cfg(feature = "ann")]

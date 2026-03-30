@@ -4,6 +4,7 @@ use femind::embeddings::{
     EmbedServiceOptions, LocalEmbeddingDevice, MINILM_CANONICAL_NAME, MINILM_DIMENSIONS,
     MINILM_PROFILE, serve_remote_embedding_service_blocking,
 };
+use femind::reranking::{RERANKER_CANONICAL_NAME, RERANKER_PROFILE};
 
 fn main() -> Result<(), String> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -15,6 +16,7 @@ fn main() -> Result<(), String> {
         "serve" => run_serve(&args[1..]),
         "status" => run_status(&args[1..]),
         "verify-remote" => run_verify_remote(&args[1..]),
+        "verify-remote-reranker" => run_verify_remote_reranker(&args[1..]),
         "--help" | "-h" => {
             print_help();
             Ok(())
@@ -35,6 +37,8 @@ struct FileConfig {
     embedding_service: Option<FileEmbeddingServiceConfig>,
     #[serde(default)]
     embeddings: Option<FileEmbeddingsConfig>,
+    #[serde(default)]
+    reranking: Option<FileRerankingConfig>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
@@ -55,6 +59,8 @@ struct FileEmbeddingServiceConfig {
     request_timeout_secs: Option<u64>,
     #[serde(default)]
     max_batch_texts: Option<usize>,
+    #[serde(default)]
+    max_batch_documents: Option<usize>,
     #[serde(default)]
     device: Option<String>,
     #[serde(default)]
@@ -98,6 +104,26 @@ struct FileRemoteServiceConfig {
     verify_profile: Option<bool>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct FileRerankingConfig {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    local: Option<FileLocalRerankingConfig>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct FileLocalRerankingConfig {
+    #[serde(default)]
+    execution_mode: Option<String>,
+    #[serde(default)]
+    device: Option<String>,
+    #[serde(default)]
+    remote_service: Option<FileRemoteServiceConfig>,
+}
+
 #[derive(Debug, Clone)]
 struct RemoteProbeConfig {
     base_url: String,
@@ -129,6 +155,35 @@ struct RemoteProbeStatus {
     max_batch_texts: Option<usize>,
 }
 
+#[derive(Debug, Clone)]
+struct RemoteRerankProbeConfig {
+    base_url: String,
+    auth_token: Option<String>,
+    timeout_secs: Option<u64>,
+    verify_profile: bool,
+    fallback_to_local: bool,
+    model: String,
+    reranker_profile: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct RemoteRerankProbeStatus {
+    model: String,
+    reranker_profile: String,
+    #[serde(default)]
+    execution_mode: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    model_repo: Option<String>,
+    #[serde(default)]
+    device_label: Option<String>,
+    #[serde(default)]
+    request_timeout_secs: Option<u64>,
+    #[serde(default)]
+    max_batch_documents: Option<usize>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 struct RemoteVerifyOutput {
     ok: bool,
@@ -144,6 +199,24 @@ struct RemoteVerifyOutput {
     remote_dimensions: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_embedding_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_execution_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct RemoteRerankVerifyOutput {
+    ok: bool,
+    profile_match: bool,
+    remote_service_base_url: String,
+    remote_service_auth_configured: bool,
+    expected_model: String,
+    expected_reranker_profile: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_reranker_profile: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_execution_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -172,6 +245,31 @@ struct StatusOutput {
     remote_service_status: Option<RemoteProbeStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_service_verification: Option<RemoteVerifyOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reranking: Option<RerankStatusOutput>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct RerankStatusOutput {
+    execution_mode: String,
+    model: String,
+    reranker_profile: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    local_device: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_service_base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_service_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_service_fallback_to_local: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_service_verify_profile: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_service_auth_configured: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_service_status: Option<RemoteRerankProbeStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_service_verification: Option<RemoteRerankVerifyOutput>,
 }
 
 fn run_serve(args: &[String]) -> Result<(), String> {
@@ -236,6 +334,13 @@ fn run_serve(args: &[String]) -> Result<(), String> {
                     format!("invalid --max-batch-texts value '{value}': {error}")
                 })?;
             }
+            "--max-batch-documents" => {
+                i += 1;
+                let value = required_value(args, i, "--max-batch-documents")?;
+                options.max_batch_documents = value.parse::<usize>().map_err(|error| {
+                    format!("invalid --max-batch-documents value '{value}': {error}")
+                })?;
+            }
             "--help" | "-h" => {
                 print_serve_help();
                 return Ok(());
@@ -265,6 +370,9 @@ fn run_serve(args: &[String]) -> Result<(), String> {
             }
             if let Some(max_batch) = service.max_batch_texts {
                 options.max_batch_texts = max_batch;
+            }
+            if let Some(max_batch) = service.max_batch_documents {
+                options.max_batch_documents = max_batch;
             }
             if let Some(device) = service.device {
                 options.device_mode = parse_device(&device)?;
@@ -307,6 +415,25 @@ fn run_verify_remote(args: &[String]) -> Result<(), String> {
         Err(result
             .error
             .unwrap_or_else(|| "remote verification failed".to_string()))
+    }
+}
+
+fn run_verify_remote_reranker(args: &[String]) -> Result<(), String> {
+    let (config, format) = match load_config_and_format(args, "verify-remote-reranker") {
+        Ok(value) => value,
+        Err(error) if error.is_empty() => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let probe = remote_rerank_probe_from_config(&config)?;
+    let result = verify_remote_rerank_probe(&probe);
+    let exit_ok = result.ok;
+    print_output(&result, format)?;
+    if exit_ok {
+        Ok(())
+    } else {
+        Err(result
+            .error
+            .unwrap_or_else(|| "remote reranker verification failed".to_string()))
     }
 }
 
@@ -387,6 +514,7 @@ fn build_status_output(config: &FileConfig) -> Result<StatusOutput, String> {
             remote_service_auth_configured: Some(auth_configured),
             remote_service_status: Some(status),
             remote_service_verification: verification,
+            reranking: build_rerank_status_output(config)?,
         })
     } else {
         Ok(StatusOutput {
@@ -402,7 +530,65 @@ fn build_status_output(config: &FileConfig) -> Result<StatusOutput, String> {
             remote_service_auth_configured: None,
             remote_service_status: None,
             remote_service_verification: None,
+            reranking: build_rerank_status_output(config)?,
         })
+    }
+}
+
+fn build_rerank_status_output(config: &FileConfig) -> Result<Option<RerankStatusOutput>, String> {
+    let Some(reranking) = config.reranking.as_ref() else {
+        return Ok(None);
+    };
+    if reranking.enabled == Some(false) {
+        return Ok(None);
+    }
+
+    let execution_mode = reranking
+        .local
+        .as_ref()
+        .and_then(|local| local.execution_mode.clone())
+        .unwrap_or_else(|| "embedded".to_string());
+    let model = reranking
+        .model
+        .clone()
+        .unwrap_or_else(|| RERANKER_CANONICAL_NAME.to_string());
+
+    if execution_mode == "remote_service" {
+        let probe = remote_rerank_probe_from_config(config)?;
+        let auth_configured = probe.auth_token.is_some();
+        let status = fetch_remote_rerank_status(&probe)?;
+        let verification = if probe.verify_profile {
+            Some(verify_remote_rerank_probe(&probe))
+        } else {
+            None
+        };
+        Ok(Some(RerankStatusOutput {
+            execution_mode,
+            model,
+            reranker_profile: RERANKER_PROFILE.to_string(),
+            local_device: reranking.local.as_ref().and_then(|local| local.device.clone()),
+            remote_service_base_url: Some(probe.base_url),
+            remote_service_timeout_secs: probe.timeout_secs,
+            remote_service_fallback_to_local: Some(probe.fallback_to_local),
+            remote_service_verify_profile: Some(probe.verify_profile),
+            remote_service_auth_configured: Some(auth_configured),
+            remote_service_status: Some(status),
+            remote_service_verification: verification,
+        }))
+    } else {
+        Ok(Some(RerankStatusOutput {
+            execution_mode,
+            model,
+            reranker_profile: RERANKER_PROFILE.to_string(),
+            local_device: reranking.local.as_ref().and_then(|local| local.device.clone()),
+            remote_service_base_url: None,
+            remote_service_timeout_secs: None,
+            remote_service_fallback_to_local: None,
+            remote_service_verify_profile: None,
+            remote_service_auth_configured: None,
+            remote_service_status: None,
+            remote_service_verification: None,
+        }))
     }
 }
 
@@ -441,6 +627,41 @@ fn remote_probe_from_config(config: &FileConfig) -> Result<RemoteProbeConfig, St
         model,
         dimensions,
         embedding_profile: MINILM_PROFILE.to_string(),
+    })
+}
+
+fn remote_rerank_probe_from_config(config: &FileConfig) -> Result<RemoteRerankProbeConfig, String> {
+    let reranking = config
+        .reranking
+        .as_ref()
+        .ok_or_else(|| "missing [reranking] config".to_string())?;
+    if reranking.enabled == Some(false) {
+        return Err("reranking.enabled is false in config".to_string());
+    }
+    let local = reranking
+        .local
+        .as_ref()
+        .ok_or_else(|| "missing [reranking.local] config".to_string())?;
+    let remote = local
+        .remote_service
+        .as_ref()
+        .ok_or_else(|| "missing [reranking.local.remote_service] config".to_string())?;
+    let auth_token = resolve_secret(
+        remote.auth_token_env.as_deref(),
+        remote.auth_token_env_file.as_deref(),
+    )?;
+
+    Ok(RemoteRerankProbeConfig {
+        base_url: remote.base_url.clone(),
+        auth_token,
+        timeout_secs: remote.timeout_secs,
+        verify_profile: remote.verify_profile.unwrap_or(true),
+        fallback_to_local: remote.fallback_to_local.unwrap_or(false),
+        model: reranking
+            .model
+            .clone()
+            .unwrap_or_else(|| RERANKER_CANONICAL_NAME.to_string()),
+        reranker_profile: RERANKER_PROFILE.to_string(),
     })
 }
 
@@ -487,6 +708,48 @@ fn verify_remote_probe(probe: &RemoteProbeConfig) -> RemoteVerifyOutput {
     }
 }
 
+fn verify_remote_rerank_probe(probe: &RemoteRerankProbeConfig) -> RemoteRerankVerifyOutput {
+    match fetch_remote_rerank_status(probe) {
+        Ok(status) => {
+            let accepted_models = [
+                RERANKER_CANONICAL_NAME,
+                "cross-encoder/ms-marco-MiniLM-L6-v2",
+                "minilm-reranker",
+            ];
+            let profile_match = accepted_models.contains(&status.model.as_str())
+                && status.reranker_profile == probe.reranker_profile;
+            RemoteRerankVerifyOutput {
+                ok: profile_match,
+                profile_match,
+                remote_service_base_url: probe.base_url.clone(),
+                remote_service_auth_configured: probe.auth_token.is_some(),
+                expected_model: probe.model.clone(),
+                expected_reranker_profile: probe.reranker_profile.clone(),
+                remote_model: Some(status.model),
+                remote_reranker_profile: Some(status.reranker_profile),
+                remote_execution_mode: status.execution_mode,
+                error: if profile_match {
+                    None
+                } else {
+                    Some("remote reranker profile does not match expected FeMind MiniLM reranker profile".to_string())
+                },
+            }
+        }
+        Err(error) => RemoteRerankVerifyOutput {
+            ok: false,
+            profile_match: false,
+            remote_service_base_url: probe.base_url.clone(),
+            remote_service_auth_configured: probe.auth_token.is_some(),
+            expected_model: probe.model.clone(),
+            expected_reranker_profile: probe.reranker_profile.clone(),
+            remote_model: None,
+            remote_reranker_profile: None,
+            remote_execution_mode: None,
+            error: Some(error),
+        },
+    }
+}
+
 fn fetch_remote_status(probe: &RemoteProbeConfig) -> Result<RemoteProbeStatus, String> {
     let url = format!("{}/status", probe.base_url.trim_end_matches('/'));
     let mut builder = ureq::AgentBuilder::new();
@@ -504,6 +767,27 @@ fn fetch_remote_status(probe: &RemoteProbeConfig) -> Result<RemoteProbeStatus, S
     response
         .into_json::<RemoteProbeStatus>()
         .map_err(|error| format!("remote status parse failed: {error}"))
+}
+
+fn fetch_remote_rerank_status(
+    probe: &RemoteRerankProbeConfig,
+) -> Result<RemoteRerankProbeStatus, String> {
+    let url = format!("{}/status", probe.base_url.trim_end_matches('/'));
+    let mut builder = ureq::AgentBuilder::new();
+    if let Some(timeout_secs) = probe.timeout_secs {
+        builder = builder.timeout(Duration::from_secs(timeout_secs));
+    }
+    let agent = builder.build();
+    let mut request = agent.get(&url);
+    if let Some(token) = probe.auth_token.as_deref() {
+        request = request.set("Authorization", &format!("Bearer {token}"));
+    }
+    let response = request
+        .call()
+        .map_err(|error| format!("remote rerank status request failed: {error}"))?;
+    response
+        .into_json::<RemoteRerankProbeStatus>()
+        .map_err(|error| format!("remote rerank status parse failed: {error}"))
 }
 
 fn load_config(path: &PathBuf) -> Result<FileConfig, String> {
@@ -627,6 +911,7 @@ fn print_help() {
     println!("  serve           Run the embedding service");
     println!("  status          Show embedding runtime status from config");
     println!("  verify-remote   Verify a configured remote embedding service");
+    println!("  verify-remote-reranker   Verify a configured remote reranker service");
     println!();
     println!("Run `femind-embed-service <command> --help` for command-specific options.");
 }
@@ -639,6 +924,11 @@ fn print_command_help(command: &str) {
         }
         "verify-remote" => {
             println!("femind-embed-service verify-remote --config <path> [--format human|json]");
+        }
+        "verify-remote-reranker" => {
+            println!(
+                "femind-embed-service verify-remote-reranker --config <path> [--format human|json]"
+            );
         }
         _ => print_help(),
     }
@@ -658,4 +948,5 @@ fn print_serve_help() {
     println!("  --auth-token-env-file <p>   Resolve bearer token from env file");
     println!("  --request-timeout-secs <n>  Max seconds for one embed request");
     println!("  --max-batch-texts <n>       Max texts accepted in one embed request");
+    println!("  --max-batch-documents <n>   Max documents accepted in one rerank request");
 }

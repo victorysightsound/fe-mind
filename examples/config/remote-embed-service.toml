@@ -7,6 +7,7 @@ auth_token_env = "FEMIND_EMBED_AUTH_TOKEN"
 # auth_token_env_file = "/home/remote/.femind-embedding-service.env"
 request_timeout_secs = 60
 max_batch_texts = 32
+max_batch_documents = 32
 device = "auto"
 cuda_ordinal = 0
 
@@ -16,5 +17,13 @@ model = "local-minilm"
 dimensions = 384
 
 [embeddings.local]
+execution_mode = "embedded"
+device = "auto"
+
+[reranking]
+enabled = true
+model = "local-minilm-reranker"
+
+[reranking.local]
 execution_mode = "embedded"
 device = "auto"

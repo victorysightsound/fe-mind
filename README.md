@@ -62,12 +62,15 @@ Current MiniLM direction:
 
 - canonical logical model label: `local-minilm`
 - strict compatibility identity lives in the embedding profile
+- canonical reranker label is `local-minilm-reranker`
+- reranker compatibility identity lives in the reranker profile
 - remote execution is treated as a runtime mode for the same MiniLM profile, not
   as a different model family
 - supported runtime targets are `local-cpu`, `local-gpu`, `remote-cpu`,
   `remote-gpu`, and `off`
 - `femind-embed-service` can now host MiniLM in `auto`, `cpu`, or `cuda` mode
-  and reports the resulting execution mode through `/status`
+  and, when built with `reranking`, can also host the MiniLM cross-encoder
+  reranker on the same process under `/rerank/*`
 - `--device cuda` requires a FeMind build with the `cuda` feature on a host
   that actually has CUDA available
 
@@ -97,9 +100,13 @@ Remote service operator surface:
 - `femind-embed-service status --config <path>`
   - resolves the configured embedding mode and reports remote-service status when
     `execution_mode = "remote_service"`
+  - also reports configured reranker status when `[reranking]` is present
 - `femind-embed-service verify-remote --config <path>`
   - checks auth, model identity, dimensions, and embedding profile against a
     configured remote MiniLM service
+- `femind-embed-service verify-remote-reranker --config <path>`
+  - checks auth, model identity, and reranker profile against a configured
+    remote MiniLM reranker service
 
 Lifecycle defaults:
 
@@ -109,6 +116,15 @@ Lifecycle defaults:
 - the native Windows helper supports `off`, `status`, `logon`, and `startup`
   modes and prepares the MSVC/CUDA environment before launch
 - idle CPU should stay low because the service only responds to requests; the
-  tradeoff is that MiniLM stays resident in memory for fast warm responses
+  tradeoff is that loaded MiniLM models stay resident in memory for fast warm
+  responses
 - native Windows CUDA hosts should keep toolkit and driver lines aligned
   (for example toolkit `12.9` with a `12.9` driver line)
+
+Reranking notes:
+
+- local reranking uses `cross-encoder/ms-marco-MiniLM-L6-v2` through candle BERT
+- remote reranking uses the same shared host process under `/rerank/status` and
+  `/rerank/rerank`
+- API reranking is supported through a generic HTTPS `/rerank` endpoint; unlike
+  embeddings, there is no broadly adopted OpenAI-native rerank schema today

@@ -37,6 +37,12 @@ api-embeddings = ["dep:ureq"]
 # Remote embeddings — local-network MiniLM embedding service
 remote-embeddings = ["dep:ureq"]
 
+# API reranking — HTTPS document ranking endpoint
+api-reranking = ["dep:ureq"]
+
+# Remote reranking — local-network MiniLM cross-encoder service
+remote-reranking = ["dep:ureq"]
+
 # Embedded HTTP service for FeMind MiniLM remote execution
 embed-service = ["local-embeddings", "remote-embeddings", "dep:axum", "dep:tokio"]
 
@@ -87,6 +93,8 @@ full = [
     "vector-search",
     "api-embeddings",
     "remote-embeddings",
+    "api-reranking",
+    "remote-reranking",
     "embed-service",
     "api-llm",
     "cli-llm",

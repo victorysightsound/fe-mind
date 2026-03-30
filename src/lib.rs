@@ -55,6 +55,7 @@ pub mod error;
 pub mod ingest;
 pub mod llm;
 pub mod memory;
+pub mod reranking;
 pub mod scoring;
 pub mod search;
 pub mod storage;

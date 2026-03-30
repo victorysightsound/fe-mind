@@ -13,6 +13,8 @@ pub use api::ApiBackend;
 pub use backend::EmbeddingBackend;
 #[cfg(feature = "local-embeddings")]
 pub use candle_native::{CandleNativeBackend, LocalEmbeddingDevice};
+#[cfg(feature = "local-embeddings")]
+pub(crate) use candle_native::{describe_device, execution_mode_from_label, select_device};
 pub use fallback::FallbackBackend;
 pub use noop::NoopBackend;
 pub use profile::{
