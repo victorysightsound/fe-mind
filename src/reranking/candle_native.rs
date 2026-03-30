@@ -179,6 +179,9 @@ mod inner {
             let cls = hidden_states
                 .i((.., 0, ..))
                 .map_err(|e| FemindError::Embedding(format!("reranker cls slice: {e}")))?;
+            let cls = cls
+                .contiguous()
+                .map_err(|e| FemindError::Embedding(format!("reranker cls contiguous: {e}")))?;
             let logits = self
                 .classifier
                 .forward(&cls)
