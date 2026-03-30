@@ -191,6 +191,8 @@ The summary now also records:
   leaked in, and whether enough hits surfaced for coverage-sensitive checks
 - per-check aggregation reports showing total matches, distinct supporting
   matches, and the composed evidence text used for rollup-style validation
+- per-check composed-answer reports showing the deterministic answer text and
+  composition kind (`direct`, `stateful`, `yes-no`, or `aggregation`)
 
 That routed plan is now part of the actual retrieval behavior, not just a
 diagnostic label:
@@ -199,6 +201,9 @@ diagnostic label:
 - historical-state routes mildly favor older evidence by `created_at`
 - aggregation routes now use an engine-level composition path that preserves
   broad coverage instead of only surfacing a narrow top-k view
+- retrieval checks now also exercise a deterministic engine-side answer
+  composer so yes/no and stateful questions are validated against the composed
+  answer, not only the raw retrieved snippets
 - current-state routes explicitly demote superseded memories and can follow
   supersession links forward to the replacement fact
 - historical-state routes can follow supersession links backward to earlier

@@ -809,6 +809,42 @@ at all?" was being zeroed out as if it were a missing-fact probe.
 
 ---
 
+## Decision 031: Practical Retrieval Checks Validate Composed Answers
+
+**Date:** 2026-03-30
+
+**Decision:** Add a deterministic engine-side answer composer and use it in the
+engine-first practical eval loop so retrieval checks validate grounded composed
+answers, not only raw retrieved snippets.
+
+**Context:** Aggregation composition was in place, but the practical loop still
+treated most retrieval checks as "did any hit text overlap enough with the
+expected answer?" That left an important gap: FeMind needed explicit coverage
+for how it would answer yes/no, current-vs-historical, and rollup questions
+once retrieval had already succeeded.
+
+**Rationale:**
+- A top-tier memory engine needs a deterministic answer layer for grounded
+  stateful and aggregation-style questions even before any LLM answerer is in
+  the loop
+- Yes/no and current-vs-historical regressions should fail because composition
+  is wrong, not only because retrieval changed
+- Practical artifacts should preserve both the evidence bundle and the composed
+  answer so maintainers can see whether a miss came from retrieval or from the
+  engine’s own composition logic
+
+**Consequences:**
+- `MemoryEngine::compose_answer_with_config(...)` now produces deterministic
+  composed answers for `direct`, `stateful`, `yes-no`, and `aggregation` paths
+- Practical retrieval checks now record `composed_answer` alongside raw hits,
+  routed plans, and aggregation diagnostics
+- Aggregation checks still preserve total/distinct evidence counts, but now
+  also validate the composed answer text directly
+- Remote-GPU validation remains green after the change:
+  practical `15/15`, live-library `58/58`, memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

@@ -59,6 +59,21 @@ pub struct AggregationResult {
     pub composed_summary: String,
 }
 
+/// Deterministic answer composition result built from routed retrieval evidence.
+#[derive(Debug, Clone)]
+pub struct ComposedAnswerResult {
+    /// Composed answer text.
+    pub answer: String,
+    /// Composition strategy used to build the answer.
+    pub kind: &'static str,
+    /// Total scored matches before distinct deduplication.
+    pub total_matches: usize,
+    /// Distinct evidence count kept for the answer.
+    pub distinct_match_count: usize,
+    /// Evidence bundle used during composition.
+    pub evidence: Vec<AggregatedMatch>,
+}
+
 /// Runtime feature configuration for femind.
 ///
 /// Two-level config:
@@ -1060,6 +1075,83 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         })
     }
 
+    /// Compose a grounded answer from routed retrieval evidence without using an LLM.
+    pub fn compose_answer_with_config(
+        &self,
+        query: &str,
+        config: &crate::context::AssemblyConfig,
+        max_matches: usize,
+    ) -> Result<ComposedAnswerResult> {
+        let route = self
+            .search(query)
+            .limit(config.search_limit.max(max_matches.max(10)))
+            .query_route();
+
+        if route.intent == crate::search::QueryIntent::Aggregation {
+            let aggregation = self.aggregate_with_config(query, config, max_matches)?;
+            let answer = compose_aggregation_answer(query, &aggregation.matches);
+            return Ok(ComposedAnswerResult {
+                answer,
+                kind: "aggregation",
+                total_matches: aggregation.total_matches,
+                distinct_match_count: aggregation.distinct_match_count,
+                evidence: aggregation.matches,
+            });
+        }
+
+        let results = self.search_with_config(query, config)?;
+        let mut evidence = Vec::new();
+        let mut distinct_keys = std::collections::HashSet::new();
+
+        for result in results {
+            let Some(candidate) = self.load_aggregated_match(result.memory_id, result.score)?
+            else {
+                continue;
+            };
+
+            let key = aggregation_match_key(&candidate.text, candidate.memory_id);
+            if !distinct_keys.insert(key) {
+                continue;
+            }
+
+            evidence.push(candidate);
+            if evidence.len() >= max_matches {
+                break;
+            }
+        }
+
+        let answer = if evidence.is_empty() {
+            String::new()
+        } else if is_yes_no_query(query) {
+            compose_yes_no_answer(&evidence[0])
+        } else if matches!(
+            route.intent,
+            crate::search::QueryIntent::CurrentState | crate::search::QueryIntent::HistoricalState
+        ) {
+            compose_stateful_answer(&evidence[0])
+        } else {
+            evidence[0].text.trim().to_string()
+        };
+
+        Ok(ComposedAnswerResult {
+            answer,
+            kind: if is_yes_no_query(query) {
+                "yes-no"
+            } else if matches!(
+                route.intent,
+                crate::search::QueryIntent::CurrentState
+                    | crate::search::QueryIntent::HistoricalState
+            ) {
+                "stateful"
+            } else {
+                "direct"
+            },
+            total_matches: evidence.len(),
+            distinct_match_count: evidence.len(),
+            evidence,
+        })
+    }
+
     /// Assemble context with custom assembly configuration.
     ///
     /// Allows tuning diversification, recency weighting, and search limits
@@ -1282,6 +1374,176 @@ fn aggregation_match_key(text: &str, memory_id: i64) -> String {
         format!("memory:{memory_id}")
     } else {
         normalized
+    }
+}
+
+fn compose_aggregation_answer(query: &str, matches: &[AggregatedMatch]) -> String {
+    if matches.is_empty() {
+        return String::new();
+    }
+
+    let labels = matches
+        .iter()
+        .filter_map(|candidate| leading_subject_label(&candidate.text))
+        .collect::<Vec<_>>();
+
+    if labels.len() == matches.len() && query_requests_count_or_list(query) {
+        let count = labels.len();
+        let count_label = small_number_word(count)
+            .map(str::to_string)
+            .unwrap_or_else(|| count.to_string());
+        return format!("{count_label} items: {}.", labels.join(", "));
+    }
+
+    matches
+        .iter()
+        .map(|candidate| candidate.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn compose_yes_no_answer(best: &AggregatedMatch) -> String {
+    if text_implies_negative_state(&best.text) {
+        format!("No. {}", best.text.trim())
+    } else {
+        format!("Yes. {}", best.text.trim())
+    }
+}
+
+fn compose_stateful_answer(best: &AggregatedMatch) -> String {
+    best.text.trim().to_string()
+}
+
+fn text_implies_negative_state(text: &str) -> bool {
+    let normalized = text.to_lowercase();
+    normalized.contains("superseded")
+        || normalized.contains("no longer")
+        || normalized.contains("not active")
+        || normalized.contains("obsolete")
+        || normalized.contains("replaced")
+        || normalized.contains("rather than")
+        || normalized.contains("instead")
+        || normalized.contains("outdated")
+        || normalized.contains("did not")
+        || normalized.contains("do not")
+        || normalized.contains("should not")
+        || normalized.contains("cannot")
+        || normalized.contains("can not")
+}
+
+fn is_yes_no_query(query: &str) -> bool {
+    matches!(
+        normalize_query(query).split_whitespace().next(),
+        Some(
+            "is" | "are"
+                | "was"
+                | "were"
+                | "does"
+                | "do"
+                | "did"
+                | "can"
+                | "could"
+                | "should"
+                | "would"
+        )
+    )
+}
+
+fn query_requests_count_or_list(query: &str) -> bool {
+    let normalized = normalize_query(query);
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    tokens.windows(2).any(|pair| pair == ["how", "many"])
+        || tokens.windows(2).any(|pair| pair == ["list", "all"])
+        || normalized.contains("which ones")
+        || normalized.contains("what were they")
+}
+
+fn normalize_query(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn leading_subject_label(text: &str) -> Option<String> {
+    let stop_words = [
+        "was",
+        "were",
+        "is",
+        "are",
+        "supports",
+        "support",
+        "remains",
+        "remain",
+        "evaluated",
+        "recorded",
+        "covers",
+        "cover",
+        "includes",
+        "include",
+        "validated",
+        "should",
+        "can",
+        "cannot",
+        "did",
+        "does",
+        "used",
+        "use",
+    ];
+
+    let cleaned = text
+        .split_whitespace()
+        .map(|token| {
+            token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_')
+        })
+        .filter(|token| !token.is_empty())
+        .take(4)
+        .collect::<Vec<_>>();
+
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    let mut label = Vec::new();
+    for token in cleaned {
+        if stop_words.contains(&token.to_lowercase().as_str()) {
+            break;
+        }
+        label.push(token);
+    }
+
+    if label.is_empty() {
+        None
+    } else {
+        Some(label.join(" "))
+    }
+}
+
+fn small_number_word(count: usize) -> Option<&'static str> {
+    match count {
+        0 => Some("Zero"),
+        1 => Some("One"),
+        2 => Some("Two"),
+        3 => Some("Three"),
+        4 => Some("Four"),
+        5 => Some("Five"),
+        6 => Some("Six"),
+        7 => Some("Seven"),
+        8 => Some("Eight"),
+        9 => Some("Nine"),
+        10 => Some("Ten"),
+        _ => None,
     }
 }
 
@@ -1862,6 +2124,84 @@ mod tests {
         assert!(composed.contains("deepinfra"));
         assert!(composed.contains("openrouter"));
         assert!(composed.contains("anthropic"));
+    }
+
+    #[test]
+    fn compose_answer_formats_aggregation_rollup() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        engine
+            .store(&mem("DeepInfra was evaluated as one extraction provider."))
+            .expect("store");
+        engine
+            .store(&mem(
+                "OpenRouter was also evaluated as an extraction provider.",
+            ))
+            .expect("store");
+        engine
+            .store(&mem(
+                "Anthropic was evaluated briefly as a third extraction provider.",
+            ))
+            .expect("store");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "How many providers were evaluated for extraction and which ones were they?",
+                &AssemblyConfig::default(),
+                5,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "aggregation");
+        assert!(answer.answer.contains("Three"));
+        assert!(answer.answer.contains("DeepInfra"));
+        assert!(answer.answer.contains("OpenRouter"));
+        assert!(answer.answer.contains("Anthropic"));
+    }
+
+    #[test]
+    fn compose_answer_formats_negative_yes_no_state() {
+        use crate::context::AssemblyConfig;
+        use crate::memory::{GraphMemory, RelationType};
+        use chrono::Duration;
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        let old = TestMem {
+            id: None,
+            text: "Desktop-first is still the active plan.".into(),
+            created_at: Utc::now() - Duration::days(7),
+        };
+        let current = TestMem {
+            id: None,
+            text: "Desktop-first was superseded. Current build order starts with femind.".into(),
+            created_at: Utc::now(),
+        };
+
+        let StoreResult::Added(old_id) = engine.store(&old).expect("store old") else {
+            panic!("expected Added");
+        };
+        let StoreResult::Added(current_id) = engine.store(&current).expect("store current") else {
+            panic!("expected Added");
+        };
+        GraphMemory::relate(&engine.db, old_id, current_id, &RelationType::SupersededBy)
+            .expect("relate");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "Is desktop-first still the active plan?",
+                &AssemblyConfig {
+                    graph_depth: 1,
+                    max_per_session: 0,
+                    ..AssemblyConfig::default()
+                },
+                3,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "yes-no");
+        assert!(answer.answer.starts_with("No."));
+        assert!(answer.answer.to_lowercase().contains("superseded"));
     }
 
     #[test]

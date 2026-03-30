@@ -64,6 +64,9 @@ The practical live-validation path is now established and repeatable:
 - aggregation-style retrieval now uses an engine-level composition path that
   preserves distinct supporting memories, records total/distinct match counts,
   and emits a composed evidence summary for coverage-sensitive rollup questions
+- practical eval now also records a deterministic composed answer for each
+  retrieval-style check, so yes/no, state, and aggregation behavior can be
+  tuned at the engine level instead of only by inspecting raw hits
 - routed retrieval now includes an explicit temporal policy:
   current-state queries mildly favor newer evidence, historical-state queries
   mildly favor older evidence, and exact-detail / abstention routes stay

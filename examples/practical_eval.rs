@@ -686,10 +686,17 @@ mod app {
         composed_summary: String,
     }
 
+    #[derive(Debug, Serialize)]
+    struct ComposedAnswerReport {
+        kind: String,
+        answer: String,
+    }
+
     struct RetrievalObservation {
         observed: Vec<ObservedHit>,
         observed_hit_count: usize,
         aggregation: Option<AggregationReport>,
+        composed_answer: Option<ComposedAnswerReport>,
     }
 
     #[derive(Debug, Serialize)]
@@ -705,6 +712,8 @@ mod app {
         criteria: Option<RetrievalCriteriaReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
         aggregation: Option<AggregationReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        composed_answer: Option<ComposedAnswerReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
         explain: Option<RetrievalExplain>,
     }
@@ -986,6 +995,10 @@ mod app {
                     &observation.observed,
                     observation.observed_hit_count,
                     observation
+                        .composed_answer
+                        .as_ref()
+                        .map(|details| details.answer.as_str()),
+                    observation
                         .aggregation
                         .as_ref()
                         .map(|details| details.composed_summary.as_str()),
@@ -1006,6 +1019,7 @@ mod app {
                     route: Some(route.into()),
                     criteria: Some(criteria),
                     aggregation: observation.aggregation,
+                    composed_answer: observation.composed_answer,
                     explain,
                 });
             }
@@ -1043,6 +1057,7 @@ mod app {
                     route: None,
                     criteria: None,
                     aggregation: None,
+                    composed_answer: None,
                     explain: None,
                 });
             }
@@ -1068,6 +1083,7 @@ mod app {
                     route: Some(route.into()),
                     criteria: None,
                     aggregation: None,
+                    composed_answer: None,
                     explain: None,
                 });
             }
@@ -1468,28 +1484,31 @@ mod app {
         graph_depth: u32,
         check: &RetrievalCheck,
     ) -> Result<RetrievalObservation, Box<dyn std::error::Error>> {
+        let requested_matches = top_k
+            .max(check.min_observed_hits.unwrap_or(0))
+            .max(check.required_fragments.len())
+            .max(5);
+        let composition = engine.compose_answer_with_config(
+            query,
+            &femind::context::AssemblyConfig {
+                graph_depth,
+                max_per_session: 0,
+                ..femind::context::AssemblyConfig::default()
+            },
+            requested_matches,
+        )?;
+        let composed_answer = composition.answer.clone();
+        let composed_kind = composition.kind.to_string();
+
         if route.intent == QueryIntent::Aggregation {
-            let requested_matches = top_k
-                .max(check.min_observed_hits.unwrap_or(0))
-                .max(check.required_fragments.len())
-                .max(5);
-            let aggregation = engine.aggregate_with_config(
-                query,
-                &femind::context::AssemblyConfig {
-                    graph_depth,
-                    max_per_session: 0,
-                    ..femind::context::AssemblyConfig::default()
-                },
-                requested_matches,
-            )?;
             let details = AggregationReport {
-                total_matches: aggregation.total_matches,
-                distinct_match_count: aggregation.distinct_match_count,
-                composed_summary: aggregation.composed_summary,
+                total_matches: composition.total_matches,
+                distinct_match_count: composition.distinct_match_count,
+                composed_summary: composed_answer.clone(),
             };
             let observed_hit_count = details.distinct_match_count;
-            let observed = aggregation
-                .matches
+            let observed = composition
+                .evidence
                 .into_iter()
                 .map(|candidate| ObservedHit {
                     text: candidate.text,
@@ -1501,15 +1520,35 @@ mod app {
                 observed,
                 observed_hit_count,
                 aggregation: Some(details),
+                composed_answer: Some(ComposedAnswerReport {
+                    kind: composed_kind,
+                    answer: composed_answer,
+                }),
             });
         }
 
-        let observed = top_hits(engine, query, top_k, graph_depth)?;
+        let observed = if composition.evidence.is_empty() {
+            top_hits(engine, query, top_k, graph_depth)?
+        } else {
+            composition
+                .evidence
+                .iter()
+                .take(top_k)
+                .map(|candidate| ObservedHit {
+                    text: candidate.text.clone(),
+                    score: candidate.score,
+                })
+                .collect()
+        };
         let observed_hit_count = observed.len();
         Ok(RetrievalObservation {
             observed,
             observed_hit_count,
             aggregation: None,
+            composed_answer: (!composed_answer.trim().is_empty()).then_some(ComposedAnswerReport {
+                kind: composed_kind,
+                answer: composed_answer,
+            }),
         })
     }
 
@@ -1565,17 +1604,21 @@ mod app {
     fn evaluate_retrieval_check(
         observed: &[ObservedHit],
         observed_hit_count: usize,
+        composed_answer: Option<&str>,
         composed_summary: Option<&str>,
         query: &str,
         check: &RetrievalCheck,
     ) -> (bool, RetrievalCriteriaReport) {
-        let combined = match composed_summary {
-            Some(summary) if !summary.trim().is_empty() => summary.to_string(),
-            _ => observed
-                .iter()
-                .map(|hit| hit.text.as_str())
-                .collect::<Vec<_>>()
-                .join(" "),
+        let combined = match composed_answer {
+            Some(answer) if !answer.trim().is_empty() => answer.to_string(),
+            _ => match composed_summary {
+                Some(summary) if !summary.trim().is_empty() => summary.to_string(),
+                _ => observed
+                    .iter()
+                    .map(|hit| hit.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            },
         };
         let expected_match = observed
             .iter()

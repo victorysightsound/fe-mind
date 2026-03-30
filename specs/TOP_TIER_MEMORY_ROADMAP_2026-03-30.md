@@ -33,6 +33,8 @@ As of the current FeMind pass, the first layer of that roadmap is already in pla
 - route-owned graph depth is now live for graph-connected questions
 - aggregation routes now use an explicit engine composition path with
   distinct-match accounting instead of relying only on plain top-k retrieval
+- a deterministic answer-composition layer is now live for yes/no, stateful,
+  and aggregation-style questions
 - `valid_at(...)` now enforces validity windows during retrieval
 - practical scenarios can now seed explicit supersession/conflict links, so
   linked state-history behavior is part of the real regression loop
