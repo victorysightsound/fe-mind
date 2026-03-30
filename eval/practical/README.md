@@ -48,10 +48,12 @@ scripts/run-practical-eval.sh
 Equivalent direct command:
 
 ```bash
-cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+cargo run --example practical_eval --features local-embeddings,remote-embeddings,reranking,remote-reranking,api-embeddings,api-reranking,api-llm,cli-llm,ann -- \
   --scenarios eval/practical/scenarios.json \
   --mode retrieval \
   --vector-mode exact \
+  --embedding-runtime local-cpu \
+  --rerank-runtime off \
   --summary target/practical-eval/retrieval-exact.json
 ```
 
@@ -59,16 +61,21 @@ Useful variants:
 
 ```bash
 # Retrieval only
-cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+cargo run --example practical_eval --features local-embeddings,remote-embeddings,reranking,remote-reranking,api-embeddings,api-reranking,api-llm,cli-llm,ann -- \
   --mode retrieval --vector-mode exact
 
 # Extraction only
-cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+cargo run --example practical_eval --features local-embeddings,remote-embeddings,reranking,remote-reranking,api-embeddings,api-reranking,api-llm,cli-llm,ann -- \
   --mode extraction --vector-mode exact
 
 # ANN retrieval path
-cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+cargo run --example practical_eval --features local-embeddings,remote-embeddings,reranking,remote-reranking,api-embeddings,api-reranking,api-llm,cli-llm,ann -- \
   --mode retrieval --vector-mode ann
+
+# Windows GPU remote path with local fallback
+FEMIND_EMBED_RUNTIME=remote-fallback \
+FEMIND_RERANK_RUNTIME=remote-fallback \
+scripts/run-practical-eval.sh
 ```
 
 ## Scope
@@ -79,6 +86,9 @@ Current local baseline:
 
 - retrieval-only `exact` mode is the standard regression path
 - latest fully green summary: `target/practical-eval/retrieval-exact.json`
+- reranker-aware remote-fallback regression is wired and currently exposes one
+  real failure in `preference-change-over-time`
+- latest reranker-aware summary: `target/practical-eval/retrieval-exact-remote-rerank.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary
 comparison or regression tools after this set is behaving well.

@@ -91,7 +91,7 @@ set is directionally strong, repeatable, and free of obvious category failures.
 
 ## Repeatable Command
 
-The primary live-validation entry point is:
+The primary deterministic validation entry point is:
 
 ```bash
 scripts/run-practical-eval.sh
@@ -102,6 +102,9 @@ Default behavior:
 - `FEMIND_EVAL_MODE=retrieval`
 - `FEMIND_VECTOR_MODE=exact`
 - `FEMIND_GRAPH_DEPTH=0`
+- `FEMIND_EMBED_RUNTIME=local-cpu`
+- `FEMIND_RERANK_RUNTIME=off`
+- `FEMIND_RERANK_LIMIT=20`
 - `FEMIND_EXTRACT_BACKEND=api`
 - `FEMIND_EXTRACT_MODEL=openai/gpt-oss-120b`
 - `FEMIND_RETRIEVAL_INGEST=records`
@@ -111,15 +114,31 @@ Default behavior:
 Equivalent direct command:
 
 ```bash
-cargo run --example practical_eval --features api-embeddings,api-llm,ann -- \
+cargo run --example practical_eval --features local-embeddings,remote-embeddings,reranking,remote-reranking,api-embeddings,api-reranking,api-llm,cli-llm,ann -- \
   --scenarios eval/practical/scenarios.json \
   --mode retrieval \
   --vector-mode exact \
+  --embedding-runtime local-cpu \
+  --rerank-runtime off \
   --summary target/practical-eval/retrieval-exact.json
 ```
 
-The example uses a runtime key command and does not require secrets to be
-written into source files or shell history.
+The example uses runtime key resolution and optional remote auth env vars. It
+does not require secrets to be written into source files or shell history.
+
+Recommended remote-GPU regression path when the Windows FeMind service is
+available:
+
+```bash
+/Users/johndeaton/bin/femind-remote-on
+set -a && source /Users/johndeaton/.config/recallbench/femind-remote.env && set +a
+FEMIND_EMBED_RUNTIME=remote-fallback \
+FEMIND_RERANK_RUNTIME=remote-fallback \
+scripts/run-practical-eval.sh
+```
+
+That path uses the remote GPU service first and falls back to the local Candle
+backends if the remote service is unavailable.
 
 Graph-focused follow-up validation can be enabled explicitly:
 
@@ -153,15 +172,21 @@ Current validated baseline:
 - retrieval-only practical eval with `vector_mode=exact` currently passes `9/9`
 - retrieval-only practical eval with `vector_mode=ann` currently passes `9/9`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
+- reranker-aware `remote-fallback` retrieval is now wired into the same runner
+- latest reranker-aware `remote-fallback` exact run passes `8/9`
+- current failing scenario is `preference-change-over-time`
+- reranker-aware summary artifact: `target/practical-eval/retrieval-exact-remote-rerank.json`
 - broader live-usage sample from actual project docs currently passes `11/11` for all four tested extraction models
 - live-usage summary artifact: `target/practical-eval/live-usage-exact.json`
+- retrieval-only `remote-fallback` live-library exact run passes `58/58`
+- retrieval-only `remote-fallback` memloft-slice exact run passes `90/90`
 
 This exact-mode practical run is the standard local regression check before
 trying wider live usage samples or ANN comparisons.
 
 ## Larger Real-World Library
 
-After the small practical set is stable, the next real-world check is:
+After the small practical set is stable, the next deterministic real-world check is:
 
 ```bash
 scripts/run-live-library.sh
@@ -169,8 +194,10 @@ scripts/run-live-library.sh
 
 Default behavior:
 
-- `all` mode
+- `retrieval` mode
 - `exact` vector mode
+- `local-cpu` embedding runtime
+- `off` reranker runtime
 - `api` extraction backend
 - `openai/gpt-oss-120b` extraction model
 - summary output at `target/live-library/live-library-exact.json`
@@ -190,6 +217,9 @@ Current larger-library baseline:
 - the current graph-backed hybrid live-library pass now scores `66/66`
 - graph-backed retrieval on the larger library is now clean enough to treat as
   part of the real-world validation gate
+- retrieval-only `remote-fallback` exact run now passes `58/58`
+- retrieval-only `remote-fallback` summary artifact:
+  `target/live-library/live-library-exact-remote-rerank.json`
 
 ## Memloft-Derived Real-Data Slice
 
@@ -202,8 +232,10 @@ scripts/run-memloft-slice.sh
 
 Default behavior:
 
-- `all` mode
+- `retrieval` mode
 - `exact` vector mode
+- `local-cpu` embedding runtime
+- `off` reranker runtime
 - `api` extraction backend
 - `openai/gpt-oss-120b` extraction model
 - summary output at `target/memloft-slice/memloft-slice-exact.json`
@@ -222,3 +254,6 @@ Current memloft-slice baseline:
 - the current graph-backed hybrid memloft-slice pass now scores `90/90`
 - graph-backed retrieval on the memloft-derived slice is now clean enough for
   RecallBench confirmation work
+- retrieval-only `remote-fallback` exact run now passes `90/90`
+- retrieval-only `remote-fallback` summary artifact:
+  `target/memloft-slice/memloft-slice-exact-remote-rerank.json`

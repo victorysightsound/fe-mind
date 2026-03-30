@@ -39,6 +39,13 @@ The practical live-validation path is now established and repeatable:
 - standard local runner: `scripts/run-practical-eval.sh`
 - larger real-world runner: `scripts/run-live-library.sh`
 - memloft-derived real-data runner: `scripts/run-memloft-slice.sh`
+- the practical runner now supports local, remote, and fallback embedding plus
+  reranking runtimes without changing scenario files
+- the recommended high-precision retrieval path is remote MiniLM plus remote
+  MiniLM reranking with local fallback when the Windows GPU service is
+  available
+- current remote-fallback retrieval baselines are `8/9` practical, `58/58`
+  live-library, and `90/90` memloft-slice
 
 ## Migration
 

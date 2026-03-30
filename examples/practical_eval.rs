@@ -1,21 +1,41 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-#[cfg(all(feature = "api-embeddings", any(feature = "api-llm", feature = "cli-llm")))]
+#[cfg(any(
+    feature = "api-embeddings",
+    feature = "local-embeddings",
+    feature = "remote-embeddings"
+))]
 mod app {
     use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::Instant;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     use chrono::{DateTime, Utc};
-    use femind::embeddings::{ApiBackend, EmbeddingBackend};
+    #[cfg(feature = "api-embeddings")]
+    use femind::embeddings::ApiBackend;
+    use femind::embeddings::EmbeddingBackend;
+    #[cfg(feature = "remote-embeddings")]
+    use femind::embeddings::RemoteEmbeddingBackend;
+    #[cfg(feature = "api-embeddings")]
+    use femind::embeddings::MINILM_DIMENSIONS;
+    #[cfg(feature = "local-embeddings")]
+    use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
     use femind::engine::{EngineConfig, MemoryEngine, VectorSearchMode};
     #[cfg(feature = "api-llm")]
     use femind::llm::ApiLlmCallback;
     #[cfg(feature = "cli-llm")]
     use femind::llm::CliLlmCallback;
+    #[cfg(feature = "api-reranking")]
+    use femind::reranking::ApiRerankerBackend;
+    #[cfg(feature = "reranking")]
+    use femind::reranking::CandleReranker;
+    #[cfg(feature = "remote-reranking")]
+    use femind::reranking::RemoteRerankerBackend;
+    use femind::reranking::{RerankerRuntime, RERANKER_CANONICAL_NAME};
     use femind::search::SearchMode;
-    use femind::traits::{LlmCallback, MemoryRecord, MemoryType};
+    use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
 
     const DEFAULT_SCENARIOS: &str = "eval/practical/scenarios.json";
@@ -24,6 +44,11 @@ mod app {
     const DEFAULT_EMBED_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2";
     const DEFAULT_API_EXTRACT_MODEL: &str = "openai/gpt-oss-120b";
     const DEFAULT_CODEX_EXTRACT_MODEL: &str = "gpt-5.4-mini";
+    const DEFAULT_EMBED_RUNTIME: &str = "api";
+    const DEFAULT_REMOTE_EMBED_BASE_URL: &str = "http://127.0.0.1:18899/embed";
+    const DEFAULT_REMOTE_AUTH_ENV: &str = "FEMIND_REMOTE_EMBED_TOKEN";
+    const DEFAULT_RERANK_RUNTIME: &str = "off";
+    const DEFAULT_REMOTE_RERANK_BASE_URL: &str = "http://127.0.0.1:18899/rerank";
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct EvalMemory {
@@ -180,6 +205,104 @@ mod app {
         }
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum EmbeddingRuntime {
+        Off,
+        Api,
+        LocalCpu,
+        LocalGpu,
+        RemoteCpu,
+        RemoteGpu,
+        RemoteFallback,
+    }
+
+    impl EmbeddingRuntime {
+        fn from_str(value: &str) -> Result<Self, String> {
+            match value {
+                "off" => Ok(Self::Off),
+                "api" => Ok(Self::Api),
+                "local-cpu" => Ok(Self::LocalCpu),
+                "local-gpu" => Ok(Self::LocalGpu),
+                "remote-cpu" => Ok(Self::RemoteCpu),
+                "remote-gpu" => Ok(Self::RemoteGpu),
+                "remote-fallback" => Ok(Self::RemoteFallback),
+                other => Err(format!(
+                    "unknown embedding runtime '{other}', expected off | api | local-cpu | local-gpu | remote-cpu | remote-gpu | remote-fallback"
+                )),
+            }
+        }
+
+        fn name(self) -> &'static str {
+            match self {
+                Self::Off => "off",
+                Self::Api => "api",
+                Self::LocalCpu => "local-cpu",
+                Self::LocalGpu => "local-gpu",
+                Self::RemoteCpu => "remote-cpu",
+                Self::RemoteGpu => "remote-gpu",
+                Self::RemoteFallback => "remote-fallback",
+            }
+        }
+
+        fn requires_api_key(self) -> bool {
+            matches!(self, Self::Api)
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum EvalRerankRuntime {
+        Off,
+        Api,
+        LocalCpu,
+        LocalGpu,
+        RemoteCpu,
+        RemoteGpu,
+        RemoteFallback,
+    }
+
+    impl EvalRerankRuntime {
+        fn from_str(value: &str) -> Result<Self, String> {
+            match value {
+                "off" => Ok(Self::Off),
+                "api" => Ok(Self::Api),
+                "local-cpu" => Ok(Self::LocalCpu),
+                "local-gpu" => Ok(Self::LocalGpu),
+                "remote-cpu" => Ok(Self::RemoteCpu),
+                "remote-gpu" => Ok(Self::RemoteGpu),
+                "remote-fallback" => Ok(Self::RemoteFallback),
+                other => Err(format!(
+                    "unknown reranking runtime '{other}', expected off | api | local-cpu | local-gpu | remote-cpu | remote-gpu | remote-fallback"
+                )),
+            }
+        }
+
+        fn name(self) -> &'static str {
+            match self {
+                Self::Off => "off",
+                Self::Api => "api",
+                Self::LocalCpu => "local-cpu",
+                Self::LocalGpu => "local-gpu",
+                Self::RemoteCpu => "remote-cpu",
+                Self::RemoteGpu => "remote-gpu",
+                Self::RemoteFallback => "remote-fallback",
+            }
+        }
+
+        fn engine_runtime(self) -> RerankerRuntime {
+            match self {
+                Self::Off => RerankerRuntime::Off,
+                Self::Api | Self::RemoteCpu => RerankerRuntime::RemoteCpu,
+                Self::LocalCpu => RerankerRuntime::LocalCpu,
+                Self::LocalGpu => RerankerRuntime::LocalGpu,
+                Self::RemoteGpu | Self::RemoteFallback => RerankerRuntime::RemoteGpu,
+            }
+        }
+
+        fn requires_api_key(self) -> bool {
+            matches!(self, Self::Api)
+        }
+    }
+
     #[derive(Debug)]
     struct Config {
         scenarios_path: PathBuf,
@@ -192,10 +315,20 @@ mod app {
         base_url: String,
         api_key_env: String,
         key_cmd: String,
+        embedding_runtime: EmbeddingRuntime,
         embedding_model: String,
+        embed_remote_base_url: String,
+        embed_remote_auth_env: String,
+        embed_remote_timeout_secs: Option<u64>,
         extraction_backend: ExtractionBackend,
         extraction_model: String,
         retrieval_ingest: RetrievalIngest,
+        reranking_runtime: EvalRerankRuntime,
+        reranking_model: String,
+        rerank_remote_base_url: String,
+        rerank_remote_auth_env: String,
+        rerank_remote_timeout_secs: Option<u64>,
+        rerank_limit: usize,
     }
 
     impl Config {
@@ -215,8 +348,19 @@ mod app {
                 env::var("FEMIND_API_KEY_ENV").unwrap_or_else(|_| "FEMIND_API_KEY".to_string());
             let mut key_cmd = env::var("FEMIND_DEEPINFRA_KEY_CMD")
                 .unwrap_or_else(|_| DEFAULT_KEY_CMD.to_string());
-            let mut embedding_model = env::var("FEMIND_EMBED_MODEL")
-                .unwrap_or_else(|_| DEFAULT_EMBED_MODEL.to_string());
+            let mut embedding_runtime = EmbeddingRuntime::from_str(
+                &env::var("FEMIND_EMBED_RUNTIME")
+                    .unwrap_or_else(|_| DEFAULT_EMBED_RUNTIME.to_string()),
+            )?;
+            let mut embedding_model =
+                env::var("FEMIND_EMBED_MODEL").unwrap_or_else(|_| DEFAULT_EMBED_MODEL.to_string());
+            let mut embed_remote_base_url = env::var("FEMIND_EMBED_REMOTE_BASE_URL")
+                .unwrap_or_else(|_| DEFAULT_REMOTE_EMBED_BASE_URL.to_string());
+            let mut embed_remote_auth_env = env::var("FEMIND_EMBED_REMOTE_AUTH_ENV")
+                .unwrap_or_else(|_| DEFAULT_REMOTE_AUTH_ENV.to_string());
+            let mut embed_remote_timeout_secs = env::var("FEMIND_EMBED_REMOTE_TIMEOUT_SECS")
+                .ok()
+                .and_then(|value| value.parse().ok());
             let extraction_backend = ExtractionBackend::from_str(
                 &env::var("FEMIND_EXTRACT_BACKEND").unwrap_or_else(|_| "api".to_string()),
             )?;
@@ -224,24 +368,40 @@ mod app {
             let mut extraction_model = env::var("FEMIND_EXTRACT_MODEL")
                 .unwrap_or_else(|_| extraction_backend.default_model().to_string());
             let mut retrieval_ingest = RetrievalIngest::from_str(
-                &env::var("FEMIND_RETRIEVAL_INGEST")
-                    .unwrap_or_else(|_| "records".to_string()),
+                &env::var("FEMIND_RETRIEVAL_INGEST").unwrap_or_else(|_| "records".to_string()),
             )?;
+            let mut reranking_runtime = EvalRerankRuntime::from_str(
+                &env::var("FEMIND_RERANK_RUNTIME")
+                    .unwrap_or_else(|_| DEFAULT_RERANK_RUNTIME.to_string()),
+            )?;
+            let mut reranking_model = env::var("FEMIND_RERANK_MODEL")
+                .unwrap_or_else(|_| RERANKER_CANONICAL_NAME.to_string());
+            let mut rerank_remote_base_url = env::var("FEMIND_RERANK_REMOTE_BASE_URL")
+                .unwrap_or_else(|_| DEFAULT_REMOTE_RERANK_BASE_URL.to_string());
+            let mut rerank_remote_auth_env = env::var("FEMIND_RERANK_REMOTE_AUTH_ENV")
+                .unwrap_or_else(|_| DEFAULT_REMOTE_AUTH_ENV.to_string());
+            let mut rerank_remote_timeout_secs = env::var("FEMIND_RERANK_REMOTE_TIMEOUT_SECS")
+                .ok()
+                .and_then(|value| value.parse().ok());
+            let mut rerank_limit = env::var("FEMIND_RERANK_LIMIT")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(20);
 
             let mut args = env::args().skip(1);
             while let Some(arg) = args.next() {
                 match arg.as_str() {
                     "--scenarios" => {
-                        scenarios_path = PathBuf::from(
-                            args.next().ok_or("--scenarios requires a path")?,
-                        );
+                        scenarios_path =
+                            PathBuf::from(args.next().ok_or("--scenarios requires a path")?);
                     }
                     "--db" => {
                         db_path = Some(PathBuf::from(args.next().ok_or("--db requires a path")?));
                     }
                     "--summary" => {
-                        summary_path =
-                            Some(PathBuf::from(args.next().ok_or("--summary requires a path")?));
+                        summary_path = Some(PathBuf::from(
+                            args.next().ok_or("--summary requires a path")?,
+                        ));
                     }
                     "--mode" => {
                         mode = EvalMode::from_str(&args.next().ok_or("--mode requires a value")?)?;
@@ -258,7 +418,7 @@ mod app {
                             other => {
                                 return Err(format!(
                                     "unknown vector mode '{other}', expected off | exact | ann"
-                                ))
+                                ));
                             }
                         };
                     }
@@ -289,6 +449,31 @@ mod app {
                         embedding_model =
                             args.next().ok_or("--embedding-model requires a value")?;
                     }
+                    "--embedding-runtime" => {
+                        embedding_runtime = EmbeddingRuntime::from_str(
+                            &args.next().ok_or("--embedding-runtime requires a value")?,
+                        )?;
+                    }
+                    "--embed-remote-base-url" => {
+                        embed_remote_base_url = args
+                            .next()
+                            .ok_or("--embed-remote-base-url requires a value")?;
+                    }
+                    "--embed-remote-auth-env" => {
+                        embed_remote_auth_env = args
+                            .next()
+                            .ok_or("--embed-remote-auth-env requires a value")?;
+                    }
+                    "--embed-remote-timeout-secs" => {
+                        embed_remote_timeout_secs = Some(
+                            args.next()
+                                .ok_or("--embed-remote-timeout-secs requires a value")?
+                                .parse()
+                                .map_err(|_| {
+                                    "--embed-remote-timeout-secs must be an integer".to_string()
+                                })?,
+                        );
+                    }
                     "--extract-backend" => {
                         extraction_backend = ExtractionBackend::from_str(
                             &args.next().ok_or("--extract-backend requires a value")?,
@@ -305,6 +490,41 @@ mod app {
                         retrieval_ingest = RetrievalIngest::from_str(
                             &args.next().ok_or("--retrieval-ingest requires a value")?,
                         )?;
+                    }
+                    "--rerank-runtime" => {
+                        reranking_runtime = EvalRerankRuntime::from_str(
+                            &args.next().ok_or("--rerank-runtime requires a value")?,
+                        )?;
+                    }
+                    "--rerank-model" => {
+                        reranking_model = args.next().ok_or("--rerank-model requires a value")?;
+                    }
+                    "--rerank-remote-base-url" => {
+                        rerank_remote_base_url = args
+                            .next()
+                            .ok_or("--rerank-remote-base-url requires a value")?;
+                    }
+                    "--rerank-remote-auth-env" => {
+                        rerank_remote_auth_env = args
+                            .next()
+                            .ok_or("--rerank-remote-auth-env requires a value")?;
+                    }
+                    "--rerank-remote-timeout-secs" => {
+                        rerank_remote_timeout_secs = Some(
+                            args.next()
+                                .ok_or("--rerank-remote-timeout-secs requires a value")?
+                                .parse()
+                                .map_err(|_| {
+                                    "--rerank-remote-timeout-secs must be an integer".to_string()
+                                })?,
+                        );
+                    }
+                    "--rerank-limit" => {
+                        rerank_limit = args
+                            .next()
+                            .ok_or("--rerank-limit requires a value")?
+                            .parse()
+                            .map_err(|_| "--rerank-limit must be an integer".to_string())?;
                     }
                     "--help" | "-h" => {
                         print_help();
@@ -325,10 +545,20 @@ mod app {
                 base_url,
                 api_key_env,
                 key_cmd,
+                embedding_runtime,
                 embedding_model,
+                embed_remote_base_url,
+                embed_remote_auth_env,
+                embed_remote_timeout_secs,
                 extraction_backend,
                 extraction_model,
                 retrieval_ingest,
+                reranking_runtime,
+                reranking_model,
+                rerank_remote_base_url,
+                rerank_remote_auth_env,
+                rerank_remote_timeout_secs,
+                rerank_limit,
             })
         }
     }
@@ -367,10 +597,16 @@ mod app {
         vector_mode: String,
         graph_depth: u32,
         top_k: usize,
+        embedding_runtime: String,
         embedding_model: String,
+        embed_remote_base_url: Option<String>,
         extract_backend: String,
         extraction_model: String,
         retrieval_ingest: String,
+        reranking_runtime: String,
+        reranking_model: String,
+        rerank_remote_base_url: Option<String>,
+        rerank_limit: usize,
         duration_ms: u128,
     }
 
@@ -388,10 +624,18 @@ mod app {
         let scenarios = load_scenarios(&config.scenarios_path)?;
         let started_at = Instant::now();
 
-        let api_key = resolve_api_key(&config)?;
-        let embedder =
-            ApiBackend::new(&config.base_url, api_key.clone(), &config.embedding_model, 384);
-        let extractor = build_extractor(&config, api_key);
+        let api_key = if config.embedding_runtime.requires_api_key()
+            || config.reranking_runtime.requires_api_key()
+            || extraction_required(&config)
+                && matches!(config.extraction_backend, ExtractionBackend::Api)
+        {
+            Some(resolve_api_key(&config)?)
+        } else {
+            None
+        };
+        let embedding_backend = build_embedding_backend(&config, api_key.as_deref())?;
+        let reranker_backend = build_reranker_backend(&config, api_key.as_deref())?;
+        let extractor = build_extractor_if_needed(&config, api_key.as_deref())?;
 
         println!("femind practical evaluation");
         println!("==========================");
@@ -399,10 +643,35 @@ mod app {
         println!("mode: {}", mode_name(config.mode));
         println!("vector_mode: {}", config.vector_mode);
         println!("graph_depth: {}", config.graph_depth);
-        println!("embedding_model: {}", embedder.model_name());
+        println!("embedding_runtime: {}", config.embedding_runtime.name());
+        println!("configured_embedding_model: {}", config.embedding_model);
+        println!(
+            "embedding_model: {}",
+            embedding_backend
+                .as_ref()
+                .map(|backend| backend.model_name())
+                .unwrap_or("off")
+        );
+        println!("api_base_url: {}", config.base_url);
         println!("extract_backend: {}", config.extraction_backend.name());
-        println!("extraction_model: {}", extractor.model_name());
+        println!("configured_extraction_model: {}", config.extraction_model);
+        println!(
+            "extraction_model: {}",
+            extractor
+                .as_ref()
+                .map(|backend| backend.model_name())
+                .unwrap_or("unused")
+        );
         println!("retrieval_ingest: {}", config.retrieval_ingest.name());
+        println!("reranking_runtime: {}", config.reranking_runtime.name());
+        println!(
+            "reranking_model: {}",
+            if reranker_backend.is_some() {
+                config.reranking_model.as_str()
+            } else {
+                "off"
+            }
+        );
         println!();
 
         let mut reports = Vec::new();
@@ -410,11 +679,21 @@ mod app {
         let mut passed_checks = 0usize;
 
         for scenario in &scenarios {
-            println!("[{}] {} ({})", scenario.id, scenario.title, scenario.category);
+            println!(
+                "[{}] {} ({})",
+                scenario.id, scenario.title, scenario.category
+            );
             println!("goal: {}", scenario.goal);
 
             let scenario_db = scenario_db_path(&config, &scenario.id)?;
-            let report = run_scenario(scenario, &scenario_db, &config, extractor.as_ref())?;
+            let report = run_scenario(
+                scenario,
+                &scenario_db,
+                &config,
+                embedding_backend.clone(),
+                reranker_backend.clone(),
+                extractor.as_deref(),
+            )?;
 
             let scenario_passed = report
                 .retrieval
@@ -423,7 +702,8 @@ mod app {
                 .chain(report.abstention.iter())
                 .filter(|c| c.passed)
                 .count();
-            let scenario_total = report.retrieval.len() + report.extraction.len() + report.abstention.len();
+            let scenario_total =
+                report.retrieval.len() + report.extraction.len() + report.abstention.len();
             passed_checks += scenario_passed;
             total_checks += scenario_total;
 
@@ -445,10 +725,34 @@ mod app {
                 vector_mode: config.vector_mode.to_string(),
                 graph_depth: config.graph_depth,
                 top_k: config.top_k,
-                embedding_model: embedder.model_name().to_string(),
+                embedding_runtime: config.embedding_runtime.name().to_string(),
+                embedding_model: embedding_backend
+                    .as_ref()
+                    .map(|backend| backend.model_name().to_string())
+                    .unwrap_or_else(|| "off".to_string()),
+                embed_remote_base_url: config
+                    .embedding_runtime
+                    .name()
+                    .starts_with("remote")
+                    .then(|| config.embed_remote_base_url.clone()),
                 extract_backend: config.extraction_backend.name().to_string(),
-                extraction_model: extractor.model_name().to_string(),
+                extraction_model: extractor
+                    .as_ref()
+                    .map(|backend| backend.model_name().to_string())
+                    .unwrap_or_else(|| "unused".to_string()),
                 retrieval_ingest: config.retrieval_ingest.name().to_string(),
+                reranking_runtime: config.reranking_runtime.name().to_string(),
+                reranking_model: if reranker_backend.is_some() {
+                    config.reranking_model.clone()
+                } else {
+                    "off".to_string()
+                },
+                rerank_remote_base_url: config
+                    .reranking_runtime
+                    .name()
+                    .starts_with("remote")
+                    .then(|| config.rerank_remote_base_url.clone()),
+                rerank_limit: config.rerank_limit,
                 duration_ms,
             },
             total_checks,
@@ -476,24 +780,29 @@ mod app {
         scenario: &Scenario,
         db_path: &Path,
         config: &Config,
-        extractor: &dyn LlmCallback,
+        embedding_backend: Option<Arc<dyn EmbeddingBackend>>,
+        reranker_backend: Option<Arc<dyn RerankerBackend>>,
+        extractor: Option<&dyn LlmCallback>,
     ) -> Result<ScenarioReport, Box<dyn std::error::Error>> {
         if db_path.exists() {
             fs::remove_file(db_path)?;
         }
 
-        let mut engine = MemoryEngine::<EvalMemory>::builder()
-            .database(db_path.to_string_lossy().into_owned())
-            .embedding_backend(ApiBackend::new(
-                &config.base_url,
-                resolve_api_key(config)?,
-                &config.embedding_model,
-                384,
-            ))
-            .build()?;
+        let mut builder =
+            MemoryEngine::<EvalMemory>::builder().database(db_path.to_string_lossy().into_owned());
+        if let Some(backend) = embedding_backend {
+            builder = builder.embedding_backend_arc(backend);
+        }
+        if let Some(backend) = reranker_backend {
+            builder = builder.reranker_backend_arc(backend);
+        }
+        let mut engine = builder.build()?;
         engine.config = EngineConfig {
-            embedding_enabled: !matches!(config.vector_mode, VectorSearchMode::Off),
+            embedding_enabled: !matches!(config.vector_mode, VectorSearchMode::Off)
+                && !matches!(config.embedding_runtime, EmbeddingRuntime::Off),
             vector_search_mode: config.vector_mode,
+            reranking_runtime: config.reranking_runtime.engine_runtime(),
+            rerank_candidate_limit: config.rerank_limit,
             ..EngineConfig::default()
         };
 
@@ -527,6 +836,8 @@ mod app {
         if matches!(config.mode, EvalMode::Extraction | EvalMode::All)
             && !scenario.extraction_checks.is_empty()
         {
+            let extractor = extractor
+                .ok_or("extraction mode requires an extraction backend to be configured")?;
             let raw_text = scenario
                 .records
                 .iter()
@@ -578,36 +889,234 @@ mod app {
         })
     }
 
-    fn build_extractor(config: &Config, api_key: String) -> Box<dyn LlmCallback> {
+    fn build_extractor_if_needed(
+        config: &Config,
+        api_key: Option<&str>,
+    ) -> Result<Option<Box<dyn LlmCallback>>, Box<dyn std::error::Error>> {
+        if !extraction_required(config) {
+            return Ok(None);
+        }
+
         match config.extraction_backend {
             ExtractionBackend::Api => {
                 #[cfg(feature = "api-llm")]
                 {
-                    Box::new(ApiLlmCallback::new(
+                    let api_key = api_key.ok_or("API extraction backend requires an API key")?;
+                    Ok(Some(Box::new(ApiLlmCallback::new(
                         &config.base_url,
                         api_key,
                         &config.extraction_model,
-                    ))
+                    ))))
                 }
                 #[cfg(not(feature = "api-llm"))]
                 {
                     let _ = api_key;
-                    panic!("api extraction backend requires api-llm feature");
+                    Err("api extraction backend requires api-llm feature".into())
                 }
             }
             ExtractionBackend::CodexCli => {
                 #[cfg(feature = "cli-llm")]
                 {
                     let _ = api_key;
-                    Box::new(CliLlmCallback::codex(&config.extraction_model))
+                    Ok(Some(Box::new(CliLlmCallback::codex(
+                        &config.extraction_model,
+                    ))))
                 }
                 #[cfg(not(feature = "cli-llm"))]
                 {
                     let _ = api_key;
-                    panic!("codex-cli extraction backend requires cli-llm feature");
+                    Err("codex-cli extraction backend requires cli-llm feature".into())
                 }
             }
         }
+    }
+
+    fn extraction_required(config: &Config) -> bool {
+        matches!(config.mode, EvalMode::Extraction | EvalMode::All)
+            || matches!(
+                config.retrieval_ingest,
+                RetrievalIngest::Extraction | RetrievalIngest::Hybrid
+            )
+    }
+
+    fn build_embedding_backend(
+        config: &Config,
+        api_key: Option<&str>,
+    ) -> Result<Option<Arc<dyn EmbeddingBackend>>, Box<dyn std::error::Error>> {
+        let backend: Option<Arc<dyn EmbeddingBackend>> = match config.embedding_runtime {
+            EmbeddingRuntime::Off => None,
+            EmbeddingRuntime::Api => {
+                #[cfg(feature = "api-embeddings")]
+                {
+                    let api_key = api_key.ok_or("API embedding runtime requires an API key")?;
+                    Some(Arc::new(ApiBackend::new(
+                        &config.base_url,
+                        api_key,
+                        &config.embedding_model,
+                        MINILM_DIMENSIONS,
+                    )))
+                }
+                #[cfg(not(feature = "api-embeddings"))]
+                {
+                    let _ = api_key;
+                    return Err("embedding runtime 'api' requires api-embeddings feature".into());
+                }
+            }
+            EmbeddingRuntime::LocalCpu | EmbeddingRuntime::LocalGpu => {
+                #[cfg(feature = "local-embeddings")]
+                {
+                    let device = match config.embedding_runtime {
+                        EmbeddingRuntime::LocalCpu => LocalEmbeddingDevice::Cpu,
+                        EmbeddingRuntime::LocalGpu => LocalEmbeddingDevice::Cuda,
+                        _ => unreachable!(),
+                    };
+                    Some(Arc::new(CandleNativeBackend::new_with_device(device, 0)?))
+                }
+                #[cfg(not(feature = "local-embeddings"))]
+                {
+                    return Err(
+                        "local embedding runtimes require the local-embeddings feature".into(),
+                    );
+                }
+            }
+            EmbeddingRuntime::RemoteCpu | EmbeddingRuntime::RemoteGpu => {
+                #[cfg(feature = "remote-embeddings")]
+                {
+                    let auth_token = resolve_named_env(&config.embed_remote_auth_env)?;
+                    Some(Arc::new(RemoteEmbeddingBackend::minilm_with_timeout(
+                        &config.embed_remote_base_url,
+                        Some(auth_token),
+                        config.embed_remote_timeout_secs.map(Duration::from_secs),
+                    )?))
+                }
+                #[cfg(not(feature = "remote-embeddings"))]
+                {
+                    return Err(
+                        "remote embedding runtimes require the remote-embeddings feature".into(),
+                    );
+                }
+            }
+            EmbeddingRuntime::RemoteFallback => {
+                #[cfg(all(feature = "remote-embeddings", feature = "local-embeddings"))]
+                {
+                    let auth_token = resolve_named_env(&config.embed_remote_auth_env)?;
+                    let fallback = Box::new(CandleNativeBackend::new_with_device(
+                        LocalEmbeddingDevice::Auto,
+                        0,
+                    )?);
+                    Some(Arc::new(
+                        RemoteEmbeddingBackend::minilm_with_local_fallback_and_timeout(
+                            &config.embed_remote_base_url,
+                            Some(auth_token),
+                            fallback,
+                            config.embed_remote_timeout_secs.map(Duration::from_secs),
+                        )?,
+                    ))
+                }
+                #[cfg(not(all(feature = "remote-embeddings", feature = "local-embeddings")))]
+                {
+                    return Err("embedding runtime 'remote-fallback' requires both remote-embeddings and local-embeddings features".into());
+                }
+            }
+        };
+
+        Ok(backend)
+    }
+
+    fn build_reranker_backend(
+        config: &Config,
+        api_key: Option<&str>,
+    ) -> Result<Option<Arc<dyn RerankerBackend>>, Box<dyn std::error::Error>> {
+        #[cfg(not(feature = "api-reranking"))]
+        let _ = api_key;
+        let backend: Option<Arc<dyn RerankerBackend>> = match config.reranking_runtime {
+            EvalRerankRuntime::Off => None,
+            EvalRerankRuntime::Api => {
+                #[cfg(feature = "api-reranking")]
+                {
+                    let api_key = api_key.ok_or("API reranker runtime requires an API key")?;
+                    Some(Arc::new(ApiRerankerBackend::new(
+                        &config.base_url,
+                        api_key,
+                        &config.reranking_model,
+                    )))
+                }
+                #[cfg(not(feature = "api-reranking"))]
+                {
+                    return Err("reranking runtime 'api' requires api-reranking feature".into());
+                }
+            }
+            EvalRerankRuntime::LocalCpu | EvalRerankRuntime::LocalGpu => {
+                #[cfg(feature = "reranking")]
+                {
+                    let device = match config.reranking_runtime {
+                        EvalRerankRuntime::LocalCpu => LocalEmbeddingDevice::Cpu,
+                        EvalRerankRuntime::LocalGpu => LocalEmbeddingDevice::Cuda,
+                        _ => unreachable!(),
+                    };
+                    Some(Arc::new(CandleReranker::new_with_device(device, 0)?))
+                }
+                #[cfg(not(feature = "reranking"))]
+                {
+                    return Err("local reranker runtimes require the reranking feature".into());
+                }
+            }
+            EvalRerankRuntime::RemoteCpu | EvalRerankRuntime::RemoteGpu => {
+                #[cfg(feature = "remote-reranking")]
+                {
+                    let auth_token = resolve_named_env(&config.rerank_remote_auth_env)?;
+                    Some(Arc::new(RemoteRerankerBackend::new_with_timeout(
+                        &config.rerank_remote_base_url,
+                        Some(auth_token),
+                        &config.reranking_model,
+                        femind::reranking::RERANKER_PROFILE,
+                        config.rerank_remote_timeout_secs.map(Duration::from_secs),
+                    )?))
+                }
+                #[cfg(not(feature = "remote-reranking"))]
+                {
+                    return Err(
+                        "remote reranker runtimes require the remote-reranking feature".into(),
+                    );
+                }
+            }
+            EvalRerankRuntime::RemoteFallback => {
+                #[cfg(all(feature = "remote-reranking", feature = "reranking"))]
+                {
+                    let auth_token = resolve_named_env(&config.rerank_remote_auth_env)?;
+                    let fallback = Box::new(CandleReranker::new_with_device(
+                        LocalEmbeddingDevice::Auto,
+                        0,
+                    )?);
+                    Some(Arc::new(
+                        RemoteRerankerBackend::with_local_fallback_and_timeout(
+                            &config.rerank_remote_base_url,
+                            Some(auth_token),
+                            &config.reranking_model,
+                            femind::reranking::RERANKER_PROFILE,
+                            fallback,
+                            config.rerank_remote_timeout_secs.map(Duration::from_secs),
+                        )?,
+                    ))
+                }
+                #[cfg(not(all(feature = "remote-reranking", feature = "reranking")))]
+                {
+                    return Err("reranking runtime 'remote-fallback' requires both remote-reranking and reranking features".into());
+                }
+            }
+        };
+
+        Ok(backend)
+    }
+
+    fn resolve_named_env(name: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let value = env::var(name)
+            .map_err(|_| format!("required environment variable '{name}' is not set"))?;
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(format!("required environment variable '{name}' is empty").into());
+        }
+        Ok(trimmed.to_string())
     }
 
     fn top_hits(
@@ -667,7 +1176,7 @@ mod app {
         engine: &MemoryEngine<EvalMemory>,
         scenario: &Scenario,
         config: &Config,
-        extractor: &dyn LlmCallback,
+        extractor: Option<&dyn LlmCallback>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match config.retrieval_ingest {
             RetrievalIngest::Records => {
@@ -679,6 +1188,8 @@ mod app {
                 let _ = engine.store_batch(&records)?;
             }
             RetrievalIngest::Extraction => {
+                let extractor = extractor
+                    .ok_or("retrieval ingest 'extraction' requires an extraction backend")?;
                 let raw_text = scenario
                     .records
                     .iter()
@@ -688,6 +1199,8 @@ mod app {
                 let _ = engine.store_with_extraction(&raw_text, extractor)?;
             }
             RetrievalIngest::Hybrid => {
+                let extractor =
+                    extractor.ok_or("retrieval ingest 'hybrid' requires an extraction backend")?;
                 let records: Vec<EvalMemory> = scenario
                     .records
                     .iter()
@@ -765,10 +1278,16 @@ mod app {
         Ok(api_key)
     }
 
-    fn scenario_db_path(config: &Config, scenario_id: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    fn scenario_db_path(
+        config: &Config,
+        scenario_id: &str,
+    ) -> Result<PathBuf, Box<dyn std::error::Error>> {
         if let Some(base) = &config.db_path {
             if base.extension().is_some() {
-                let stem = base.file_stem().and_then(|s| s.to_str()).unwrap_or("practical-eval");
+                let stem = base
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("practical-eval");
                 let parent = base.parent().unwrap_or_else(|| Path::new("."));
                 fs::create_dir_all(parent)?;
                 return Ok(parent.join(format!("{stem}-{scenario_id}.db")));
@@ -789,12 +1308,19 @@ mod app {
             return true;
         }
 
-        if matches_yes_no_state_answer(&observed_normalized, &normalize(query), &expected_normalized) {
+        if matches_yes_no_state_answer(
+            &observed_normalized,
+            &normalize(query),
+            &expected_normalized,
+        ) {
             return true;
         }
 
-        if matches_positive_state_answer(&observed_normalized, &normalize(query), &expected_normalized)
-        {
+        if matches_positive_state_answer(
+            &observed_normalized,
+            &normalize(query),
+            &expected_normalized,
+        ) {
             return true;
         }
 
@@ -845,7 +1371,11 @@ mod app {
             .count();
         let recall = overlap as f32 / expected_tokens.len() as f32;
 
-        let min_overlap = if expected_tokens.len() <= 2 { expected_tokens.len() } else { 2 };
+        let min_overlap = if expected_tokens.len() <= 2 {
+            expected_tokens.len()
+        } else {
+            2
+        };
         overlap >= min_overlap && recall >= 0.5
     }
 
@@ -860,7 +1390,18 @@ mod app {
             || expected.contains("do not");
         let asks_yes_no = matches!(
             query.split_whitespace().next(),
-            Some("is" | "are" | "was" | "were" | "does" | "do" | "did" | "can" | "could" | "should" | "would")
+            Some(
+                "is" | "are"
+                    | "was"
+                    | "were"
+                    | "does"
+                    | "do"
+                    | "did"
+                    | "can"
+                    | "could"
+                    | "should"
+                    | "would"
+            )
         );
         let asks_current_state =
             query.contains("still") || query.contains("active") || query.contains("current");
@@ -894,7 +1435,18 @@ mod app {
     fn matches_positive_state_answer(observed: &str, query: &str, expected: &str) -> bool {
         let asks_yes_no = matches!(
             query.split_whitespace().next(),
-            Some("is" | "are" | "was" | "were" | "does" | "do" | "did" | "can" | "could" | "should" | "would")
+            Some(
+                "is" | "are"
+                    | "was"
+                    | "were"
+                    | "does"
+                    | "do"
+                    | "did"
+                    | "can"
+                    | "could"
+                    | "should"
+                    | "would"
+            )
         );
         if !asks_yes_no {
             return false;
@@ -929,7 +1481,13 @@ mod app {
         value
             .to_lowercase()
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() { c } else { ' ' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() {
+                    c
+                } else {
+                    ' '
+                }
+            })
             .collect::<String>()
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -945,12 +1503,12 @@ mod app {
 
     fn canonical_token(token: &str) -> Option<String> {
         let token = match token {
-            "the" | "a" | "an" | "is" | "are" | "was" | "were" | "be" | "been" | "being"
-            | "to" | "for" | "of" | "in" | "on" | "at" | "by" | "and" | "or" | "that"
-            | "this" | "it" | "its" | "still" | "then" | "than" | "because" | "what"
-            | "which" | "who" | "should" | "not" | "do" | "does" | "did" | "yet"
-            | "after" | "before" | "over" | "under" | "with" | "without" | "from"
-            | "into" | "about" | "no" | "current" | "earlier" => return None,
+            "the" | "a" | "an" | "is" | "are" | "was" | "were" | "be" | "been" | "being" | "to"
+            | "for" | "of" | "in" | "on" | "at" | "by" | "and" | "or" | "that" | "this" | "it"
+            | "its" | "still" | "then" | "than" | "because" | "what" | "which" | "who"
+            | "should" | "not" | "do" | "does" | "did" | "yet" | "after" | "before" | "over"
+            | "under" | "with" | "without" | "from" | "into" | "about" | "no" | "current"
+            | "earlier" => return None,
             "keep" | "used" | "use" => "prefer",
             "cheap" => "low",
             "tried" | "try" => "first",
@@ -986,7 +1544,7 @@ mod app {
 
     fn print_help() {
         println!(
-            "Usage: cargo run --example practical_eval --features api-embeddings,api-llm,ann -- [options]\n\
+            "Usage: cargo run --example practical_eval --features <feature-list> -- [options]\n\
              \n\
              Options:\n\
              \t--scenarios <path>         Path to scenarios JSON (default: eval/practical/scenarios.json)\n\
@@ -999,10 +1557,20 @@ mod app {
              \t--base-url <url>           OpenAI-compatible API base URL\n\
              \t--api-key-env <name>       Environment variable to read before using --key-cmd\n\
              \t--key-cmd <cmd>            Shell command that prints the API key\n\
+             \t--embedding-runtime <mode> Embedding runtime: off | api | local-cpu | local-gpu | remote-cpu | remote-gpu | remote-fallback\n\
              \t--embedding-model <model>  Embedding model name\n\
+             \t--embed-remote-base-url <url>\n\
+             \t--embed-remote-auth-env <name>\n\
+             \t--embed-remote-timeout-secs <n>\n\
              \t--extract-backend <kind>   Extraction backend: api | codex-cli\n\
              \t--extraction-model <model> Extraction model name\n\
-             \t--retrieval-ingest <kind>  Retrieval ingest path: records | extraction | hybrid\n"
+             \t--retrieval-ingest <kind>  Retrieval ingest path: records | extraction | hybrid\n\
+             \t--rerank-runtime <mode>    Reranker runtime: off | api | local-cpu | local-gpu | remote-cpu | remote-gpu | remote-fallback\n\
+             \t--rerank-model <model>     Reranker model name\n\
+             \t--rerank-remote-base-url <url>\n\
+             \t--rerank-remote-auth-env <name>\n\
+             \t--rerank-remote-timeout-secs <n>\n\
+             \t--rerank-limit <n>         Max candidates to rerank (default: 20)\n"
         );
     }
 
@@ -1012,8 +1580,7 @@ mod app {
 
         #[test]
         fn matcher_accepts_superseded_yes_no_answer() {
-            let observed =
-                "The prior desktop-first idea is superseded. Current build order is femind first, then feloop.";
+            let observed = "The prior desktop-first idea is superseded. Current build order is femind first, then feloop.";
             let query = "Is desktop-first still the active plan?";
             let expected = "No. That plan was superseded.";
 
@@ -1036,19 +1603,24 @@ mod app {
     }
 }
 
-#[cfg(all(feature = "api-embeddings", any(feature = "api-llm", feature = "cli-llm")))]
+#[cfg(any(
+    feature = "api-embeddings",
+    feature = "local-embeddings",
+    feature = "remote-embeddings"
+))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     app::run()
 }
 
-#[cfg(not(all(
+#[cfg(not(any(
     feature = "api-embeddings",
-    any(feature = "api-llm", feature = "cli-llm")
+    feature = "local-embeddings",
+    feature = "remote-embeddings"
 )))]
 fn main() {
     eprintln!(
-        "This example requires features: api-embeddings and one extraction backend (api-llm or cli-llm).\n\
-         Example: cargo run --example practical_eval --features api-embeddings,cli-llm,ann -- --help"
+        "This example requires at least one embedding backend feature.\n\
+         Example: cargo run --example practical_eval --features local-embeddings,remote-embeddings,reranking,remote-reranking,api-llm,cli-llm,ann -- --help"
     );
     std::process::exit(1);
 }
