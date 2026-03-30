@@ -8,6 +8,7 @@
 mod app {
     use std::env;
     use std::fs;
+    use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -34,7 +35,7 @@ mod app {
     #[cfg(feature = "remote-reranking")]
     use femind::reranking::RemoteRerankerBackend;
     use femind::reranking::{RerankerRuntime, RERANKER_CANONICAL_NAME};
-    use femind::search::SearchMode;
+    use femind::search::{QueryRoute, SearchMode};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
 
@@ -584,12 +585,48 @@ mod app {
         hybrid: Vec<ObservedHit>,
     }
 
+    #[derive(Debug, Serialize, Clone)]
+    struct RoutedSearchPlan {
+        intent: String,
+        mode: String,
+        depth: String,
+        temporal_policy: String,
+        strict_grounding: bool,
+        query_alignment: bool,
+        rerank_limit: usize,
+        note: String,
+    }
+
+    impl From<QueryRoute> for RoutedSearchPlan {
+        fn from(value: QueryRoute) -> Self {
+            Self {
+                intent: value.intent.to_string(),
+                mode: value.mode_name().to_string(),
+                depth: value.depth_name().to_string(),
+                temporal_policy: value.temporal_policy_name().to_string(),
+                strict_grounding: value.strict_grounding,
+                query_alignment: value.query_alignment,
+                rerank_limit: value.rerank_limit,
+                note: value.note.to_string(),
+            }
+        }
+    }
+
+    #[derive(Debug, Serialize, Clone, Default)]
+    struct AggregateStats {
+        total_checks: usize,
+        passed_checks: usize,
+        pass_rate: f32,
+    }
+
     #[derive(Debug, Serialize)]
     struct CheckReport {
         query: String,
         passed: bool,
         expected: String,
         observed: Vec<ObservedHit>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        route: Option<RoutedSearchPlan>,
         #[serde(skip_serializing_if = "Option::is_none")]
         explain: Option<RetrievalExplain>,
     }
@@ -633,6 +670,9 @@ mod app {
         total_checks: usize,
         passed_checks: usize,
         pass_rate: f32,
+        check_type_stats: BTreeMap<String, AggregateStats>,
+        category_stats: BTreeMap<String, AggregateStats>,
+        intent_stats: BTreeMap<String, AggregateStats>,
         reports: Vec<ScenarioReport>,
     }
 
@@ -733,6 +773,7 @@ mod app {
         println!("summary: {passed_checks}/{total_checks} checks passed");
 
         let duration_ms = started_at.elapsed().as_millis();
+        let (check_type_stats, category_stats, intent_stats) = summarize_reports(&reports);
         let summary = RunSummary {
             metadata: RunMetadata {
                 generated_at: Utc::now(),
@@ -779,6 +820,9 @@ mod app {
             } else {
                 passed_checks as f32 / total_checks as f32
             },
+            check_type_stats,
+            category_stats,
+            intent_stats,
             reports,
         };
 
@@ -830,6 +874,7 @@ mod app {
         let mut retrieval = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.retrieval_checks {
+                let route = Some(routed_search_plan(&engine, &check.query));
                 let observed = top_hits(&engine, &check.query, config.top_k, config.graph_depth)?;
                 let combined = observed
                     .iter()
@@ -850,6 +895,7 @@ mod app {
                     passed,
                     expected: check.expected_answer.clone(),
                     observed,
+                    route,
                     explain,
                 });
             }
@@ -883,6 +929,7 @@ mod app {
                         .into_iter()
                         .map(|text| ObservedHit { text, score: 1.0 })
                         .collect(),
+                    route: None,
                     explain: None,
                 });
             }
@@ -891,6 +938,7 @@ mod app {
         let mut abstention = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.abstention_checks {
+                let route = Some(routed_search_plan(&engine, &check.query));
                 let observed = top_hits(&engine, &check.query, config.top_k, config.graph_depth)?;
                 let passed = check.expected_behavior == "abstain" && observed.is_empty();
                 abstention.push(CheckReport {
@@ -898,6 +946,7 @@ mod app {
                     passed,
                     expected: check.expected_behavior.clone(),
                     observed,
+                    route,
                     explain: None,
                 });
             }
@@ -912,6 +961,100 @@ mod app {
             extraction,
             abstention,
         })
+    }
+
+    fn routed_search_plan(
+        engine: &MemoryEngine<EvalMemory>,
+        query: &str,
+    ) -> RoutedSearchPlan {
+        engine.search(query).query_route().into()
+    }
+
+    fn summarize_reports(
+        reports: &[ScenarioReport],
+    ) -> (
+        BTreeMap<String, AggregateStats>,
+        BTreeMap<String, AggregateStats>,
+        BTreeMap<String, AggregateStats>,
+    ) {
+        let mut check_type_stats = BTreeMap::new();
+        let mut category_stats = BTreeMap::new();
+        let mut intent_stats = BTreeMap::new();
+
+        for report in reports {
+            let retrieval_total = report.retrieval.len();
+            let retrieval_passed = report.retrieval.iter().filter(|check| check.passed).count();
+            record_stat(
+                &mut check_type_stats,
+                "retrieval",
+                retrieval_total,
+                retrieval_passed,
+            );
+
+            let extraction_total = report.extraction.len();
+            let extraction_passed = report.extraction.iter().filter(|check| check.passed).count();
+            record_stat(
+                &mut check_type_stats,
+                "extraction",
+                extraction_total,
+                extraction_passed,
+            );
+
+            let abstention_total = report.abstention.len();
+            let abstention_passed = report.abstention.iter().filter(|check| check.passed).count();
+            record_stat(
+                &mut check_type_stats,
+                "abstention",
+                abstention_total,
+                abstention_passed,
+            );
+
+            let scenario_total = retrieval_total + extraction_total + abstention_total;
+            let scenario_passed = retrieval_passed + extraction_passed + abstention_passed;
+            record_stat(
+                &mut category_stats,
+                &report.category,
+                scenario_total,
+                scenario_passed,
+            );
+
+            for check in report.retrieval.iter().chain(report.abstention.iter()) {
+                if let Some(route) = &check.route {
+                    record_stat(
+                        &mut intent_stats,
+                        &route.intent,
+                        1,
+                        usize::from(check.passed),
+                    );
+                }
+            }
+        }
+
+        finalize_stats(&mut check_type_stats);
+        finalize_stats(&mut category_stats);
+        finalize_stats(&mut intent_stats);
+        (check_type_stats, category_stats, intent_stats)
+    }
+
+    fn record_stat(
+        bucket: &mut BTreeMap<String, AggregateStats>,
+        key: &str,
+        total: usize,
+        passed: usize,
+    ) {
+        let entry = bucket.entry(key.to_string()).or_default();
+        entry.total_checks += total;
+        entry.passed_checks += passed;
+    }
+
+    fn finalize_stats(bucket: &mut BTreeMap<String, AggregateStats>) {
+        for stats in bucket.values_mut() {
+            stats.pass_rate = if stats.total_checks == 0 {
+                0.0
+            } else {
+                stats.passed_checks as f32 / stats.total_checks as f32
+            };
+        }
     }
 
     fn build_extractor_if_needed(

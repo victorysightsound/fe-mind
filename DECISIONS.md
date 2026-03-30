@@ -557,6 +557,71 @@ infrastructure into product architecture.
 
 ---
 
+## Decision 024: Engine-First Validation Before Benchmarking
+
+**Date:** 2026-03-30
+
+**Decision:** Treat FeMind's practical and real-world regression suites as the
+active tuning loop, and defer benchmark-style evaluation to milestone
+checkpoints after meaningful engine changes.
+
+**Context:** Benchmarking was useful for exposing broad retrieval ceilings, but
+it started to distort prioritization. FeMind's job is to become a strong
+production memory engine first, not to optimize its architecture around one
+external benchmark shape before core retrieval behavior is settled.
+
+**Rationale:**
+- The practical suite, live-library suite, and memloft-derived slice are closer
+  to the actual production scenarios FeMind is meant to serve
+- Engine-centric tests are cheaper to run, easier to debug, and easier to make
+  deterministic
+- They separate retrieval quality from answer-model and judge-model variance
+- They make it possible to add granular diagnostics and route-specific tuning
+  that benchmark harnesses do not provide
+
+**Consequences:**
+- `eval/practical/`, `eval/live-library/`, and `eval/memloft-slice` are the
+  primary tuning loop
+- Benchmark work is paused except for occasional milestone checks
+- Query-intent routing and richer retrieval diagnostics become higher priority
+  than benchmark-specific adaptation
+- Practical evaluation output should expose more granularity about why a check
+  failed and which retrieval path ran
+
+---
+
+## Decision 025: QueryIntent Routing With Explicit Temporal Policy
+
+**Date:** 2026-03-30
+
+**Decision:** Route retrieval through an inferred `QueryIntent` and attach an
+explicit temporal policy to the route instead of relying only on generic
+post-search heuristics.
+
+**Context:** FeMind already had lexical grounding, reranking, and some
+query-shape heuristics, but all queries still shared the same underlying search
+behavior. That made it harder to tune current-state, historical-state,
+aggregation, exact-detail, and abstention-style questions independently.
+
+**Rationale:**
+- Different question families need different retrieval behavior
+- Current-vs-historical questions need more than text matching; they need a
+  consistent recency direction in ranking
+- The practical and real-world suites are easier to debug when the routed plan
+  is explicit and serialized in the summary artifact
+
+**Consequences:**
+- FeMind now infers `general`, `exact-detail`, `current-state`,
+  `historical-state`, `aggregation`, and `abstention-risk` routes
+- Routes can change mode, depth, grounding, query alignment, rerank limits, and
+  temporal bias
+- Current-state routes mildly favor newer evidence by `created_at`
+- Historical-state routes mildly favor older evidence by `created_at`
+- Practical summaries now show the routed plan per retrieval-style check so
+  intent-level regressions can be tuned directly
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

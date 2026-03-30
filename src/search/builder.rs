@@ -46,6 +46,97 @@ pub enum SearchDepth {
     Forensic,
 }
 
+/// High-level query classes used to route retrieval behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum QueryIntent {
+    General,
+    ExactDetail,
+    CurrentState,
+    HistoricalState,
+    Aggregation,
+    AbstentionRisk,
+}
+
+impl QueryIntent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::ExactDetail => "exact-detail",
+            Self::CurrentState => "current-state",
+            Self::HistoricalState => "historical-state",
+            Self::Aggregation => "aggregation",
+            Self::AbstentionRisk => "abstention-risk",
+        }
+    }
+}
+
+/// Route-level temporal preference applied after first-stage retrieval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TemporalPolicy {
+    Neutral,
+    PreferNewer,
+    PreferOlder,
+}
+
+impl TemporalPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Neutral => "neutral",
+            Self::PreferNewer => "prefer-newer",
+            Self::PreferOlder => "prefer-older",
+        }
+    }
+}
+
+impl std::fmt::Display for TemporalPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::fmt::Display for QueryIntent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Effective routed search plan for a query.
+#[derive(Debug, Clone)]
+pub struct QueryRoute {
+    pub intent: QueryIntent,
+    pub mode: SearchMode,
+    pub depth: SearchDepth,
+    pub temporal_policy: TemporalPolicy,
+    pub strict_grounding: bool,
+    pub query_alignment: bool,
+    pub rerank_limit: usize,
+    pub note: &'static str,
+}
+
+impl QueryRoute {
+    pub fn mode_name(&self) -> &'static str {
+        match self.mode {
+            SearchMode::Keyword => "keyword",
+            SearchMode::Vector => "vector",
+            SearchMode::Hybrid => "hybrid",
+            SearchMode::Auto => "auto",
+            SearchMode::Exhaustive { .. } => "exhaustive",
+        }
+    }
+
+    pub fn depth_name(&self) -> &'static str {
+        match self.depth {
+            SearchDepth::Standard => "standard",
+            SearchDepth::Deep => "deep",
+            SearchDepth::Forensic => "forensic",
+        }
+    }
+
+    pub fn temporal_policy_name(&self) -> &'static str {
+        self.temporal_policy.as_str()
+    }
+}
+
 /// A scored search result containing the memory ID and relevance score.
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -84,6 +175,13 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     vector_search_mode: VectorSearchMode,
     strict_grounding_enabled: bool,
     query_alignment_enabled: bool,
+    routing_enabled: bool,
+    query_intent: Option<QueryIntent>,
+    mode_overridden: bool,
+    depth_overridden: bool,
+    strict_grounding_overridden: bool,
+    query_alignment_overridden: bool,
+    rerank_limit_overridden: bool,
     #[cfg(feature = "ann")]
     ann_index: Option<Arc<crate::search::AnnIndex>>,
     _phantom: PhantomData<T>,
@@ -110,6 +208,13 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             vector_search_mode: VectorSearchMode::default(),
             strict_grounding_enabled: true,
             query_alignment_enabled: true,
+            routing_enabled: true,
+            query_intent: None,
+            mode_overridden: false,
+            depth_overridden: false,
+            strict_grounding_overridden: false,
+            query_alignment_overridden: false,
+            rerank_limit_overridden: false,
             #[cfg(feature = "ann")]
             ann_index: None,
             _phantom: PhantomData,
@@ -137,6 +242,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Set the maximum number of candidates to pass through the reranker.
     pub fn with_rerank_limit(mut self, limit: usize) -> Self {
         self.rerank_limit = limit;
+        self.rerank_limit_overridden = true;
         self
     }
 
@@ -149,12 +255,32 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Enable or disable strict post-search grounding filters.
     pub fn with_strict_grounding(mut self, enabled: bool) -> Self {
         self.strict_grounding_enabled = enabled;
+        self.strict_grounding_overridden = true;
         self
     }
 
     /// Enable or disable query-shape-aware reranking heuristics.
     pub fn with_query_alignment(mut self, enabled: bool) -> Self {
         self.query_alignment_enabled = enabled;
+        self.query_alignment_overridden = true;
+        self
+    }
+
+    /// Attach default grounding behavior without marking it as a caller override.
+    pub(crate) fn with_default_strict_grounding(mut self, enabled: bool) -> Self {
+        self.strict_grounding_enabled = enabled;
+        self
+    }
+
+    /// Attach default query-alignment behavior without marking it as a caller override.
+    pub(crate) fn with_default_query_alignment(mut self, enabled: bool) -> Self {
+        self.query_alignment_enabled = enabled;
+        self
+    }
+
+    /// Attach the engine default rerank limit without marking it as a caller override.
+    pub(crate) fn with_default_rerank_limit(mut self, limit: usize) -> Self {
+        self.rerank_limit = limit;
         self
     }
 
@@ -168,13 +294,126 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Set the search mode.
     pub fn mode(mut self, mode: SearchMode) -> Self {
         self.mode = mode;
+        self.mode_overridden = true;
         self
     }
 
     /// Set the search depth (which tiers to search).
     pub fn depth(mut self, depth: SearchDepth) -> Self {
         self.depth = depth;
+        self.depth_overridden = true;
         self
+    }
+
+    /// Enable or disable query-intent routing.
+    pub fn with_routing(mut self, enabled: bool) -> Self {
+        self.routing_enabled = enabled;
+        self
+    }
+
+    /// Override the inferred query intent.
+    pub fn with_query_intent(mut self, intent: QueryIntent) -> Self {
+        self.query_intent = Some(intent);
+        self
+    }
+
+    /// Return the effective routed plan for this query.
+    pub fn query_route(&self) -> QueryRoute {
+        let intent = self.query_intent.unwrap_or_else(|| infer_query_intent(&self.query));
+        if !self.routing_enabled {
+            return QueryRoute {
+                intent,
+                mode: self.mode.clone(),
+                depth: self.depth,
+                temporal_policy: TemporalPolicy::Neutral,
+                strict_grounding: self.strict_grounding_enabled,
+                query_alignment: self.query_alignment_enabled,
+                rerank_limit: self.rerank_limit,
+                note: "routing disabled; using configured search settings",
+            };
+        }
+
+        let mode = if self.mode_overridden {
+            self.mode.clone()
+        } else {
+            match intent {
+                QueryIntent::AbstentionRisk => SearchMode::Keyword,
+                _ => self.mode.clone(),
+            }
+        };
+
+        let depth = if self.depth_overridden {
+            self.depth
+        } else {
+            match intent {
+                QueryIntent::HistoricalState | QueryIntent::Aggregation => SearchDepth::Deep,
+                _ => self.depth,
+            }
+        };
+
+        let strict_grounding = if self.strict_grounding_overridden {
+            self.strict_grounding_enabled
+        } else {
+            matches!(intent, QueryIntent::ExactDetail | QueryIntent::AbstentionRisk)
+        };
+
+        let temporal_policy = match intent {
+            QueryIntent::CurrentState => TemporalPolicy::PreferNewer,
+            QueryIntent::HistoricalState => TemporalPolicy::PreferOlder,
+            QueryIntent::General
+            | QueryIntent::ExactDetail
+            | QueryIntent::Aggregation
+            | QueryIntent::AbstentionRisk => TemporalPolicy::Neutral,
+        };
+
+        let query_alignment = if self.query_alignment_overridden {
+            self.query_alignment_enabled
+        } else {
+            !matches!(intent, QueryIntent::Aggregation | QueryIntent::AbstentionRisk)
+        };
+
+        let rerank_limit = if self.rerank_limit_overridden {
+            self.rerank_limit
+        } else {
+            match intent {
+                QueryIntent::ExactDetail => self.rerank_limit.clamp(8, 16),
+                QueryIntent::CurrentState | QueryIntent::HistoricalState => {
+                    self.rerank_limit.max(30)
+                }
+                QueryIntent::Aggregation | QueryIntent::AbstentionRisk => 0,
+                QueryIntent::General => self.rerank_limit,
+            }
+        };
+
+        let note = match intent {
+            QueryIntent::General => "default hybrid-style retrieval",
+            QueryIntent::ExactDetail => {
+                "exact-detail query; keep grounding and compact reranking"
+            }
+            QueryIntent::CurrentState => {
+                "current-state query; widen reranking and favor current-state evidence"
+            }
+            QueryIntent::HistoricalState => {
+                "historical-state query; widen reranking and favor earlier-state evidence"
+            }
+            QueryIntent::Aggregation => {
+                "aggregation query; preserve broad coverage and bypass reranking"
+            }
+            QueryIntent::AbstentionRisk => {
+                "abstention-risk query; use keyword-first strict grounding"
+            }
+        };
+
+        QueryRoute {
+            intent,
+            mode,
+            depth,
+            temporal_policy,
+            strict_grounding,
+            query_alignment,
+            rerank_limit,
+            note,
+        }
     }
 
     /// Set the maximum number of results to return.
@@ -222,31 +461,32 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Synchronous — uses pre-computed embeddings from the background indexer
     /// for vector search, not inline inference.
     pub fn execute(self) -> Result<Vec<SearchResult>> {
-        match &self.mode {
-            SearchMode::Keyword => self.execute_keyword(),
-            SearchMode::Vector => self.execute_vector(),
-            SearchMode::Hybrid => self.execute_hybrid(),
-            SearchMode::Auto => self.execute_auto(),
+        let route = self.query_route();
+        match &route.mode {
+            SearchMode::Keyword => self.execute_keyword(&route),
+            SearchMode::Vector => self.execute_vector(&route),
+            SearchMode::Hybrid => self.execute_hybrid(&route),
+            SearchMode::Auto => self.execute_auto(&route),
             SearchMode::Exhaustive { min_score } => {
                 let threshold = *min_score;
-                self.execute_exhaustive(threshold)
+                self.execute_exhaustive(&route, threshold)
             }
         }
     }
 
-    fn execute_auto(&self) -> Result<Vec<SearchResult>> {
+    fn execute_auto(&self, route: &QueryRoute) -> Result<Vec<SearchResult>> {
         if self.vector_search_mode == VectorSearchMode::Off || self.embedding.is_none() {
-            self.execute_keyword()
+            self.execute_keyword(route)
         } else {
-            self.execute_hybrid()
+            self.execute_hybrid(route)
         }
     }
 
     /// Execute keyword-only search via FTS5.
-    fn execute_keyword(&self) -> Result<Vec<SearchResult>> {
+    fn execute_keyword(&self, route: &QueryRoute) -> Result<Vec<SearchResult>> {
         let category_filter = self.category.as_deref();
         let type_filter = self.memory_type.map(|t| t.as_str());
-        let min_tier = self.depth_to_min_tier();
+        let min_tier = self.depth_to_min_tier(route.depth);
 
         let fts_results = FtsSearch::search_with_tiers(
             self.db,
@@ -256,9 +496,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             type_filter,
             min_tier,
         )?;
-        let fts_results = self.maybe_rerank_results(fts_results)?;
+        let fts_results = self.maybe_rerank_results(fts_results, route.rerank_limit)?;
 
         let mut results = self.apply_filters(fts_results);
+        apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
 
         // Apply min_score filter
         if let Some(threshold) = self.min_score {
@@ -270,10 +511,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     }
 
     /// Execute exhaustive search — return all matches above threshold.
-    fn execute_exhaustive(&self, min_score: f32) -> Result<Vec<SearchResult>> {
+    fn execute_exhaustive(&self, route: &QueryRoute, min_score: f32) -> Result<Vec<SearchResult>> {
         let category_filter = self.category.as_deref();
         let type_filter = self.memory_type.map(|t| t.as_str());
-        let min_tier = self.depth_to_min_tier();
+        let min_tier = self.depth_to_min_tier(route.depth);
 
         let fts_results = FtsSearch::search_with_tiers(
             self.db,
@@ -283,34 +524,42 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             type_filter,
             min_tier,
         )?;
-        let fts_results = self.maybe_rerank_results(fts_results)?;
+        let fts_results = self.maybe_rerank_results(fts_results, route.rerank_limit)?;
 
         let mut results = self.apply_filters(fts_results);
+        apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         results.retain(|r| r.score >= min_score);
         Ok(results)
     }
 
     /// Execute vector-only search.
-    fn execute_vector(&self) -> Result<Vec<SearchResult>> {
+    fn execute_vector(&self, route: &QueryRoute) -> Result<Vec<SearchResult>> {
         if self.vector_search_mode == VectorSearchMode::Off {
-            return self.execute_keyword();
+            return self.execute_keyword(route);
         }
 
         let Some(ref embedding) = self.embedding else {
             // No embedding backend — fall back to keyword
-            return self.execute_keyword();
+            return self.execute_keyword(route);
         };
 
         if !embedding.is_available() {
-            return self.execute_keyword();
+            return self.execute_keyword(route);
         }
 
         let query_vec = embedding.embed_query(&self.query)?;
         let model_names = embedding.compatibility_model_names();
         let vector_results = self.vector_results(&query_vec, &model_names, self.limit * 3)?;
-        let vector_results = self.maybe_rerank_results(vector_results)?;
+        let vector_results = self.maybe_rerank_results(vector_results, route.rerank_limit)?;
 
         let mut results = self.apply_filters(vector_results);
+        apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
+        if route.strict_grounding {
+            apply_strict_detail_query_filter(self.db, &self.query, &mut results);
+        }
+        if route.query_alignment {
+            rerank_for_query_alignment(self.db, &self.query, &mut results);
+        }
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
         }
@@ -319,22 +568,22 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     }
 
     /// Execute hybrid search: FTS5 + vector merged via RRF.
-    fn execute_hybrid(&self) -> Result<Vec<SearchResult>> {
+    fn execute_hybrid(&self, route: &QueryRoute) -> Result<Vec<SearchResult>> {
         if self.vector_search_mode == VectorSearchMode::Off {
-            return self.execute_keyword();
+            return self.execute_keyword(route);
         }
 
         let Some(ref embedding) = self.embedding else {
-            return self.execute_keyword();
+            return self.execute_keyword(route);
         };
 
         if !embedding.is_available() {
-            return self.execute_keyword();
+            return self.execute_keyword(route);
         }
 
         let category_filter = self.category.as_deref();
         let type_filter = self.memory_type.map(|t| t.as_str());
-        let min_tier = self.depth_to_min_tier();
+        let min_tier = self.depth_to_min_tier(route.depth);
 
         // FTS5 keyword search (OR mode + stop-word removal, over-fetch 3x for RRF)
         let fts_results = FtsSearch::search_or_mode(
@@ -353,9 +602,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         // Merge via RRF
         let merged = rrf_merge(&fts_results, &vector_results, &self.query, self.limit * 2);
-        let merged = self.maybe_rerank_results(merged)?;
+        let merged = self.maybe_rerank_results(merged, route.rerank_limit)?;
 
         let mut results = self.apply_filters(merged);
+        apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
 
         // Reranking disabled — RRF + vector weighting provides better ranking
         // rerank_results(self.db, &mut results, &self.query);
@@ -363,10 +613,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         // Near-duplicate filtering: remove results >0.95 similar to higher-ranked ones
         deduplicate_by_vector_similarity(self.db, &mut results, &model_names, 0.95);
 
-        if self.strict_grounding_enabled {
+        if route.strict_grounding {
             apply_strict_detail_query_filter(self.db, &self.query, &mut results);
         }
-        if self.query_alignment_enabled {
+        if route.query_alignment {
             rerank_for_query_alignment(self.db, &self.query, &mut results);
         }
 
@@ -435,23 +685,27 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     }
 
     /// Convert search depth to minimum tier filter.
-    fn depth_to_min_tier(&self) -> Option<i32> {
-        match self.depth {
+    fn depth_to_min_tier(&self, depth: SearchDepth) -> Option<i32> {
+        match depth {
             SearchDepth::Standard => Some(1), // Tiers 1+2 (summaries and facts)
             SearchDepth::Deep => Some(0),     // All tiers including raw episodes
             SearchDepth::Forensic => None, // No filter (same as Deep, but conceptually includes archived)
         }
     }
 
-    fn maybe_rerank_results(&self, results: Vec<FtsResult>) -> Result<Vec<FtsResult>> {
+    fn maybe_rerank_results(
+        &self,
+        results: Vec<FtsResult>,
+        rerank_limit: usize,
+    ) -> Result<Vec<FtsResult>> {
         let Some(reranker) = self.reranker.as_ref() else {
             return Ok(results);
         };
-        if self.rerank_limit == 0 || results.len() < 2 {
+        if rerank_limit == 0 || results.len() < 2 {
             return Ok(results);
         }
 
-        let rerank_count = self.rerank_limit.min(results.len());
+        let rerank_count = rerank_limit.min(results.len());
         let mut candidates = Vec::with_capacity(rerank_count);
         for result in results.iter().take(rerank_count) {
             let text = self.db.with_reader(|conn| {
@@ -696,6 +950,64 @@ fn deduplicate_by_vector_similarity(
     });
 }
 
+fn apply_temporal_route_bias(
+    db: &Database,
+    results: &mut [SearchResult],
+    temporal_policy: TemporalPolicy,
+) {
+    if results.len() < 2 || matches!(temporal_policy, TemporalPolicy::Neutral) {
+        return;
+    }
+
+    let timestamps: Vec<Option<i64>> = results
+        .iter()
+        .map(|result| {
+            db.with_reader(|conn| {
+                conn.query_row(
+                    "SELECT created_at FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(crate::error::FemindError::Database)
+            })
+            .ok()
+            .and_then(|value| {
+                chrono::DateTime::parse_from_rfc3339(&value)
+                    .ok()
+                    .map(|dt| dt.timestamp())
+            })
+        })
+        .collect();
+
+    let Some(min_ts) = timestamps.iter().flatten().copied().min() else {
+        return;
+    };
+    let Some(max_ts) = timestamps.iter().flatten().copied().max() else {
+        return;
+    };
+    if min_ts == max_ts {
+        return;
+    }
+
+    let spread = (max_ts - min_ts) as f32;
+    for (result, maybe_ts) in results.iter_mut().zip(timestamps.iter()) {
+        let Some(ts) = *maybe_ts else { continue };
+        let normalized_recent = (ts - min_ts) as f32 / spread;
+        let multiplier = match temporal_policy {
+            TemporalPolicy::Neutral => 1.0,
+            TemporalPolicy::PreferNewer => 0.9 + 0.2 * normalized_recent,
+            TemporalPolicy::PreferOlder => 0.9 + 0.2 * (1.0 - normalized_recent),
+        };
+        result.score *= multiplier;
+    }
+
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
 pub(crate) fn apply_strict_detail_query_filter(
     db: &Database,
     query: &str,
@@ -815,6 +1127,22 @@ pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
         || query_mentions_artifact_detail(query)
 }
 
+pub fn infer_query_intent(query: &str) -> QueryIntent {
+    if query_requests_aggregation(query) {
+        QueryIntent::Aggregation
+    } else if query_requests_abstention_risk(query) {
+        QueryIntent::AbstentionRisk
+    } else if query_requires_strict_grounding(query) {
+        QueryIntent::ExactDetail
+    } else if query_requests_historical_state(query) {
+        QueryIntent::HistoricalState
+    } else if query_requests_current_state(query) {
+        QueryIntent::CurrentState
+    } else {
+        QueryIntent::General
+    }
+}
+
 pub(crate) fn lexical_grounding_ok(query: &str, text: &str) -> bool {
     if query_asks_for_combined_capability(query) && text_implies_exclusion(text) {
         return query_is_yes_no(query);
@@ -915,6 +1243,7 @@ fn query_alignment_multiplier(query: &str, text: &str) -> f32 {
     let normalized_query = normalize_text(query);
     let normalized_text = normalize_text(text);
     let lowered_text = text.to_lowercase();
+    let intent = infer_query_intent(query);
 
     let mut multiplier = 1.0_f32;
 
@@ -972,6 +1301,37 @@ fn query_alignment_multiplier(query: &str, text: &str) -> f32 {
         } else {
             0.78
         };
+    }
+
+    match intent {
+        QueryIntent::CurrentState => {
+            let current = text_indicates_current_state(&normalized_text);
+            let historical = text_indicates_historical_state(&normalized_text);
+            if current {
+                multiplier *= 1.55;
+            } else if historical {
+                multiplier *= 0.8;
+            }
+        }
+        QueryIntent::HistoricalState => {
+            let historical = text_indicates_historical_state(&normalized_text);
+            let current = text_indicates_current_state(&normalized_text);
+            if historical {
+                multiplier *= 1.5;
+            } else if current {
+                multiplier *= 0.82;
+            }
+        }
+        QueryIntent::AbstentionRisk => {
+            multiplier *= if text_implies_exclusion(&normalized_text)
+                || text_indicates_negative_limit(&normalized_text)
+            {
+                1.1
+            } else {
+                0.95
+            };
+        }
+        QueryIntent::Aggregation | QueryIntent::ExactDetail | QueryIntent::General => {}
     }
 
     multiplier
@@ -1187,11 +1547,108 @@ fn query_requests_support_state(query: &str) -> bool {
         || normalized.contains("stateful")
 }
 
+fn query_requests_aggregation(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    let tokens: Vec<_> = normalized.split_whitespace().collect();
+    let rollup_nouns = |token: &str| {
+        matches!(
+            token,
+            "sessions"
+                | "runs"
+                | "times"
+                | "entries"
+                | "items"
+                | "questions"
+                | "scenarios"
+                | "checks"
+                | "memories"
+                | "results"
+        )
+    };
+    let totalization = tokens.contains(&"sum")
+        || (tokens.contains(&"count") && tokens.iter().any(|token| rollup_nouns(token)))
+        || (tokens.contains(&"total")
+            && tokens
+                .iter()
+                .any(|token| matches!(*token, "number" | "count") || rollup_nouns(token)));
+
+    tokens.windows(2).any(|pair| pair == ["how", "many"])
+        || tokens.windows(2).any(|pair| pair == ["list", "all"])
+        || tokens.windows(2).any(|pair| pair == ["which", "ones"])
+        || totalization
+        || (tokens.contains(&"all") && tokens.contains(&"sessions"))
+}
+
+fn query_requests_abstention_risk(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    normalized.contains("ever mention")
+        || normalized.contains("ever say")
+        || normalized.contains("did i ever")
+        || normalized.contains("did we ever")
+        || normalized.contains("if any")
+        || normalized.contains("at all")
+        || normalized.contains("anything about")
+}
+
+fn query_requests_current_state(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    normalized.contains("current")
+        || normalized.contains("currently")
+        || normalized.contains("right now")
+        || normalized.contains("latest")
+        || normalized.contains("today")
+        || normalized.contains("active")
+        || normalized.contains("going with")
+        || normalized.contains("using now")
+        || normalized.contains("preferred now")
+        || normalized.contains("final")
+}
+
+fn query_requests_historical_state(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    normalized.contains("earlier")
+        || normalized.contains("previous")
+        || normalized.contains("previously")
+        || normalized.contains("before")
+        || normalized.contains("prior")
+        || normalized.contains("used to")
+        || normalized.contains("originally")
+        || normalized.contains("initial")
+        || normalized.contains("formerly")
+        || normalized.contains("at first")
+}
+
 fn text_indicates_support_state(normalized_text: &str, lowered_text: &str) -> bool {
     normalized_text.contains("enabled")
         || normalized_text.contains("stateful")
         || normalized_text.contains("support")
         || lowered_text.contains("codex-cli")
+}
+
+fn text_indicates_current_state(normalized_text: &str) -> bool {
+    normalized_text.contains("current")
+        || normalized_text.contains("currently")
+        || normalized_text.contains("right now")
+        || normalized_text.contains("latest")
+        || normalized_text.contains("active")
+        || normalized_text.contains("preferred")
+        || normalized_text.contains("prefer")
+        || normalized_text.contains("going with")
+        || normalized_text.contains("using now")
+        || normalized_text.contains("final")
+}
+
+fn text_indicates_historical_state(normalized_text: &str) -> bool {
+    normalized_text.contains("earlier")
+        || normalized_text.contains("previous")
+        || normalized_text.contains("previously")
+        || normalized_text.contains("before")
+        || normalized_text.contains("prior")
+        || normalized_text.contains("used to")
+        || normalized_text.contains("originally")
+        || normalized_text.contains("initial")
+        || normalized_text.contains("formerly")
+        || normalized_text.contains("at first")
 }
 
 fn query_requests_next_step(query: &str) -> bool {
@@ -1593,5 +2050,213 @@ mod tests {
             "Update: for benchmark and evaluation workflows, prefer DeepInfra MiniLM embeddings because they are much faster and cheap enough.";
 
         assert!(lexical_grounding_ok(query, supporting_hit));
+    }
+
+    #[test]
+    fn infer_query_intent_covers_core_routes() {
+        assert_eq!(
+            infer_query_intent("How many practical scenarios are there?"),
+            QueryIntent::Aggregation
+        );
+        assert_eq!(
+            infer_query_intent("What was the exact total token cost of the last Nemotron run?"),
+            QueryIntent::ExactDetail
+        );
+        assert_eq!(
+            infer_query_intent("What exact token count threshold triggers the lexical-grounding filter?"),
+            QueryIntent::ExactDetail
+        );
+        assert_eq!(
+            infer_query_intent("Did we ever mention Redis at all?"),
+            QueryIntent::AbstentionRisk
+        );
+        assert_eq!(
+            infer_query_intent("What is the current preferred embedding path?"),
+            QueryIntent::CurrentState
+        );
+        assert_eq!(
+            infer_query_intent("What did we use before the rename?"),
+            QueryIntent::HistoricalState
+        );
+        assert_eq!(
+            infer_query_intent("What exact plist filename was used?"),
+            QueryIntent::ExactDetail
+        );
+        assert_eq!(
+            infer_query_intent(
+                "What exact dataset hash value is stored in cache_meta for the current benchmark corpus?"
+            ),
+            QueryIntent::ExactDetail
+        );
+        assert_eq!(
+            infer_query_intent(
+                "What exact request header value was sent in the failing initialize call before the transport fix?"
+            ),
+            QueryIntent::ExactDetail
+        );
+    }
+
+    #[test]
+    fn query_route_adjusts_plan_for_abstention_queries() {
+        let db = setup();
+        let route = SearchBuilder::<TestMem>::new(&db, "Did we ever mention Redis at all?")
+            .query_route();
+        assert_eq!(route.intent, QueryIntent::AbstentionRisk);
+        assert!(matches!(route.mode, SearchMode::Keyword));
+        assert!(route.strict_grounding);
+        assert!(!route.query_alignment);
+        assert_eq!(route.rerank_limit, 0);
+    }
+
+    #[test]
+    fn query_route_widens_reranking_for_state_queries() {
+        let db = setup();
+        let current = SearchBuilder::<TestMem>::new(&db, "What is the current preferred path?")
+            .query_route();
+        let historical = SearchBuilder::<TestMem>::new(&db, "What was the preferred path before?")
+            .query_route();
+        assert_eq!(current.intent, QueryIntent::CurrentState);
+        assert_eq!(historical.intent, QueryIntent::HistoricalState);
+        assert_eq!(current.temporal_policy, TemporalPolicy::PreferNewer);
+        assert_eq!(historical.temporal_policy, TemporalPolicy::PreferOlder);
+        assert!(current.query_alignment);
+        assert!(historical.query_alignment);
+        assert_eq!(current.rerank_limit, 30);
+        assert_eq!(historical.rerank_limit, 30);
+    }
+
+    #[test]
+    fn query_alignment_boosts_current_state_text() {
+        let query = "What is the current preferred embedding path?";
+        let current_hit = "The current preferred path is remote MiniLM with local fallback.";
+        let historical_hit = "Previously we used the earlier local-only path before the switch.";
+        assert!(
+            query_alignment_multiplier(query, current_hit)
+                > query_alignment_multiplier(query, historical_hit)
+        );
+    }
+
+    #[test]
+    fn query_alignment_boosts_historical_state_text() {
+        let query = "What did we use before the rename?";
+        let historical_hit =
+            "Before the rename, the initial plan used mindcore and local-only retrieval.";
+        let current_hit = "The current path uses femind with remote fallback.";
+        assert!(
+            query_alignment_multiplier(query, historical_hit)
+                > query_alignment_multiplier(query, current_hit)
+        );
+    }
+
+    #[test]
+    fn temporal_bias_prefers_newer_for_current_state_queries() {
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let older = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "preferred path was local cpu".to_string(),
+                    category: None,
+                    created_at: Utc::now() - chrono::Duration::days(10),
+                },
+            )
+            .expect("store old");
+        let newer = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "current preferred path is remote fallback".to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store new");
+
+        let older_id = match older {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let newer_id = match newer {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        let mut results = vec![
+            SearchResult {
+                memory_id: older_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: newer_id,
+                score: 1.0,
+            },
+        ];
+        apply_temporal_route_bias(&db, &mut results, TemporalPolicy::PreferNewer);
+        assert_eq!(results[0].memory_id, newer_id);
+    }
+
+    #[test]
+    fn temporal_bias_prefers_older_for_historical_queries() {
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let older = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "before the rename we used mindcore".to_string(),
+                    category: None,
+                    created_at: Utc::now() - chrono::Duration::days(30),
+                },
+            )
+            .expect("store old");
+        let newer = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "current repo name is fe mind".to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store new");
+
+        let older_id = match older {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let newer_id = match newer {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        let mut results = vec![
+            SearchResult {
+                memory_id: newer_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: older_id,
+                score: 1.0,
+            },
+        ];
+        apply_temporal_route_bias(&db, &mut results, TemporalPolicy::PreferOlder);
+        assert_eq!(results[0].memory_id, older_id);
     }
 }

@@ -360,8 +360,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let mut builder = SearchBuilder::new(&self.db, query)
             .with_scoring(Arc::clone(&self.scoring))
             .with_vector_search_mode(self.config.vector_search_mode)
-            .with_strict_grounding(self.config.strict_grounding_enabled)
-            .with_query_alignment(self.config.query_alignment_enabled);
+            .with_default_strict_grounding(self.config.strict_grounding_enabled)
+            .with_default_query_alignment(self.config.query_alignment_enabled)
+            .with_default_rerank_limit(self.config.rerank_candidate_limit);
         if self.config.vector_search_mode != VectorSearchMode::Off {
             if let Some(ref embedding) = self.embedding {
                 builder = builder.with_embedding(Arc::clone(embedding));
@@ -369,9 +370,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
         if self.config.reranking_runtime != RerankerRuntime::Off {
             if let Some(ref reranker) = self.reranker {
-                builder = builder
-                    .with_reranker(Arc::clone(reranker))
-                    .with_rerank_limit(self.config.rerank_candidate_limit);
+                builder = builder.with_reranker(Arc::clone(reranker));
             }
         }
         #[cfg(feature = "ann")]

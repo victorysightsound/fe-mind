@@ -22,6 +22,13 @@ that are useful to an actual application or developer workflow?
 Benchmark datasets remain useful for regression and comparison, but they are
 not the primary design target.
 
+Current policy is explicit:
+
+- FeMind tuning is engine-first
+- `eval/practical/`, `eval/live-library/`, and `eval/memloft-slice` are the
+  active development loop
+- benchmark-style runs are milestone scoreboards only, not the daily tuning path
+
 ## Practical Eval Categories
 
 The curated eval set should cover these categories:
@@ -147,6 +154,22 @@ the summary artifact, set:
 ```bash
 FEMIND_EVAL_EXPLAIN_FAILURES=1
 ```
+
+The summary now also records:
+
+- check-type pass-rate breakdowns
+- scenario-category pass-rate breakdowns
+- query-intent pass-rate breakdowns
+- per-check routed search plans showing inferred intent, mode, depth,
+  temporal policy, grounding, query-alignment, and rerank settings
+
+That routed plan is now part of the actual retrieval behavior, not just a
+diagnostic label:
+
+- current-state routes mildly favor newer evidence by `created_at`
+- historical-state routes mildly favor older evidence by `created_at`
+- exact-detail and abstention-focused routes stay temporally neutral unless a
+  caller overrides the search settings directly
 
 Graph-focused follow-up validation can be enabled explicitly:
 

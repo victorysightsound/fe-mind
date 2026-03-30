@@ -66,6 +66,9 @@ pub mod prelude {
     pub use crate::engine::{MemoryEngine, VectorSearchMode};
     pub use crate::error::{FemindError, Result};
     pub use crate::memory::store::StoreResult;
-    pub use crate::search::{SearchBuilder, SearchDepth, SearchMode, SearchResult};
+    pub use crate::search::{
+        QueryIntent, QueryRoute, SearchBuilder, SearchDepth, SearchMode, SearchResult,
+        TemporalPolicy,
+    };
     pub use crate::traits::{MemoryMeta, MemoryRecord, MemoryType};
 }

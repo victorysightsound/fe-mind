@@ -46,6 +46,17 @@ The practical live-validation path is now established and repeatable:
   available
 - current remote-fallback retrieval baselines are `9/9` practical, `58/58`
   live-library, and `90/90` memloft-slice
+- FeMind is currently using an engine-first validation loop: `eval/practical`,
+  `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
+  benchmark-style evaluation is deferred to milestone checkpoints after
+  meaningful engine changes
+- practical evaluation summaries now include pass-rate breakdowns by check type,
+  scenario category, and inferred query intent, along with the routed search
+  plan used for each retrieval-style check
+- routed retrieval now includes an explicit temporal policy:
+  current-state queries mildly favor newer evidence, historical-state queries
+  mildly favor older evidence, and exact-detail / abstention routes stay
+  temporally neutral unless the caller overrides them
 
 ## Migration
 
@@ -57,6 +68,7 @@ Key maintainer references:
 
 - `ARCHITECTURE.md` — full crate structure and API design
 - `RESEARCH.md` — research, landscape analysis, and specification
+- `specs/TOP_TIER_MEMORY_ROADMAP_2026-03-30.md` — next-step research roadmap for routed, temporal, and high-precision retrieval
 - `DECISIONS.md` — architectural decisions log
 - `specs/REMOTE_MINILM_BACKEND.md` — remote/local-network MiniLM backend contract
 - `PRACTICAL_EVAL.md` — real-world validation plan and practical eval categories

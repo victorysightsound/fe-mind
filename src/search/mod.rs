@@ -7,7 +7,10 @@ pub mod vector;
 
 #[cfg(feature = "ann")]
 pub use ann::AnnIndex;
-pub use builder::{SearchBuilder, SearchDepth, SearchMode, SearchResult};
+pub use builder::{
+    QueryIntent, QueryRoute, SearchBuilder, SearchDepth, SearchMode, SearchResult,
+    TemporalPolicy,
+};
 pub use fts5::{FtsResult, FtsSearch};
 pub use hybrid::rrf_merge;
 pub use vector::VectorSearch;

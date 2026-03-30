@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-16
 **Status:** Research complete. Findings incorporated into the current v0.2.0 crate.
-**Related:** `ARCHITECTURE.md` (implementation spec), `DECISIONS.md` (decisions 001-016), `research/gap_analysis_2026_03.md` (March 2026 gap analysis)
+**Related:** `ARCHITECTURE.md` (implementation spec), `DECISIONS.md` (decisions 001-016), `research/gap_analysis_2026_03.md` (March 2026 gap analysis), `specs/TOP_TIER_MEMORY_ROADMAP_2026-03-30.md` (post-v0.2 retrieval and memory roadmap)
 
 ---
 
