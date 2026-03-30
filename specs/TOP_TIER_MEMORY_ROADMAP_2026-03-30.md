@@ -35,6 +35,9 @@ As of the current FeMind pass, the first layer of that roadmap is already in pla
   distinct-match accounting instead of relying only on plain top-k retrieval
 - a deterministic answer-composition layer is now live for yes/no, stateful,
   and aggregation-style questions
+- deterministic composition now also records confidence, abstention, and
+  rationale, and exact-detail routes can distinguish unsupported details from
+  total absence of evidence
 - `valid_at(...)` now enforces validity windows during retrieval
 - practical scenarios can now seed explicit supersession/conflict links, so
   linked state-history behavior is part of the real regression loop

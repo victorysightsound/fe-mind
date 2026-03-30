@@ -320,6 +320,18 @@
         "source": "ops-note",
         "memory_type": "procedural",
         "text": "The launchd agent file that keeps the FeMind tunnel alive is /Users/johndeaton/Library/LaunchAgents/com.user.femind-embed-tunnel.plist."
+      },
+      {
+        "timestamp": "2026-03-29T11:40:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "text": "The Windows scheduled task named FemindNativeStartup keeps the native FeMind startup path alive."
+      },
+      {
+        "timestamp": "2026-03-29T11:41:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "text": "A Windows scheduled task keeps the native FeMind startup path alive, but the exact task GUID was never recorded."
       }
     ],
     "retrieval_checks": [

@@ -845,6 +845,51 @@ once retrieval had already succeeded.
 
 ---
 
+## Decision 032: Exact-Detail Composition Must Distinguish Unsupported Detail from No Evidence
+
+**Date:** 2026-03-30
+
+**Decision:** Extend deterministic answer composition so exact-detail routes
+report confidence, abstention, and rationale, and let strict-detail composition
+run a broader fallback evidence pass before concluding that no supporting
+evidence exists.
+
+**Context:** The practical harness could already validate deterministic
+composed answers, but it still treated abstention as "no hits surfaced." That
+was too weak for provenance-heavy questions. FeMind needed to prove a harder
+case: related Windows task evidence is present, but the exact task GUID was
+never recorded. In that case the engine should abstain because the detail is
+unsupported, not because retrieval failed completely.
+
+**Rationale:**
+- Production memory systems need to distinguish:
+  - no evidence exists
+  - nearby evidence exists but the requested exact detail was never recorded
+  - nearby evidence exists but the surfaced answer still is not grounded enough
+- Provenance-heavy questions are common in real developer workflows: paths,
+  ports, filenames, service names, and identifiers
+- The practical artifacts need richer engine-side diagnostics so maintainers can
+  tune retrieval versus composition separately
+
+**Consequences:**
+- `ComposedAnswerResult` now includes `confidence`, `abstained`, and
+  `rationale`
+- Practical retrieval and abstention checks now record those fields in the
+  summary artifact
+- Abstention checks now validate the engine’s abstain decision instead of
+  requiring empty retrieval
+- Exact-detail composition now performs a broader OR-style fallback retrieval
+  pass with strict grounding disabled before it decides between:
+  - `no-supporting-evidence`
+  - `unsupported-detail`
+  - `insufficient-grounding`
+- The practical provenance scenario now includes nearby Windows task evidence
+  plus an explicit "GUID was never recorded" note
+- Remote-GPU validation remains green after the change:
+  practical `15/15`, live-library `58/58`, memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

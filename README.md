@@ -67,6 +67,9 @@ The practical live-validation path is now established and repeatable:
 - practical eval now also records a deterministic composed answer for each
   retrieval-style check, so yes/no, state, and aggregation behavior can be
   tuned at the engine level instead of only by inspecting raw hits
+- composed answers now also record confidence, abstention, and rationale so
+  maintainers can see when FeMind answered confidently, when it abstained, and
+  why
 - routed retrieval now includes an explicit temporal policy:
   current-state queries mildly favor newer evidence, historical-state queries
   mildly favor older evidence, and exact-detail / abstention routes stay
@@ -83,6 +86,11 @@ The practical live-validation path is now established and repeatable:
   competing records remain textually relevant enough to surface together
 - `SearchBuilder::valid_at(...)` is now enforced against stored `valid_from` /
   `valid_until` windows instead of being a no-op
+- exact-detail composition now performs a broader evidence fallback when strict
+  grounding filters everything out, which lets FeMind distinguish:
+  - no evidence at all
+  - related evidence exists but the exact detail was never recorded
+  - related evidence exists but the surfaced detail still is not grounded
 
 ## Migration
 

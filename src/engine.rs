@@ -7,13 +7,13 @@ use sha2::Digest;
 use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
 use crate::embeddings::EmbeddingBackend;
 use crate::error::{FemindError, Result};
-use crate::memory::store::StoreResult;
 use crate::memory::MemoryStore;
+use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{CompositeScorer, ImportanceScorer, MemoryTypeScorer, RecencyScorer};
 use crate::search::builder::SearchBuilder;
-use crate::storage::migrations;
 use crate::storage::Database;
+use crate::storage::migrations;
 use crate::traits::{MemoryRecord, RerankerBackend, ScoringStrategy};
 
 /// Result of a store_with_extraction() operation.
@@ -66,12 +66,36 @@ pub struct ComposedAnswerResult {
     pub answer: String,
     /// Composition strategy used to build the answer.
     pub kind: &'static str,
+    /// Confidence level for the composed answer.
+    pub confidence: CompositionConfidence,
+    /// Whether the composer intentionally abstained.
+    pub abstained: bool,
+    /// Short explanation for the confidence/abstention outcome.
+    pub rationale: &'static str,
     /// Total scored matches before distinct deduplication.
     pub total_matches: usize,
     /// Distinct evidence count kept for the answer.
     pub distinct_match_count: usize,
     /// Evidence bundle used during composition.
     pub evidence: Vec<AggregatedMatch>,
+}
+
+/// Confidence label for deterministic composed answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompositionConfidence {
+    Low,
+    Medium,
+    High,
+}
+
+impl CompositionConfidence {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
 }
 
 /// Runtime feature configuration for femind.
@@ -1082,6 +1106,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         config: &crate::context::AssemblyConfig,
         max_matches: usize,
     ) -> Result<ComposedAnswerResult> {
+        let requires_strict_grounding =
+            crate::search::builder::query_requires_strict_grounding(query);
         let route = self
             .search(query)
             .limit(config.search_limit.max(max_matches.max(10)))
@@ -1089,10 +1115,27 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
         if route.intent == crate::search::QueryIntent::Aggregation {
             let aggregation = self.aggregate_with_config(query, config, max_matches)?;
-            let answer = compose_aggregation_answer(query, &aggregation.matches);
+            if aggregation.matches.is_empty() {
+                return Ok(ComposedAnswerResult {
+                    answer: "I don’t have enough grounded evidence to answer.".to_string(),
+                    kind: "aggregation",
+                    confidence: CompositionConfidence::Low,
+                    abstained: true,
+                    rationale: "no-supporting-evidence",
+                    total_matches: aggregation.total_matches,
+                    distinct_match_count: aggregation.distinct_match_count,
+                    evidence: aggregation.matches,
+                });
+            }
+
+            let (answer, confidence, rationale) =
+                compose_aggregation_answer(query, &aggregation.matches);
             return Ok(ComposedAnswerResult {
                 answer,
                 kind: "aggregation",
+                confidence,
+                abstained: false,
+                rationale,
                 total_matches: aggregation.total_matches,
                 distinct_match_count: aggregation.distinct_match_count,
                 evidence: aggregation.matches,
@@ -1100,52 +1143,115 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
 
         let results = self.search_with_config(query, config)?;
-        let mut evidence = Vec::new();
-        let mut distinct_keys = std::collections::HashSet::new();
+        let evidence = self.collect_distinct_aggregated_matches(results, max_matches)?;
 
-        for result in results {
-            let Some(candidate) = self.load_aggregated_match(result.memory_id, result.score)?
-            else {
-                continue;
-            };
+        if evidence.is_empty() {
+            if requires_strict_grounding {
+                let fallback_results = self
+                    .search(query)
+                    .mode(crate::search::SearchMode::Exhaustive { min_score: 0.0 })
+                    .limit(config.search_limit.max(max_matches.max(25)))
+                    .with_strict_grounding(false)
+                    .with_query_alignment(false)
+                    .execute()?;
+                let fallback_evidence =
+                    self.collect_distinct_aggregated_matches(fallback_results, max_matches)?;
 
-            let key = aggregation_match_key(&candidate.text, candidate.memory_id);
-            if !distinct_keys.insert(key) {
-                continue;
+                if !fallback_evidence.is_empty() {
+                    let rationale =
+                        if evidence_explicitly_lacks_requested_detail(query, &fallback_evidence) {
+                            "unsupported-detail"
+                        } else {
+                            "insufficient-grounding"
+                        };
+                    let answer = if rationale == "unsupported-detail" {
+                        "I don’t have the exact grounded detail needed to answer that."
+                    } else {
+                        "I don’t have enough grounded evidence to answer that exactly."
+                    };
+                    return Ok(ComposedAnswerResult {
+                        answer: answer.to_string(),
+                        kind: "abstain",
+                        confidence: CompositionConfidence::Low,
+                        abstained: true,
+                        rationale,
+                        total_matches: fallback_evidence.len(),
+                        distinct_match_count: fallback_evidence.len(),
+                        evidence: fallback_evidence,
+                    });
+                }
             }
 
-            evidence.push(candidate);
-            if evidence.len() >= max_matches {
-                break;
-            }
+            return Ok(ComposedAnswerResult {
+                answer: "I don’t have enough grounded evidence to answer.".to_string(),
+                kind: "abstain",
+                confidence: CompositionConfidence::Low,
+                abstained: true,
+                rationale: "no-supporting-evidence",
+                total_matches: 0,
+                distinct_match_count: 0,
+                evidence,
+            });
         }
 
-        let answer = if evidence.is_empty() {
-            String::new()
-        } else if is_yes_no_query(query) {
-            compose_yes_no_answer(&evidence[0])
+        let top = &evidence[0];
+        if evidence_explicitly_lacks_requested_detail(query, &evidence) {
+            return Ok(ComposedAnswerResult {
+                answer: "I don’t have the exact grounded detail needed to answer that.".to_string(),
+                kind: "abstain",
+                confidence: CompositionConfidence::Low,
+                abstained: true,
+                rationale: "unsupported-detail",
+                total_matches: evidence.len(),
+                distinct_match_count: evidence.len(),
+                evidence,
+            });
+        }
+
+        if requires_strict_grounding
+            && !crate::search::builder::lexical_grounding_ok(query, &top.text)
+        {
+            return Ok(ComposedAnswerResult {
+                answer: "I don’t have enough grounded evidence to answer that exactly.".to_string(),
+                kind: "abstain",
+                confidence: CompositionConfidence::Low,
+                abstained: true,
+                rationale: "insufficient-grounding",
+                total_matches: evidence.len(),
+                distinct_match_count: evidence.len(),
+                evidence,
+            });
+        }
+
+        let (answer, kind, confidence, rationale) = if is_yes_no_query(query) {
+            compose_yes_no_answer(query, &evidence)
         } else if matches!(
             route.intent,
             crate::search::QueryIntent::CurrentState | crate::search::QueryIntent::HistoricalState
         ) {
-            compose_stateful_answer(&evidence[0])
+            compose_stateful_answer(&evidence)
+        } else if requires_strict_grounding {
+            (
+                top.text.trim().to_string(),
+                "direct",
+                CompositionConfidence::High,
+                "grounded-detail",
+            )
         } else {
-            evidence[0].text.trim().to_string()
+            (
+                top.text.trim().to_string(),
+                "direct",
+                CompositionConfidence::Medium,
+                "top-evidence",
+            )
         };
 
         Ok(ComposedAnswerResult {
             answer,
-            kind: if is_yes_no_query(query) {
-                "yes-no"
-            } else if matches!(
-                route.intent,
-                crate::search::QueryIntent::CurrentState
-                    | crate::search::QueryIntent::HistoricalState
-            ) {
-                "stateful"
-            } else {
-                "direct"
-            },
+            kind,
+            confidence,
+            abstained: false,
+            rationale,
             total_matches: evidence.len(),
             distinct_match_count: evidence.len(),
             evidence,
@@ -1220,6 +1326,34 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// Direct access to the global database (if configured).
     pub fn global_database(&self) -> Option<&Database> {
         self.global_db.as_ref()
+    }
+
+    fn collect_distinct_aggregated_matches(
+        &self,
+        results: Vec<crate::search::builder::SearchResult>,
+        max_matches: usize,
+    ) -> Result<Vec<AggregatedMatch>> {
+        let mut evidence = Vec::new();
+        let mut distinct_keys = std::collections::HashSet::new();
+
+        for result in results {
+            let Some(candidate) = self.load_aggregated_match(result.memory_id, result.score)?
+            else {
+                continue;
+            };
+
+            let key = aggregation_match_key(&candidate.text, candidate.memory_id);
+            if !distinct_keys.insert(key) {
+                continue;
+            }
+
+            evidence.push(candidate);
+            if evidence.len() >= max_matches {
+                break;
+            }
+        }
+
+        Ok(evidence)
     }
 
     fn load_aggregated_match(&self, memory_id: i64, score: f32) -> Result<Option<AggregatedMatch>> {
@@ -1377,11 +1511,10 @@ fn aggregation_match_key(text: &str, memory_id: i64) -> String {
     }
 }
 
-fn compose_aggregation_answer(query: &str, matches: &[AggregatedMatch]) -> String {
-    if matches.is_empty() {
-        return String::new();
-    }
-
+fn compose_aggregation_answer(
+    query: &str,
+    matches: &[AggregatedMatch],
+) -> (String, CompositionConfidence, &'static str) {
     let labels = matches
         .iter()
         .filter_map(|candidate| leading_subject_label(&candidate.text))
@@ -1392,27 +1525,83 @@ fn compose_aggregation_answer(query: &str, matches: &[AggregatedMatch]) -> Strin
         let count_label = small_number_word(count)
             .map(str::to_string)
             .unwrap_or_else(|| count.to_string());
-        return format!("{count_label} items: {}.", labels.join(", "));
+        return (
+            format!("{count_label} items: {}.", labels.join(", ")),
+            if count >= 2 {
+                CompositionConfidence::High
+            } else {
+                CompositionConfidence::Medium
+            },
+            "distinct-rollup",
+        );
     }
 
-    matches
-        .iter()
-        .map(|candidate| candidate.text.trim())
-        .filter(|text| !text.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
+    (
+        matches
+            .iter()
+            .map(|candidate| candidate.text.trim())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+        CompositionConfidence::Medium,
+        "joined-evidence",
+    )
 }
 
-fn compose_yes_no_answer(best: &AggregatedMatch) -> String {
-    if text_implies_negative_state(&best.text) {
-        format!("No. {}", best.text.trim())
+fn compose_yes_no_answer(
+    query: &str,
+    evidence: &[AggregatedMatch],
+) -> (String, &'static str, CompositionConfidence, &'static str) {
+    let best = &evidence[0];
+    let confidence = if has_conflicting_state_evidence(query, evidence) {
+        CompositionConfidence::Medium
     } else {
-        format!("Yes. {}", best.text.trim())
+        CompositionConfidence::High
+    };
+    let rationale = if confidence == CompositionConfidence::High {
+        "stateful-polarity"
+    } else {
+        "conflicting-state-evidence"
+    };
+
+    if text_implies_negative_state(&best.text) {
+        (
+            format!("No. {}", best.text.trim()),
+            "yes-no",
+            confidence,
+            rationale,
+        )
+    } else {
+        (
+            format!("Yes. {}", best.text.trim()),
+            "yes-no",
+            confidence,
+            rationale,
+        )
     }
 }
 
-fn compose_stateful_answer(best: &AggregatedMatch) -> String {
-    best.text.trim().to_string()
+fn compose_stateful_answer(
+    evidence: &[AggregatedMatch],
+) -> (String, &'static str, CompositionConfidence, &'static str) {
+    let best = &evidence[0];
+    let confidence = if has_conflicting_state_evidence("", evidence) {
+        CompositionConfidence::Medium
+    } else {
+        CompositionConfidence::High
+    };
+    let rationale = if confidence == CompositionConfidence::High {
+        "stateful-route"
+    } else {
+        "conflicting-state-evidence"
+    };
+
+    (
+        best.text.trim().to_string(),
+        "stateful",
+        confidence,
+        rationale,
+    )
 }
 
 fn text_implies_negative_state(text: &str) -> bool {
@@ -1448,6 +1637,40 @@ fn is_yes_no_query(query: &str) -> bool {
                 | "would"
         )
     )
+}
+
+fn has_conflicting_state_evidence(query: &str, evidence: &[AggregatedMatch]) -> bool {
+    if evidence.len() < 2 {
+        return false;
+    }
+
+    let first_negative = text_implies_negative_state(&evidence[0].text);
+    let second_negative = text_implies_negative_state(&evidence[1].text);
+    let score_close = evidence[1].score >= evidence[0].score * 0.6;
+
+    if first_negative == second_negative || !score_close {
+        return false;
+    }
+
+    query.is_empty() || is_yes_no_query(query)
+}
+
+fn evidence_explicitly_lacks_requested_detail(query: &str, evidence: &[AggregatedMatch]) -> bool {
+    if !crate::search::builder::query_requires_strict_grounding(query) {
+        return false;
+    }
+
+    evidence.iter().any(|candidate| {
+        let normalized = normalize_query(&candidate.text);
+        normalized.contains("not recorded")
+            || normalized.contains("never recorded")
+            || normalized.contains("not documented")
+            || normalized.contains("never documented")
+            || normalized.contains("not captured")
+            || normalized.contains("unknown")
+            || normalized.contains("was not recorded")
+            || normalized.contains("was never recorded")
+    })
 }
 
 fn query_requests_count_or_list(query: &str) -> bool {
@@ -2154,10 +2377,75 @@ mod tests {
             .expect("compose");
 
         assert_eq!(answer.kind, "aggregation");
+        assert_eq!(answer.confidence, CompositionConfidence::High);
+        assert!(!answer.abstained);
+        assert_eq!(answer.rationale, "distinct-rollup");
         assert!(answer.answer.contains("Three"));
         assert!(answer.answer.contains("DeepInfra"));
         assert!(answer.answer.contains("OpenRouter"));
         assert!(answer.answer.contains("Anthropic"));
+    }
+
+    #[test]
+    fn compose_answer_returns_high_confidence_for_grounded_artifact_detail() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        engine
+            .store(&mem(
+                "The launchd agent file that keeps the FeMind tunnel alive is /Users/johndeaton/Library/LaunchAgents/com.user.femind-embed-tunnel.plist.",
+            ))
+            .expect("store");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "Which launchd plist keeps the FeMind tunnel alive?",
+                &AssemblyConfig::default(),
+                3,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "direct");
+        assert_eq!(answer.confidence, CompositionConfidence::High);
+        assert!(!answer.abstained);
+        assert_eq!(answer.rationale, "grounded-detail");
+        assert!(answer.answer.contains("com.user.femind-embed-tunnel.plist"));
+    }
+
+    #[test]
+    fn compose_answer_abstains_on_unsupported_exact_detail_with_nearby_evidence() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        engine
+            .store(&mem(
+                "The Windows scheduled task named FemindNativeStartup keeps the native FeMind startup path alive.",
+            ))
+            .expect("store");
+        engine
+            .store(&mem(
+                "A Windows scheduled task keeps the native FeMind startup path alive, but the exact task GUID was never recorded.",
+            ))
+            .expect("store");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "What exact scheduled task GUID keeps the same tunnel alive on Windows?",
+                &AssemblyConfig::default(),
+                3,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "abstain");
+        assert_eq!(answer.confidence, CompositionConfidence::Low);
+        assert!(answer.abstained);
+        assert_eq!(answer.rationale, "unsupported-detail");
+        assert!(
+            answer
+                .answer
+                .to_lowercase()
+                .contains("exact grounded detail")
+        );
     }
 
     #[test]

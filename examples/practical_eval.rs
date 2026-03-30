@@ -17,10 +17,10 @@ mod app {
     #[cfg(feature = "api-embeddings")]
     use femind::embeddings::ApiBackend;
     use femind::embeddings::EmbeddingBackend;
-    #[cfg(feature = "remote-embeddings")]
-    use femind::embeddings::RemoteEmbeddingBackend;
     #[cfg(feature = "api-embeddings")]
     use femind::embeddings::MINILM_DIMENSIONS;
+    #[cfg(feature = "remote-embeddings")]
+    use femind::embeddings::RemoteEmbeddingBackend;
     #[cfg(feature = "local-embeddings")]
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
     use femind::engine::{EngineConfig, MemoryEngine, VectorSearchMode};
@@ -36,7 +36,7 @@ mod app {
     use femind::reranking::CandleReranker;
     #[cfg(feature = "remote-reranking")]
     use femind::reranking::RemoteRerankerBackend;
-    use femind::reranking::{RerankerRuntime, RERANKER_CANONICAL_NAME};
+    use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
     use femind::search::{QueryIntent, QueryRoute, SearchMode};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
@@ -690,6 +690,9 @@ mod app {
     struct ComposedAnswerReport {
         kind: String,
         answer: String,
+        confidence: String,
+        abstained: bool,
+        rationale: String,
     }
 
     struct RetrievalObservation {
@@ -983,21 +986,23 @@ mod app {
                     check.graph_depth.or(scenario.graph_depth),
                     config.graph_depth,
                 );
+                let requested_matches = config
+                    .top_k
+                    .max(check.min_observed_hits.unwrap_or(0))
+                    .max(check.required_fragments.len())
+                    .max(5);
                 let observation = collect_retrieval_observation(
                     &engine,
                     &check.query,
                     config.top_k,
                     &route,
                     graph_depth,
-                    check,
+                    requested_matches,
                 )?;
                 let (passed, criteria) = evaluate_retrieval_check(
                     &observation.observed,
                     observation.observed_hit_count,
-                    observation
-                        .composed_answer
-                        .as_ref()
-                        .map(|details| details.answer.as_str()),
+                    observation.composed_answer.as_ref(),
                     observation
                         .aggregation
                         .as_ref()
@@ -1072,19 +1077,35 @@ mod app {
                     check.graph_depth.or(scenario.graph_depth),
                     config.graph_depth,
                 );
-                let observed = top_hits(&engine, &check.query, config.top_k, graph_depth)?;
-                let passed = check.expected_behavior == "abstain" && observed.is_empty();
+                let observation = collect_retrieval_observation(
+                    &engine,
+                    &check.query,
+                    config.top_k,
+                    &route,
+                    graph_depth,
+                    config.top_k.max(5),
+                )?;
+                let passed = check.expected_behavior == "abstain"
+                    && observation
+                        .composed_answer
+                        .as_ref()
+                        .is_some_and(|answer| answer.abstained);
+                let explain = if !passed && config.explain_failures {
+                    Some(explain_retrieval(&engine, &check.query, config.top_k)?)
+                } else {
+                    None
+                };
                 abstention.push(CheckReport {
                     query: check.query.clone(),
                     passed,
                     expected: check.expected_behavior.clone(),
-                    observed,
+                    observed: observation.observed,
                     graph_depth,
                     route: Some(route.into()),
                     criteria: None,
-                    aggregation: None,
-                    composed_answer: None,
-                    explain: None,
+                    aggregation: observation.aggregation,
+                    composed_answer: observation.composed_answer,
+                    explain,
                 });
             }
         }
@@ -1482,12 +1503,8 @@ mod app {
         top_k: usize,
         route: &QueryRoute,
         graph_depth: u32,
-        check: &RetrievalCheck,
+        requested_matches: usize,
     ) -> Result<RetrievalObservation, Box<dyn std::error::Error>> {
-        let requested_matches = top_k
-            .max(check.min_observed_hits.unwrap_or(0))
-            .max(check.required_fragments.len())
-            .max(5);
         let composition = engine.compose_answer_with_config(
             query,
             &femind::context::AssemblyConfig {
@@ -1499,6 +1516,9 @@ mod app {
         )?;
         let composed_answer = composition.answer.clone();
         let composed_kind = composition.kind.to_string();
+        let composed_confidence = composition.confidence.as_str().to_string();
+        let composed_abstained = composition.abstained;
+        let composed_rationale = composition.rationale.to_string();
 
         if route.intent == QueryIntent::Aggregation {
             let details = AggregationReport {
@@ -1523,6 +1543,9 @@ mod app {
                 composed_answer: Some(ComposedAnswerReport {
                     kind: composed_kind,
                     answer: composed_answer,
+                    confidence: composed_confidence,
+                    abstained: composed_abstained,
+                    rationale: composed_rationale,
                 }),
             });
         }
@@ -1548,6 +1571,9 @@ mod app {
             composed_answer: (!composed_answer.trim().is_empty()).then_some(ComposedAnswerReport {
                 kind: composed_kind,
                 answer: composed_answer,
+                confidence: composed_confidence,
+                abstained: composed_abstained,
+                rationale: composed_rationale,
             }),
         })
     }
@@ -1604,13 +1630,15 @@ mod app {
     fn evaluate_retrieval_check(
         observed: &[ObservedHit],
         observed_hit_count: usize,
-        composed_answer: Option<&str>,
+        composed_answer: Option<&ComposedAnswerReport>,
         composed_summary: Option<&str>,
         query: &str,
         check: &RetrievalCheck,
     ) -> (bool, RetrievalCriteriaReport) {
         let combined = match composed_answer {
-            Some(answer) if !answer.trim().is_empty() => answer.to_string(),
+            Some(answer) if !answer.abstained && !answer.answer.trim().is_empty() => {
+                answer.answer.clone()
+            }
             _ => match composed_summary {
                 Some(summary) if !summary.trim().is_empty() => summary.to_string(),
                 _ => observed

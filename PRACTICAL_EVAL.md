@@ -193,6 +193,8 @@ The summary now also records:
   matches, and the composed evidence text used for rollup-style validation
 - per-check composed-answer reports showing the deterministic answer text and
   composition kind (`direct`, `stateful`, `yes-no`, or `aggregation`)
+- per-check composed-answer confidence, abstention state, and rationale so
+  exact-detail and provenance failures can be diagnosed without guessing
 
 That routed plan is now part of the actual retrieval behavior, not just a
 diagnostic label:
@@ -204,6 +206,8 @@ diagnostic label:
 - retrieval checks now also exercise a deterministic engine-side answer
   composer so yes/no and stateful questions are validated against the composed
   answer, not only the raw retrieved snippets
+- abstention checks now validate the engine’s own abstain decision instead of
+  treating “no hits surfaced” as the only acceptable refusal path
 - current-state routes explicitly demote superseded memories and can follow
   supersession links forward to the replacement fact
 - historical-state routes can follow supersession links backward to earlier
@@ -212,6 +216,9 @@ diagnostic label:
   caller overrides the search settings directly
 - `valid_at(...)` searches now respect stored `valid_from` / `valid_until`
   windows, so time-scoped retrieval is part of the real engine path
+- exact-detail composition now does a broader fallback evidence pass when
+  strict grounding filters out all hits, so the engine can distinguish
+  unsupported details from total absence of evidence
 
 Graph-focused follow-up validation can be enabled explicitly:
 
@@ -247,6 +254,8 @@ Current validated baseline:
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, and provenance/abstention scenarios
+- the provenance/abstention scenario now proves FeMind can abstain on an exact
+  Windows task GUID even when nearby Windows task evidence is present
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
