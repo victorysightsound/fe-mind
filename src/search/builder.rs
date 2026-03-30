@@ -577,7 +577,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let type_filter = self.memory_type.map(|t| t.as_str());
         let min_tier = self.depth_to_min_tier(route.depth);
 
-        let fts_results = FtsSearch::search_with_tiers(
+        let fts_results = FtsSearch::search_or_mode(
             self.db,
             &self.query,
             10_000,
@@ -1983,7 +1983,11 @@ fn query_requests_abstention_risk(query: &str) -> bool {
         || normalized.contains("did i ever")
         || normalized.contains("did we ever")
         || normalized.contains("if any")
-        || normalized.contains("at all")
+        || (normalized.contains("at all")
+            && (normalized.contains("mention")
+                || normalized.contains("say")
+                || normalized.contains("record")
+                || normalized.contains("anything about")))
         || normalized.contains("anything about")
 }
 
@@ -2465,6 +2469,10 @@ mod tests {
         assert_eq!(
             infer_query_intent("Did we ever mention Redis at all?"),
             QueryIntent::AbstentionRisk
+        );
+        assert_eq!(
+            infer_query_intent("Should benchmark history still matter at all?"),
+            QueryIntent::General
         );
         assert_eq!(
             infer_query_intent("What is the current preferred embedding path?"),

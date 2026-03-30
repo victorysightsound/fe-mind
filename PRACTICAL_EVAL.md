@@ -189,12 +189,16 @@ The summary now also records:
 - per-check retrieval criteria reports showing whether the expected answer
   matched, whether required fragments were present, whether forbidden fragments
   leaked in, and whether enough hits surfaced for coverage-sensitive checks
+- per-check aggregation reports showing total matches, distinct supporting
+  matches, and the composed evidence text used for rollup-style validation
 
 That routed plan is now part of the actual retrieval behavior, not just a
 diagnostic label:
 
 - current-state routes mildly favor newer evidence by `created_at`
 - historical-state routes mildly favor older evidence by `created_at`
+- aggregation routes now use an engine-level composition path that preserves
+  broad coverage instead of only surfacing a narrow top-k view
 - current-state routes explicitly demote superseded memories and can follow
   supersession links forward to the replacement fact
 - historical-state routes can follow supersession links backward to earlier

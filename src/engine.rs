@@ -33,6 +33,32 @@ pub struct StoreExtractionResult {
     pub tokens_used: usize,
 }
 
+/// A single retrieval hit surfaced through aggregation-oriented search.
+#[derive(Debug, Clone)]
+pub struct AggregatedMatch {
+    /// Memory row ID.
+    pub memory_id: i64,
+    /// Retrieved text content.
+    pub text: String,
+    /// Optional category/source label.
+    pub category: Option<String>,
+    /// Combined relevance score from retrieval.
+    pub score: f32,
+}
+
+/// Aggregation-oriented retrieval result.
+#[derive(Debug, Clone)]
+pub struct AggregationResult {
+    /// Total scored matches before distinct deduplication.
+    pub total_matches: usize,
+    /// Distinct match count after text-level deduplication.
+    pub distinct_match_count: usize,
+    /// Top distinct matches kept for downstream composition.
+    pub matches: Vec<AggregatedMatch>,
+    /// Simple composed summary text spanning the kept matches.
+    pub composed_summary: String,
+}
+
 /// Runtime feature configuration for femind.
 ///
 /// Two-level config:
@@ -920,10 +946,10 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             }
         }
 
-        if self.config.strict_grounding_enabled {
+        if route.strict_grounding {
             crate::search::builder::apply_strict_detail_query_filter(&self.db, query, &mut merged);
         }
-        if self.config.query_alignment_enabled {
+        if route.query_alignment {
             crate::search::builder::rerank_for_query_alignment(&self.db, query, &mut merged);
         }
 
@@ -981,6 +1007,57 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         config: &crate::context::AssemblyConfig,
     ) -> Result<Vec<crate::search::builder::SearchResult>> {
         self.multi_query_search(query, config)
+    }
+
+    /// Collect broad retrieval evidence for aggregation-style questions.
+    ///
+    /// This keeps distinct supporting memories instead of collapsing to a plain
+    /// top-k list, which makes count/list composition easier at higher layers.
+    pub fn aggregate_with_config(
+        &self,
+        query: &str,
+        config: &crate::context::AssemblyConfig,
+        max_matches: usize,
+    ) -> Result<AggregationResult> {
+        let mut aggregation_config = config.clone();
+        aggregation_config.max_per_session = 0;
+        aggregation_config.search_limit = aggregation_config.search_limit.max(max_matches.max(25));
+
+        let results = self.multi_query_search(query, &aggregation_config)?;
+
+        let total_matches = results.len();
+        let mut distinct_keys = std::collections::HashSet::new();
+        let mut matches = Vec::new();
+
+        for result in results {
+            let Some(candidate) = self.load_aggregated_match(result.memory_id, result.score)?
+            else {
+                continue;
+            };
+
+            let key = aggregation_match_key(&candidate.text, candidate.memory_id);
+            if !distinct_keys.insert(key) {
+                continue;
+            }
+
+            if matches.len() < max_matches {
+                matches.push(candidate);
+            }
+        }
+
+        let composed_summary = matches
+            .iter()
+            .map(|candidate| candidate.text.trim())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        Ok(AggregationResult {
+            total_matches,
+            distinct_match_count: distinct_keys.len(),
+            matches,
+            composed_summary,
+        })
     }
 
     /// Assemble context with custom assembly configuration.
@@ -1051,6 +1128,26 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// Direct access to the global database (if configured).
     pub fn global_database(&self) -> Option<&Database> {
         self.global_db.as_ref()
+    }
+
+    fn load_aggregated_match(&self, memory_id: i64, score: f32) -> Result<Option<AggregatedMatch>> {
+        self.db.with_reader(|conn| {
+            let row = conn.query_row(
+                "SELECT searchable_text, category FROM memories WHERE id = ?1",
+                [memory_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            );
+            match row {
+                Ok((text, category)) => Ok(Some(AggregatedMatch {
+                    memory_id,
+                    text,
+                    category,
+                    score,
+                })),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(error) => Err(error.into()),
+            }
+        })
     }
 
     #[cfg(feature = "ann")]
@@ -1162,6 +1259,29 @@ fn routed_graph_depth(
         config.graph_depth
     } else {
         route.graph_depth
+    }
+}
+
+fn aggregation_match_key(text: &str, memory_id: i64) -> String {
+    let normalized = text
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if normalized.is_empty() {
+        format!("memory:{memory_id}")
+    } else {
+        normalized
     }
 }
 
@@ -1707,6 +1827,41 @@ mod tests {
             results.first().map(|result| result.memory_id) == Some(old_id),
             "historical route should rank the prior state ahead of the current one"
         );
+    }
+
+    #[test]
+    fn aggregation_queries_collect_distinct_matches() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        engine
+            .store(&mem("DeepInfra was evaluated as one extraction provider."))
+            .expect("store");
+        engine
+            .store(&mem(
+                "OpenRouter was also evaluated as an extraction provider.",
+            ))
+            .expect("store");
+        engine
+            .store(&mem(
+                "Anthropic was evaluated briefly as a third extraction provider.",
+            ))
+            .expect("store");
+
+        let aggregation = engine
+            .aggregate_with_config(
+                "How many providers were evaluated for extraction and which ones were they?",
+                &AssemblyConfig::default(),
+                5,
+            )
+            .expect("aggregate");
+
+        assert_eq!(aggregation.distinct_match_count, 3);
+        assert_eq!(aggregation.matches.len(), 3);
+        let composed = aggregation.composed_summary.to_lowercase();
+        assert!(composed.contains("deepinfra"));
+        assert!(composed.contains("openrouter"));
+        assert!(composed.contains("anthropic"));
     }
 
     #[test]

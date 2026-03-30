@@ -61,6 +61,9 @@ The practical live-validation path is now established and repeatable:
 - retrieval-style checks can now declare required fragments, forbidden
   fragments, and minimum observed-hit counts so aggregation and provenance
   regressions fail for the right reason instead of only by loose token overlap
+- aggregation-style retrieval now uses an engine-level composition path that
+  preserves distinct supporting memories, records total/distinct match counts,
+  and emits a composed evidence summary for coverage-sensitive rollup questions
 - routed retrieval now includes an explicit temporal policy:
   current-state queries mildly favor newer evidence, historical-state queries
   mildly favor older evidence, and exact-detail / abstention routes stay

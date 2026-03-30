@@ -37,7 +37,7 @@ mod app {
     #[cfg(feature = "remote-reranking")]
     use femind::reranking::RemoteRerankerBackend;
     use femind::reranking::{RerankerRuntime, RERANKER_CANONICAL_NAME};
-    use femind::search::{QueryRoute, SearchMode};
+    use femind::search::{QueryIntent, QueryRoute, SearchMode};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
 
@@ -680,6 +680,19 @@ mod app {
     }
 
     #[derive(Debug, Serialize)]
+    struct AggregationReport {
+        total_matches: usize,
+        distinct_match_count: usize,
+        composed_summary: String,
+    }
+
+    struct RetrievalObservation {
+        observed: Vec<ObservedHit>,
+        observed_hit_count: usize,
+        aggregation: Option<AggregationReport>,
+    }
+
+    #[derive(Debug, Serialize)]
     struct CheckReport {
         query: String,
         passed: bool,
@@ -690,6 +703,8 @@ mod app {
         route: Option<RoutedSearchPlan>,
         #[serde(skip_serializing_if = "Option::is_none")]
         criteria: Option<RetrievalCriteriaReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        aggregation: Option<AggregationReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
         explain: Option<RetrievalExplain>,
     }
@@ -959,8 +974,24 @@ mod app {
                     check.graph_depth.or(scenario.graph_depth),
                     config.graph_depth,
                 );
-                let observed = top_hits(&engine, &check.query, config.top_k, graph_depth)?;
-                let (passed, criteria) = evaluate_retrieval_check(&observed, &check.query, check);
+                let observation = collect_retrieval_observation(
+                    &engine,
+                    &check.query,
+                    config.top_k,
+                    &route,
+                    graph_depth,
+                    check,
+                )?;
+                let (passed, criteria) = evaluate_retrieval_check(
+                    &observation.observed,
+                    observation.observed_hit_count,
+                    observation
+                        .aggregation
+                        .as_ref()
+                        .map(|details| details.composed_summary.as_str()),
+                    &check.query,
+                    check,
+                );
                 let explain = if !passed && config.explain_failures {
                     Some(explain_retrieval(&engine, &check.query, config.top_k)?)
                 } else {
@@ -970,10 +1001,11 @@ mod app {
                     query: check.query.clone(),
                     passed,
                     expected: check.expected_answer.clone(),
-                    observed,
+                    observed: observation.observed,
                     graph_depth,
                     route: Some(route.into()),
                     criteria: Some(criteria),
+                    aggregation: observation.aggregation,
                     explain,
                 });
             }
@@ -1010,6 +1042,7 @@ mod app {
                     graph_depth: 0,
                     route: None,
                     criteria: None,
+                    aggregation: None,
                     explain: None,
                 });
             }
@@ -1034,6 +1067,7 @@ mod app {
                     graph_depth,
                     route: Some(route.into()),
                     criteria: None,
+                    aggregation: None,
                     explain: None,
                 });
             }
@@ -1426,6 +1460,59 @@ mod app {
         Ok(trimmed.to_string())
     }
 
+    fn collect_retrieval_observation(
+        engine: &MemoryEngine<EvalMemory>,
+        query: &str,
+        top_k: usize,
+        route: &QueryRoute,
+        graph_depth: u32,
+        check: &RetrievalCheck,
+    ) -> Result<RetrievalObservation, Box<dyn std::error::Error>> {
+        if route.intent == QueryIntent::Aggregation {
+            let requested_matches = top_k
+                .max(check.min_observed_hits.unwrap_or(0))
+                .max(check.required_fragments.len())
+                .max(5);
+            let aggregation = engine.aggregate_with_config(
+                query,
+                &femind::context::AssemblyConfig {
+                    graph_depth,
+                    max_per_session: 0,
+                    ..femind::context::AssemblyConfig::default()
+                },
+                requested_matches,
+            )?;
+            let details = AggregationReport {
+                total_matches: aggregation.total_matches,
+                distinct_match_count: aggregation.distinct_match_count,
+                composed_summary: aggregation.composed_summary,
+            };
+            let observed_hit_count = details.distinct_match_count;
+            let observed = aggregation
+                .matches
+                .into_iter()
+                .map(|candidate| ObservedHit {
+                    text: candidate.text,
+                    score: candidate.score,
+                })
+                .collect();
+
+            return Ok(RetrievalObservation {
+                observed,
+                observed_hit_count,
+                aggregation: Some(details),
+            });
+        }
+
+        let observed = top_hits(engine, query, top_k, graph_depth)?;
+        let observed_hit_count = observed.len();
+        Ok(RetrievalObservation {
+            observed,
+            observed_hit_count,
+            aggregation: None,
+        })
+    }
+
     fn top_hits(
         engine: &MemoryEngine<EvalMemory>,
         query: &str,
@@ -1455,11 +1542,7 @@ mod app {
                 });
             }
         } else {
-            let results = engine
-                .search(query)
-                .mode(SearchMode::Auto)
-                .limit(top_k)
-                .execute()?;
+            let results = engine.search(query).limit(top_k).execute()?;
 
             for result in results.into_iter().take(top_k) {
                 let text = engine.database().with_reader(|conn| {
@@ -1481,14 +1564,19 @@ mod app {
 
     fn evaluate_retrieval_check(
         observed: &[ObservedHit],
+        observed_hit_count: usize,
+        composed_summary: Option<&str>,
         query: &str,
         check: &RetrievalCheck,
     ) -> (bool, RetrievalCriteriaReport) {
-        let combined = observed
-            .iter()
-            .map(|hit| hit.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let combined = match composed_summary {
+            Some(summary) if !summary.trim().is_empty() => summary.to_string(),
+            _ => observed
+                .iter()
+                .map(|hit| hit.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
         let expected_match = observed
             .iter()
             .any(|hit| expected_match(&hit.text, query, &check.expected_answer))
@@ -1510,14 +1598,14 @@ mod app {
         let forbidden_fragments_ok = present_forbidden_fragments.is_empty();
         let hit_count_ok = check
             .min_observed_hits
-            .is_none_or(|min_hits| observed.len() >= min_hits);
+            .is_none_or(|min_hits| observed_hit_count >= min_hits);
 
         let criteria = RetrievalCriteriaReport {
             expected_match,
             required_fragments_ok,
             forbidden_fragments_ok,
             hit_count_ok,
-            observed_hit_count: observed.len(),
+            observed_hit_count,
             min_observed_hits: check.min_observed_hits,
             missing_required_fragments,
             present_forbidden_fragments,

@@ -769,6 +769,46 @@ engine’s own routed plan.
 
 ---
 
+## Decision 030: Aggregation Uses Engine-Level Composition, Not Just Top-K Hits
+
+**Date:** 2026-03-30
+
+**Decision:** Treat aggregation questions as a first-class engine path that
+collects distinct supporting memories and emits coverage-oriented aggregation
+metadata, while narrowing abstention-risk routing so generic yes/no questions
+with phrases like "at all" are not mistaken for unsupported-presence probes.
+
+**Context:** FeMind already routed aggregation queries to `SearchMode::Exhaustive`,
+but the eval loop still tended to look at a narrow observed hit list. That made
+rollup questions harder to diagnose and hid whether the engine had broad enough
+coverage. At the same time, a memloft-slice regression showed that the
+abstention-risk heuristic was too broad: "Should benchmark history still matter
+at all?" was being zeroed out as if it were a missing-fact probe.
+
+**Rationale:**
+- Aggregation needs engine-owned composition behavior, not only better scoring
+  on ordinary retrieval results
+- Coverage-sensitive questions should expose total matches, distinct supporting
+  matches, and the composed evidence text that would feed downstream answer
+  generation
+- Exhaustive aggregation should use broader OR-style lexical coverage than the
+  stricter path used for exact-detail retrieval
+- Abstention heuristics should target unsupported presence/mention probes, not
+  generic yes/no policy questions
+
+**Consequences:**
+- `MemoryEngine::aggregate_with_config(...)` now returns distinct supporting
+  matches plus a composed summary string for aggregation-style questions
+- Practical eval retrieval checks now surface aggregation diagnostics alongside
+  ordinary criteria reports
+- Exhaustive aggregation search now uses the broader OR-style FTS coverage path
+- The `infer_query_intent(...)` heuristic no longer treats bare "at all"
+  phrasing as abstention-risk without a matching unsupported-presence signal
+- Remote-GPU validation remains green after the change:
+  practical `15/15`, live-library `58/58`, memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing
