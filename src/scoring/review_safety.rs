@@ -131,6 +131,7 @@ pub enum ReviewScope {
     Staging,
     Lab,
     Migration,
+    Maintenance,
 }
 
 impl ReviewScope {
@@ -141,6 +142,7 @@ impl ReviewScope {
             Self::Staging => "staging",
             Self::Lab => "lab",
             Self::Migration => "migration",
+            Self::Maintenance => "maintenance",
         }
     }
 
@@ -151,6 +153,7 @@ impl ReviewScope {
             "staging" | "stage" => Some(Self::Staging),
             "lab" | "internal-lab" | "internal_lab" => Some(Self::Lab),
             "migration" | "temporary-migration" | "temporary_migration" => Some(Self::Migration),
+            "maintenance" | "maintenance-window" | "maintenance_window" => Some(Self::Maintenance),
             _ => None,
         }
     }
@@ -171,6 +174,9 @@ pub enum ReviewPolicyClass {
     MigrationException,
     BreakglassException,
     PrivateInfrastructureException,
+    AuthBypassException,
+    DataResetException,
+    TrafficCutoverException,
 }
 
 impl ReviewPolicyClass {
@@ -183,6 +189,9 @@ impl ReviewPolicyClass {
             Self::MigrationException => "migration-exception",
             Self::BreakglassException => "breakglass-exception",
             Self::PrivateInfrastructureException => "private-infrastructure-exception",
+            Self::AuthBypassException => "auth-bypass-exception",
+            Self::DataResetException => "data-reset-exception",
+            Self::TrafficCutoverException => "traffic-cutover-exception",
         }
     }
 
@@ -209,6 +218,16 @@ impl ReviewPolicyClass {
             "private-infrastructure-exception"
             | "private_infrastructure_exception"
             | "private-infrastructure" => Some(Self::PrivateInfrastructureException),
+            "auth-bypass-exception" | "auth_bypass_exception" | "auth-bypass" => {
+                Some(Self::AuthBypassException)
+            }
+            "data-reset-exception" | "data_reset_exception" | "data-reset" => {
+                Some(Self::DataResetException)
+            }
+            "traffic-cutover-exception"
+            | "traffic_cutover_exception"
+            | "traffic-cutover"
+            | "cutover" => Some(Self::TrafficCutoverException),
             _ => None,
         }
     }
@@ -227,6 +246,9 @@ pub enum ReviewApprovalTemplate {
     LabException,
     BreakglassOps,
     PrivateEndpointBridge,
+    LabAuthBypass,
+    MaintenanceReset,
+    TrafficCutover,
 }
 
 impl ReviewApprovalTemplate {
@@ -237,6 +259,9 @@ impl ReviewApprovalTemplate {
             Self::LabException => "lab-exception",
             Self::BreakglassOps => "breakglass-ops",
             Self::PrivateEndpointBridge => "private-endpoint-bridge",
+            Self::LabAuthBypass => "lab-auth-bypass",
+            Self::MaintenanceReset => "maintenance-reset",
+            Self::TrafficCutover => "traffic-cutover",
         }
     }
 
@@ -249,6 +274,9 @@ impl ReviewApprovalTemplate {
             "private-endpoint-bridge" | "private_endpoint_bridge" | "private-endpoint" => {
                 Some(Self::PrivateEndpointBridge)
             }
+            "lab-auth-bypass" | "lab_auth_bypass" | "auth-bypass" => Some(Self::LabAuthBypass),
+            "maintenance-reset" | "maintenance_reset" | "reset" => Some(Self::MaintenanceReset),
+            "traffic-cutover" | "traffic_cutover" | "cutover" => Some(Self::TrafficCutover),
             _ => None,
         }
     }
@@ -260,6 +288,9 @@ impl ReviewApprovalTemplate {
             Self::LabException => ReviewScope::Lab,
             Self::BreakglassOps => ReviewScope::Production,
             Self::PrivateEndpointBridge => ReviewScope::Production,
+            Self::LabAuthBypass => ReviewScope::Lab,
+            Self::MaintenanceReset => ReviewScope::Maintenance,
+            Self::TrafficCutover => ReviewScope::Migration,
         }
     }
 
@@ -270,6 +301,9 @@ impl ReviewApprovalTemplate {
             Self::LabException => ReviewPolicyClass::OperationalException,
             Self::BreakglassOps => ReviewPolicyClass::BreakglassException,
             Self::PrivateEndpointBridge => ReviewPolicyClass::PrivateInfrastructureException,
+            Self::LabAuthBypass => ReviewPolicyClass::AuthBypassException,
+            Self::MaintenanceReset => ReviewPolicyClass::DataResetException,
+            Self::TrafficCutover => ReviewPolicyClass::TrafficCutoverException,
         }
     }
 
@@ -280,6 +314,9 @@ impl ReviewApprovalTemplate {
             Self::LabException => 30,
             Self::BreakglassOps => 1,
             Self::PrivateEndpointBridge => 14,
+            Self::LabAuthBypass => 1,
+            Self::MaintenanceReset => 2,
+            Self::TrafficCutover => 3,
         };
         now + chrono::Duration::days(days)
     }
@@ -368,6 +405,12 @@ pub(crate) fn query_scope(query: &str) -> ReviewScope {
         ReviewScope::Staging
     } else if normalized.contains(" lab") || normalized.contains("lab ") {
         ReviewScope::Lab
+    } else if normalized.contains("maintenance")
+        || normalized.contains("reset window")
+        || normalized.contains("maintenance window")
+        || normalized.contains("rebuild window")
+    {
+        ReviewScope::Maintenance
     } else if normalized.contains("breakglass")
         || normalized.contains("outage")
         || normalized.contains("emergency")
@@ -376,6 +419,7 @@ pub(crate) fn query_scope(query: &str) -> ReviewScope {
     {
         ReviewScope::Production
     } else if normalized.contains("migration")
+        || normalized.contains("cutover")
         || normalized.contains("temporary")
         || normalized.contains("bridge")
     {
@@ -396,6 +440,7 @@ pub(crate) fn review_scope_matches_query(record: &MemoryMeta, query: &str) -> bo
         ReviewScope::Staging => matches!(query_scope, ReviewScope::Staging | ReviewScope::Lab),
         ReviewScope::Lab => matches!(query_scope, ReviewScope::Lab | ReviewScope::Staging),
         ReviewScope::Migration => matches!(query_scope, ReviewScope::Migration),
+        ReviewScope::Maintenance => matches!(query_scope, ReviewScope::Maintenance),
     }
 }
 
@@ -455,6 +500,30 @@ pub(crate) fn review_policy_class_matches_query(record: &MemoryMeta, query: &str
                 || normalized.contains("internal host")
                 || normalized.contains("endpoint")
                 || normalized.contains("tunnel")
+        }
+        ReviewPolicyClass::AuthBypassException => {
+            normalized.contains("without auth")
+                || normalized.contains("no auth")
+                || normalized.contains("disable auth")
+                || normalized.contains("skip auth")
+                || normalized.contains("bypass auth")
+                || normalized.contains("packet capture")
+        }
+        ReviewPolicyClass::DataResetException => {
+            normalized.contains("drop")
+                || normalized.contains("reset")
+                || normalized.contains("wipe")
+                || normalized.contains("rebuild from scratch")
+                || normalized.contains("truncate")
+                || normalized.contains("erase")
+        }
+        ReviewPolicyClass::TrafficCutoverException => {
+            normalized.contains("cutover")
+                || normalized.contains("switch traffic")
+                || normalized.contains("redirect traffic")
+                || normalized.contains("promote")
+                || normalized.contains("swap endpoint")
+                || normalized.contains("new relay")
         }
     }
 }
@@ -537,6 +606,26 @@ pub(crate) fn detect_review_flag(record: &MemoryMeta) -> Option<ReviewFlag> {
         tags.push("destructive-command");
     }
 
+    if !protective_context
+        && (normalized.contains("drop the ann")
+            || normalized.contains("drop the tables")
+            || normalized.contains("rebuild from scratch")
+            || normalized.contains("wipe the index")
+            || normalized.contains("truncate"))
+    {
+        tags.push("data-reset");
+    }
+
+    if !protective_context
+        && (normalized.contains("cutover")
+            || normalized.contains("switch clients")
+            || normalized.contains("redirect traffic")
+            || normalized.contains("new relay endpoint")
+            || normalized.contains("promote the new"))
+    {
+        tags.push("traffic-cutover");
+    }
+
     if tags.is_empty() {
         return None;
     }
@@ -544,15 +633,19 @@ pub(crate) fn detect_review_flag(record: &MemoryMeta) -> Option<ReviewFlag> {
     tags.sort_unstable();
     tags.dedup();
 
-    let severity = if tags
-        .iter()
-        .any(|tag| matches!(*tag, "network-exposure" | "auth-disable"))
-    {
+    let severity = if tags.iter().any(|tag| {
+        matches!(
+            *tag,
+            "network-exposure" | "auth-disable" | "traffic-cutover"
+        )
+    }) {
         ReviewSeverity::Critical
-    } else if tags
-        .iter()
-        .any(|tag| matches!(*tag, "destructive-command" | "secret-handling"))
-    {
+    } else if tags.iter().any(|tag| {
+        matches!(
+            *tag,
+            "destructive-command" | "secret-handling" | "data-reset"
+        )
+    }) {
         ReviewSeverity::High
     } else {
         ReviewSeverity::Medium
@@ -562,6 +655,10 @@ pub(crate) fn detect_review_flag(record: &MemoryMeta) -> Option<ReviewFlag> {
         "network-exposure"
     } else if tags.contains(&"auth-disable") {
         "auth-disable"
+    } else if tags.contains(&"traffic-cutover") {
+        "traffic-cutover"
+    } else if tags.contains(&"data-reset") {
+        "data-reset"
     } else if tags.contains(&"destructive-command") {
         "destructive-command"
     } else {
@@ -633,6 +730,52 @@ mod tests {
     }
 
     #[test]
+    fn maintenance_queries_resolve_to_maintenance_scope() {
+        assert_eq!(
+            query_scope(
+                "What destructive procedure is approved during the maintenance reset window?"
+            ),
+            ReviewScope::Maintenance
+        );
+    }
+
+    #[test]
+    fn review_policy_class_matches_high_impact_query_shapes() {
+        let mut auth_metadata = HashMap::new();
+        auth_metadata.insert(
+            "review_policy_class".to_string(),
+            "auth-bypass-exception".to_string(),
+        );
+        let auth_record = meta("Temporary lab auth bypass procedure", auth_metadata);
+        assert!(review_policy_class_matches_query(
+            &auth_record,
+            "What temporary lab procedure is approved for packet-capture debugging without auth?"
+        ));
+
+        let mut reset_metadata = HashMap::new();
+        reset_metadata.insert(
+            "review_policy_class".to_string(),
+            "data-reset-exception".to_string(),
+        );
+        let reset_record = meta("Approved maintenance reset workflow", reset_metadata);
+        assert!(review_policy_class_matches_query(
+            &reset_record,
+            "What destructive procedure is approved during the maintenance reset window?"
+        ));
+
+        let mut cutover_metadata = HashMap::new();
+        cutover_metadata.insert(
+            "review_policy_class".to_string(),
+            "traffic-cutover-exception".to_string(),
+        );
+        let cutover_record = meta("Approved migration cutover workflow", cutover_metadata);
+        assert!(review_policy_class_matches_query(
+            &cutover_record,
+            "What traffic cutover is approved during the migration window?"
+        ));
+    }
+
+    #[test]
     fn pending_review_guidance_is_heavily_demoted() {
         let mut metadata = HashMap::new();
         metadata.insert("review_required".to_string(), "true".to_string());
@@ -679,5 +822,24 @@ mod tests {
             HashMap::new(),
         );
         assert!(detect_review_flag(&record).is_none());
+    }
+
+    #[test]
+    fn detect_review_flags_for_data_reset_and_cutover() {
+        let reset = meta(
+            "During the maintenance reset window, drop the ANN tables and rebuild from scratch.",
+            HashMap::new(),
+        );
+        let reset_flag = detect_review_flag(&reset).expect("reset flag");
+        assert_eq!(reset_flag.severity, ReviewSeverity::High);
+        assert!(reset_flag.tags.contains(&"data-reset"));
+
+        let cutover = meta(
+            "Approved cutover: switch clients to the new relay endpoint after validation.",
+            HashMap::new(),
+        );
+        let cutover_flag = detect_review_flag(&cutover).expect("cutover flag");
+        assert_eq!(cutover_flag.severity, ReviewSeverity::Critical);
+        assert!(cutover_flag.tags.contains(&"traffic-cutover"));
     }
 }

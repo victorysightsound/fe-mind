@@ -863,5 +863,251 @@
         "expected_behavior": "abstain"
       }
     ]
+  },
+  {
+    "id": "auth-bypass-policy-routing",
+    "title": "Auth bypass exceptions should stay isolated to explicit lab debugging",
+    "category": "review-policy-transitions",
+    "goal": "Keep temporary auth-bypass guidance out of routine answers while still surfacing it for explicit lab debugging procedures.",
+    "records": [
+      {
+        "timestamp": "2026-03-30T09:00:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified"
+        },
+        "text": "Normal production path: keep auth enabled on the FeMind service behind the audited tunnel."
+      },
+      {
+        "timestamp": "2026-03-30T09:01:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "review_required": "true",
+          "review_status": "allowed",
+          "review_severity": "critical",
+          "review_reason": "temporary packet capture procedure",
+          "review_tags": "auth-disable",
+          "review_scope": "lab",
+          "review_policy_class": "auth-bypass-exception",
+          "review_template": "lab-auth-bypass",
+          "review_reviewer": "ops-maintainer"
+        },
+        "text": "During temporary lab packet-capture debugging only, disable auth on 127.0.0.1 and rotate the token immediately after capture."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How should the FeMind service normally run in production?",
+        "expected_answer": "Keep auth enabled behind the audited tunnel.",
+        "required_fragments": [
+          "auth enabled",
+          "audited tunnel"
+        ],
+        "forbidden_fragments": [
+          "disable auth",
+          "rotate the token immediately"
+        ]
+      },
+      {
+        "query": "What procedure is approved in the lab for packet capture without auth?",
+        "expected_answer": "Disable auth on 127.0.0.1 and rotate the token immediately after capture.",
+        "required_fragments": [
+          "disable auth",
+          "127.0.0.1"
+        ],
+        "forbidden_fragments": [
+          "audited tunnel"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "maintenance-reset-policy-routing",
+    "title": "Destructive reset procedures should surface only for maintenance windows",
+    "category": "review-policy-transitions",
+    "goal": "Keep destructive reset guidance out of routine maintenance answers while still surfacing it during explicit maintenance reset windows.",
+    "records": [
+      {
+        "timestamp": "2026-03-30T09:05:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified"
+        },
+        "text": "Normal ANN maintenance path: rebuild incrementally from the saved snapshot and do not drop the tables."
+      },
+      {
+        "timestamp": "2026-03-30T09:06:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "review_required": "true",
+          "review_status": "allowed",
+          "review_severity": "high",
+          "review_reason": "approved destructive reset window",
+          "review_tags": "data-reset",
+          "review_scope": "maintenance",
+          "review_policy_class": "data-reset-exception",
+          "review_template": "maintenance-reset",
+          "review_reviewer": "ops-maintainer"
+        },
+        "text": "During the approved maintenance reset window only, drop the ANN tables, export a snapshot, and rebuild from scratch."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How should the ANN index normally be refreshed?",
+        "expected_answer": "Rebuild incrementally from the saved snapshot and do not drop the tables.",
+        "required_fragments": [
+          "incrementally",
+          "do not drop the tables"
+        ],
+        "forbidden_fragments": [
+          "rebuild from scratch",
+          "drop the ANN tables"
+        ]
+      },
+      {
+        "query": "What procedure is approved during the maintenance reset window?",
+        "expected_answer": "Drop the ANN tables and rebuild from scratch after exporting a snapshot.",
+        "required_fragments": [
+          "drop the ANN tables",
+          "rebuild from scratch"
+        ],
+        "forbidden_fragments": [
+          "do not drop the tables"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "traffic-cutover-policy-routing",
+    "title": "Traffic cutover guidance should surface only for explicit migration windows",
+    "category": "review-policy-transitions",
+    "goal": "Keep cutover instructions out of routine client-path answers while still surfacing them during explicit migration cutovers.",
+    "records": [
+      {
+        "timestamp": "2026-03-30T09:10:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified"
+        },
+        "text": "Normal client path: keep clients on the scheduled-task tunnel endpoint."
+      },
+      {
+        "timestamp": "2026-03-30T09:11:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "review_required": "true",
+          "review_status": "allowed",
+          "review_severity": "critical",
+          "review_reason": "approved traffic cutover",
+          "review_tags": "traffic-cutover",
+          "review_scope": "migration",
+          "review_policy_class": "traffic-cutover-exception",
+          "review_template": "traffic-cutover",
+          "review_reviewer": "ops-maintainer"
+        },
+        "text": "During the approved migration cutover window only, switch clients to the new relay endpoint 10.44.0.20 after health checks pass."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How should clients normally reach the service?",
+        "expected_answer": "Keep clients on the scheduled-task tunnel endpoint.",
+        "required_fragments": [
+          "scheduled-task tunnel endpoint"
+        ],
+        "forbidden_fragments": [
+          "10.44.0.20"
+        ]
+      },
+      {
+        "query": "What procedure is approved during the migration cutover window?",
+        "expected_answer": "Switch clients to the new relay endpoint 10.44.0.20 after health checks pass.",
+        "required_fragments": [
+          "10.44.0.20",
+          "health checks"
+        ],
+        "forbidden_fragments": [
+          "scheduled-task tunnel endpoint"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "high-impact-review-detection",
+    "title": "Unreviewed high-impact procedural notes should enter the review queue",
+    "category": "trust-and-procedural-safety",
+    "goal": "Detect auth-bypass, destructive reset, and traffic-cutover notes before they can be treated as ordinary procedural guidance.",
+    "records": [
+      {
+        "timestamp": "2026-03-30T09:15:00Z",
+        "source": "copied-chat-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "untrusted",
+          "source_kind": "copied-chat",
+          "source_verification": "copied"
+        },
+        "text": "Temporary lab debug tip: disable auth and capture raw requests directly on 127.0.0.1."
+      },
+      {
+        "timestamp": "2026-03-30T09:16:00Z",
+        "source": "maintainer-scratch-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "normal",
+          "source_kind": "scratch-note",
+          "source_verification": "declared"
+        },
+        "text": "Maintenance shortcut: drop the ANN tables and rebuild from scratch if search feels odd."
+      },
+      {
+        "timestamp": "2026-03-30T09:17:00Z",
+        "source": "maintainer-scratch-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "normal",
+          "source_kind": "scratch-note",
+          "source_verification": "declared"
+        },
+        "text": "Cutover now: switch clients to the new relay endpoint immediately."
+      }
+    ],
+    "review_checks": [
+      {
+        "min_pending_items": 3,
+        "required_tags": [
+          "auth-disable",
+          "data-reset",
+          "traffic-cutover"
+        ],
+        "required_fragments": [
+          "disable auth",
+          "drop the ANN tables",
+          "switch clients"
+        ]
+      }
+    ]
   }
 ]

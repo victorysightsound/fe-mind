@@ -116,9 +116,13 @@ Each scenario should include:
   - `required_tags`
   - `required_fragments`
   - `forbidden_fragments`
-  - review metadata on records such as `review_scope`, `review_policy_class`,
-    `review_reviewer`, `review_template`, `review_expires_at`, and
-    `review_replaced_by`
+- review metadata on records such as `review_scope`, `review_policy_class`,
+  `review_reviewer`, `review_template`, `review_expires_at`, and
+  `review_replaced_by`
+- high-impact review policy examples now include:
+  - auth bypass exceptions
+  - destructive reset windows
+  - traffic cutovers
 
 ## Release Use
 
@@ -266,8 +270,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `30/30`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `30/30`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `37/37`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `37/37`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
@@ -290,6 +294,11 @@ Current validated baseline:
 - review-policy coverage now also includes:
   - breakglass exceptions that surface only for explicit outage-recovery queries
   - scoped trusted-source conflict resolution for supported-path questions
+- higher-impact approval-class coverage now also includes:
+  - lab-only auth-bypass exceptions
+  - maintenance reset windows
+  - migration traffic cutovers
+  - pending-review detection for unreviewed auth bypass, data reset, and cutover notes
 - temporary review allowances can now be modeled with `review_expires_at`
   timestamps and inspected through the operator review CLI
 - review operations now also support template-driven approvals plus
@@ -301,8 +310,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `30/30`
-- latest reranker-aware `remote-fallback` ANN run passes `30/30`
+- latest reranker-aware `remote-fallback` exact run passes `37/37`
+- latest reranker-aware `remote-fallback` ANN run passes `37/37`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

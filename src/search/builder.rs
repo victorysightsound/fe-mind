@@ -1320,6 +1320,17 @@ fn procedural_conflict_rank(query: &str, meta: &MemoryMeta, score: f32) -> i32 {
         || normalized_query.contains("outage")
         || normalized_query.contains("temporary")
         || normalized_query.contains("recovery");
+    let query_prefers_high_impact_exception = query_prefers_exception
+        || normalized_query.contains("without auth")
+        || normalized_query.contains("disable auth")
+        || normalized_query.contains("bypass auth")
+        || normalized_query.contains("reset window")
+        || normalized_query.contains("maintenance reset")
+        || normalized_query.contains("rebuild from scratch")
+        || normalized_query.contains("destructive procedure")
+        || normalized_query.contains("cutover")
+        || normalized_query.contains("switch clients")
+        || normalized_query.contains("redirect traffic");
     let query_prefers_default = !query_prefers_exception
         && (normalized_query.contains("supported")
             || normalized_query.contains("approved")
@@ -1334,7 +1345,14 @@ fn procedural_conflict_rank(query: &str, meta: &MemoryMeta, score: f32) -> i32 {
         || normalized_text.contains("breakglass")
         || normalized_text.contains("workaround")
         || normalized_text.contains("older")
-        || normalized_text.contains("until");
+        || normalized_text.contains("until")
+        || normalized_text.contains("without auth")
+        || normalized_text.contains("disable auth")
+        || normalized_text.contains("rebuild from scratch")
+        || normalized_text.contains("drop the")
+        || normalized_text.contains("cutover")
+        || normalized_text.contains("switch clients")
+        || normalized_text.contains("redirect traffic");
     let text_is_staging = normalized_text.contains("staging") || normalized_text.contains("lab");
     let text_is_production = normalized_text.contains("production");
     let text_is_migration =
@@ -1373,10 +1391,10 @@ fn procedural_conflict_rank(query: &str, meta: &MemoryMeta, score: f32) -> i32 {
     if query_prefers_default && text_is_exception {
         rank -= 160;
     }
-    if query_prefers_exception && text_is_exception {
+    if query_prefers_high_impact_exception && text_is_exception {
         rank += 140;
     }
-    if query_prefers_exception && text_is_default {
+    if query_prefers_high_impact_exception && text_is_default {
         rank -= 120;
     }
 

@@ -1254,6 +1254,62 @@ hybrid retrieval.
 
 ---
 
+## Decision 040: Higher-Impact Procedural Changes Need Their Own Approval Classes
+
+**Date:** 2026-03-30
+
+**Decision:** Extend FeMind's review policy surface with explicit approval
+classes and templates for auth bypass, destructive reset windows, and traffic
+cutovers, and validate them through engine-first routing scenarios instead of
+only metadata parsing.
+
+**Context:** FeMind already handled scoped exceptions, breakglass recovery, and
+trusted conflict resolution, but several high-impact operational changes were
+still flattened into broad categories. That made it harder to separate routine
+guidance from:
+- temporary auth bypass for lab debugging
+- destructive index/database reset windows
+- migration cutovers that intentionally switch traffic
+
+**Rationale:**
+- these procedures are operationally distinct and should not share the same
+  retrieval rules as generic network exposure or maintenance notes
+- maintainers need approval templates with sensible default expiry windows
+- pending-review detection should catch these note types before they surface as
+  ordinary guidance
+- practical eval should exercise both:
+  - explicit approved exceptions
+  - unreviewed high-impact notes entering the queue
+
+**Consequences:**
+- review scopes now also include:
+  - `maintenance`
+- review policy classes now also include:
+  - `auth-bypass-exception`
+  - `data-reset-exception`
+  - `traffic-cutover-exception`
+- review templates now also include:
+  - `lab-auth-bypass`
+  - `maintenance-reset`
+  - `traffic-cutover`
+- query scope and policy matching now recognize:
+  - maintenance reset windows
+  - lab auth-bypass procedures
+  - migration cutover procedures
+- automatic review-flag detection now also tags:
+  - `data-reset`
+  - `traffic-cutover`
+- practical eval now includes explicit scenarios for:
+  - auth-bypass policy routing
+  - maintenance reset policy routing
+  - traffic cutover policy routing
+  - high-impact pending-review detection
+- Remote-GPU validation is green after the change:
+  practical `37/37` exact, practical `37/37` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

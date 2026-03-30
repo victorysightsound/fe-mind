@@ -164,6 +164,11 @@ Current status after the 2026-03-30 trust/safety pass:
 - approval policy classes now also include breakglass and private-infrastructure
   exceptions, and those classes actively shape retrieval rather than staying as
   passive metadata
+- higher-impact approval classes now also cover:
+  - auth bypass
+  - destructive reset windows
+  - traffic cutovers
+  with template defaults and scope-aware retrieval behavior
 - secret-policy classes now also cover private endpoints and internal hostnames
 - trusted sensitive guidance now resolves conflicts by provenance strength, so
   higher-confidence internal sources can suppress weaker trusted alternatives
@@ -173,8 +178,8 @@ Current status after the 2026-03-30 trust/safety pass:
   suppress generic defaults or weaker workaround notes when the query is
   explicit
 - the current remote-GPU engine-first baseline is:
-  - practical `30/30` exact
-  - practical `30/30` ann
+  - practical `37/37` exact
+  - practical `37/37` ann
   - live-library `58/58` exact
   - memloft-slice `90/90` exact
 

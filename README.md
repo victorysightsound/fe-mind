@@ -27,13 +27,17 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `30/30`
-- retrieval-only practical eval in `ann` mode currently passes `30/30`
+- retrieval-only practical eval in `exact` mode currently passes `37/37`
+- retrieval-only practical eval in `ann` mode currently passes `37/37`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
   text-only changed-fact scenarios
-  scenarios
+- practical eval now also covers higher-impact approval classes for:
+  - auth bypass
+  - destructive maintenance resets
+  - traffic cutovers
+  including both explicit routing and pending-review detection
 - larger real-world follow-up library now lives under `eval/live-library/`
 - larger real-world library now covers 18 scenarios and 58 retrieval checks
 - larger real-world library currently passes `58/58` in the standard
@@ -51,7 +55,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `30/30` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `37/37` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
@@ -117,6 +121,16 @@ The practical live-validation path is now established and repeatable:
 - review lifecycle metadata now also supports:
   - `review_template`
   - `review_replaced_by`
+- review scopes now also include:
+  - `maintenance`
+- review policy classes now also include:
+  - `auth-bypass-exception`
+  - `data-reset-exception`
+  - `traffic-cutover-exception`
+- review templates now also include:
+  - `lab-auth-bypass`
+  - `maintenance-reset`
+  - `traffic-cutover`
 - temporary review allowances can now carry `review_expires_at` timestamps and
   be normalized back to `expired` automatically when the allowance window ends
 - `femind-review` now provides an operator CLI for:

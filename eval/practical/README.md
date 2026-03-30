@@ -63,6 +63,14 @@ Useful review metadata keys for scenario records:
 - `review_expires_at`
 - `review_replaced_by`
 
+Common high-impact values now covered in the suite:
+
+- `review_scope`: `lab`, `migration`, `maintenance`
+- `review_policy_class`: `auth-bypass-exception`, `data-reset-exception`,
+  `traffic-cutover-exception`
+- `review_template`: `lab-auth-bypass`, `maintenance-reset`,
+  `traffic-cutover`
+
 ## Review Workflow
 
 1. ingest the scenario records using the selected provider path
@@ -153,8 +161,11 @@ Current local baseline:
   review-policy-transition scenarios
 - the practical set now also includes trusted private-endpoint conflict
   coverage with exact-detail abstention on sensitive infrastructure values
-- reranker-aware remote-fallback regression is currently green at `30/30`
-- reranker-aware remote-fallback ANN regression is also green at `30/30`
+- the practical set now also includes higher-impact approval-class routing for
+  auth bypass, destructive resets, and traffic cutovers, plus pending-review
+  detection for those note types
+- reranker-aware remote-fallback regression is currently green at `37/37`
+- reranker-aware remote-fallback ANN regression is also green at `37/37`
 - latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary
