@@ -7,13 +7,13 @@ use sha2::Digest;
 use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
 use crate::embeddings::EmbeddingBackend;
 use crate::error::{FemindError, Result};
-use crate::memory::store::StoreResult;
 use crate::memory::MemoryStore;
+use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{CompositeScorer, ImportanceScorer, MemoryTypeScorer, RecencyScorer};
 use crate::search::builder::SearchBuilder;
-use crate::storage::migrations;
 use crate::storage::Database;
+use crate::storage::migrations;
 use crate::traits::{MemoryRecord, RerankerBackend, ScoringStrategy};
 
 /// Result of a store_with_extraction() operation.
@@ -636,6 +636,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         use crate::search::fts5::strip_stop_words;
         use std::collections::HashMap;
 
+        let route = self.search(query).limit(limit).query_route();
+
         // Query variant 1: original
         let results1 = self.search(query).limit(limit).execute()?;
 
@@ -739,6 +741,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
         if self.config.graph_enabled && config.graph_depth > 0 {
             use crate::memory::{GraphMemory, RelationType};
+            use crate::search::StateConflictPolicy;
 
             // Graph expansion: traverse from the strongest lexical/semantic hits and
             // pull in connected memories with a depth-based score discount.
@@ -749,7 +752,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 .collect();
 
             for seed in &seed_results {
-                let Ok(nodes) = GraphMemory::traverse(&self.db, seed.memory_id, config.graph_depth) else {
+                let Ok(nodes) = GraphMemory::traverse(&self.db, seed.memory_id, config.graph_depth)
+                else {
                     continue;
                 };
 
@@ -777,6 +781,54 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                             score: candidate_score,
                         });
                 }
+
+                match route.state_conflict_policy {
+                    StateConflictPolicy::PreferCurrent => {
+                        let Ok(successors) =
+                            GraphMemory::superseded_successors(&self.db, seed.memory_id)
+                        else {
+                            continue;
+                        };
+
+                        for successor_id in successors {
+                            let candidate_score = seed.score * 0.96;
+                            expanded
+                                .entry(successor_id)
+                                .and_modify(|existing| {
+                                    if candidate_score > existing.score {
+                                        existing.score = candidate_score;
+                                    }
+                                })
+                                .or_insert(crate::search::builder::SearchResult {
+                                    memory_id: successor_id,
+                                    score: candidate_score,
+                                });
+                        }
+                    }
+                    StateConflictPolicy::PreferHistorical => {
+                        let Ok(predecessors) =
+                            GraphMemory::superseded_predecessors(&self.db, seed.memory_id)
+                        else {
+                            continue;
+                        };
+
+                        for predecessor_id in predecessors {
+                            let candidate_score = seed.score * 0.96;
+                            expanded
+                                .entry(predecessor_id)
+                                .and_modify(|existing| {
+                                    if candidate_score > existing.score {
+                                        existing.score = candidate_score;
+                                    }
+                                })
+                                .or_insert(crate::search::builder::SearchResult {
+                                    memory_id: predecessor_id,
+                                    score: candidate_score,
+                                });
+                        }
+                    }
+                    StateConflictPolicy::Neutral => {}
+                }
             }
 
             merged = expanded.into_values().collect();
@@ -786,48 +838,63 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            // Graph filtering: demote results that have been superseded by newer facts.
+            // Graph filtering: make current-vs-historical retrieval explicit instead of
+            // always demoting prior states.
             let mut superseded_ids: std::collections::HashSet<i64> =
                 std::collections::HashSet::new();
+            let mut current_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
 
-            // Check each result: does anything supersede it?
             for r in &merged {
-                // Look for incoming SupersededBy edges (this memory IS the old one)
-                let is_superseded = self
-                    .db
-                    .with_reader(|conn| {
-                        let count: i64 = conn
-                            .query_row(
-                                "SELECT COUNT(*) FROM memory_relations
-                         WHERE source_id = ?1 AND relation = 'superseded_by'",
-                                [r.memory_id],
-                                |row| row.get(0),
-                            )
-                            .unwrap_or(0);
-                        Ok::<bool, crate::error::FemindError>(count > 0)
-                    })
-                    .unwrap_or(false);
+                let snapshot = GraphMemory::state_conflict_snapshot(&self.db, r.memory_id)
+                    .ok()
+                    .flatten();
 
-                if is_superseded {
-                    superseded_ids.insert(r.memory_id);
+                if let Some(snapshot) = snapshot {
+                    if snapshot.is_superseded {
+                        superseded_ids.insert(r.memory_id);
+                    }
+                    if snapshot.supersedes_other {
+                        current_ids.insert(r.memory_id);
+                    }
                 }
             }
 
-            if !superseded_ids.is_empty() {
-                tracing::debug!(
-                    "Graph filtering: {} results demoted as superseded",
-                    superseded_ids.len()
-                );
-                for r in &mut merged {
-                    if superseded_ids.contains(&r.memory_id) {
-                        r.score *= 0.1; // Heavily demote outdated facts
+            match route.state_conflict_policy {
+                StateConflictPolicy::PreferCurrent if !superseded_ids.is_empty() => {
+                    tracing::debug!(
+                        "Graph filtering: {} prior-state results demoted for current-state route",
+                        superseded_ids.len()
+                    );
+                    for r in &mut merged {
+                        if superseded_ids.contains(&r.memory_id) {
+                            r.score *= 0.1;
+                        }
                     }
+                    merged.sort_by(|a, b| {
+                        b.score
+                            .partial_cmp(&a.score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
                 }
-                merged.sort_by(|a, b| {
-                    b.score
-                        .partial_cmp(&a.score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                StateConflictPolicy::PreferHistorical if !current_ids.is_empty() => {
+                    tracing::debug!(
+                        "Graph filtering: {} current-state results demoted for historical route",
+                        current_ids.len()
+                    );
+                    for r in &mut merged {
+                        if current_ids.contains(&r.memory_id) {
+                            r.score *= 0.35;
+                        }
+                    }
+                    merged.sort_by(|a, b| {
+                        b.score
+                            .partial_cmp(&a.score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
+                StateConflictPolicy::Neutral
+                | StateConflictPolicy::PreferCurrent
+                | StateConflictPolicy::PreferHistorical => {}
             }
         }
 
@@ -1482,6 +1549,72 @@ mod tests {
     }
 
     #[test]
+    fn historical_queries_expand_back_to_prior_state() {
+        use crate::context::AssemblyConfig;
+        use crate::memory::{GraphMemory, RelationType};
+        use chrono::Duration;
+
+        let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
+        let old = TestMem {
+            id: None,
+            text: "Before the rename, the repo was mindcore.".into(),
+            created_at: Utc::now() - Duration::days(30),
+        };
+        let current = TestMem {
+            id: None,
+            text: "The repo is now fe-mind.".into(),
+            created_at: Utc::now(),
+        };
+
+        let StoreResult::Added(old_id) = engine.store(&old).expect("store old") else {
+            panic!("expected Added");
+        };
+        let StoreResult::Added(current_id) = engine.store(&current).expect("store current") else {
+            panic!("expected Added");
+        };
+        GraphMemory::relate(&engine.db, old_id, current_id, &RelationType::SupersededBy)
+            .expect("relate");
+
+        let results = engine
+            .search_with_config(
+                "What was the repo before fe-mind?",
+                &AssemblyConfig {
+                    graph_depth: 1,
+                    max_per_session: 0,
+                    ..AssemblyConfig::default()
+                },
+            )
+            .expect("search");
+
+        let rendered = results
+            .iter()
+            .filter_map(|result| {
+                engine
+                    .db
+                    .with_reader(|conn| {
+                        conn.query_row(
+                            "SELECT searchable_text FROM memories WHERE id = ?1",
+                            [result.memory_id],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .map_err(crate::error::FemindError::Database)
+                    })
+                    .ok()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        assert!(
+            rendered.contains("mindcore"),
+            "historical route should be able to pull the prior state through supersession links"
+        );
+        assert!(
+            results.first().map(|result| result.memory_id) == Some(old_id),
+            "historical route should rank the prior state ahead of the current one"
+        );
+    }
+
+    #[test]
     fn count_via_engine() {
         let engine = MemoryEngine::<TestMem>::builder().build().expect("build");
         assert_eq!(engine.count().expect("count"), 0);
@@ -1636,7 +1769,8 @@ mod tests {
         else {
             panic!("expected Added");
         };
-        let StoreResult::Added(banana_id) = engine.store(&mem("banana fruit")).expect("store banana")
+        let StoreResult::Added(banana_id) =
+            engine.store(&mem("banana fruit")).expect("store banana")
         else {
             panic!("expected Added");
         };

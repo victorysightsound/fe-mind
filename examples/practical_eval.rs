@@ -6,9 +6,9 @@
     feature = "remote-embeddings"
 ))]
 mod app {
+    use std::collections::BTreeMap;
     use std::env;
     use std::fs;
-    use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -17,10 +17,10 @@ mod app {
     #[cfg(feature = "api-embeddings")]
     use femind::embeddings::ApiBackend;
     use femind::embeddings::EmbeddingBackend;
-    #[cfg(feature = "remote-embeddings")]
-    use femind::embeddings::RemoteEmbeddingBackend;
     #[cfg(feature = "api-embeddings")]
     use femind::embeddings::MINILM_DIMENSIONS;
+    #[cfg(feature = "remote-embeddings")]
+    use femind::embeddings::RemoteEmbeddingBackend;
     #[cfg(feature = "local-embeddings")]
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
     use femind::engine::{EngineConfig, MemoryEngine, VectorSearchMode};
@@ -34,7 +34,7 @@ mod app {
     use femind::reranking::CandleReranker;
     #[cfg(feature = "remote-reranking")]
     use femind::reranking::RemoteRerankerBackend;
-    use femind::reranking::{RerankerRuntime, RERANKER_CANONICAL_NAME};
+    use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
     use femind::search::{QueryRoute, SearchMode};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
@@ -591,6 +591,7 @@ mod app {
         mode: String,
         depth: String,
         temporal_policy: String,
+        state_conflict_policy: String,
         strict_grounding: bool,
         query_alignment: bool,
         rerank_limit: usize,
@@ -604,6 +605,7 @@ mod app {
                 mode: value.mode_name().to_string(),
                 depth: value.depth_name().to_string(),
                 temporal_policy: value.temporal_policy_name().to_string(),
+                state_conflict_policy: value.state_conflict_policy_name().to_string(),
                 strict_grounding: value.strict_grounding,
                 query_alignment: value.query_alignment,
                 rerank_limit: value.rerank_limit,
@@ -673,6 +675,7 @@ mod app {
         check_type_stats: BTreeMap<String, AggregateStats>,
         category_stats: BTreeMap<String, AggregateStats>,
         intent_stats: BTreeMap<String, AggregateStats>,
+        state_policy_stats: BTreeMap<String, AggregateStats>,
         reports: Vec<ScenarioReport>,
     }
 
@@ -773,7 +776,8 @@ mod app {
         println!("summary: {passed_checks}/{total_checks} checks passed");
 
         let duration_ms = started_at.elapsed().as_millis();
-        let (check_type_stats, category_stats, intent_stats) = summarize_reports(&reports);
+        let (check_type_stats, category_stats, intent_stats, state_policy_stats) =
+            summarize_reports(&reports);
         let summary = RunSummary {
             metadata: RunMetadata {
                 generated_at: Utc::now(),
@@ -823,6 +827,7 @@ mod app {
             check_type_stats,
             category_stats,
             intent_stats,
+            state_policy_stats,
             reports,
         };
 
@@ -963,10 +968,7 @@ mod app {
         })
     }
 
-    fn routed_search_plan(
-        engine: &MemoryEngine<EvalMemory>,
-        query: &str,
-    ) -> RoutedSearchPlan {
+    fn routed_search_plan(engine: &MemoryEngine<EvalMemory>, query: &str) -> RoutedSearchPlan {
         engine.search(query).query_route().into()
     }
 
@@ -976,10 +978,12 @@ mod app {
         BTreeMap<String, AggregateStats>,
         BTreeMap<String, AggregateStats>,
         BTreeMap<String, AggregateStats>,
+        BTreeMap<String, AggregateStats>,
     ) {
         let mut check_type_stats = BTreeMap::new();
         let mut category_stats = BTreeMap::new();
         let mut intent_stats = BTreeMap::new();
+        let mut state_policy_stats = BTreeMap::new();
 
         for report in reports {
             let retrieval_total = report.retrieval.len();
@@ -992,7 +996,11 @@ mod app {
             );
 
             let extraction_total = report.extraction.len();
-            let extraction_passed = report.extraction.iter().filter(|check| check.passed).count();
+            let extraction_passed = report
+                .extraction
+                .iter()
+                .filter(|check| check.passed)
+                .count();
             record_stat(
                 &mut check_type_stats,
                 "extraction",
@@ -1001,7 +1009,11 @@ mod app {
             );
 
             let abstention_total = report.abstention.len();
-            let abstention_passed = report.abstention.iter().filter(|check| check.passed).count();
+            let abstention_passed = report
+                .abstention
+                .iter()
+                .filter(|check| check.passed)
+                .count();
             record_stat(
                 &mut check_type_stats,
                 "abstention",
@@ -1026,6 +1038,12 @@ mod app {
                         1,
                         usize::from(check.passed),
                     );
+                    record_stat(
+                        &mut state_policy_stats,
+                        &route.state_conflict_policy,
+                        1,
+                        usize::from(check.passed),
+                    );
                 }
             }
         }
@@ -1033,7 +1051,13 @@ mod app {
         finalize_stats(&mut check_type_stats);
         finalize_stats(&mut category_stats);
         finalize_stats(&mut intent_stats);
-        (check_type_stats, category_stats, intent_stats)
+        finalize_stats(&mut state_policy_stats);
+        (
+            check_type_stats,
+            category_stats,
+            intent_stats,
+            state_policy_stats,
+        )
     }
 
     fn record_stat(

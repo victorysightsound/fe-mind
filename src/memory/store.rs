@@ -69,13 +69,15 @@ impl<T: MemoryRecord> MemoryStore<T> {
             Some(serde_json::to_string(&record.metadata())?)
         };
         let created_at = record.created_at().to_rfc3339();
+        let valid_from = record_valid_from(record);
+        let valid_until = record_valid_until(record);
 
         db.with_writer(|conn| {
             conn.execute(
                 "INSERT INTO memories (
                     searchable_text, memory_type, importance, category,
-                    metadata_json, content_hash, created_at, record_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    metadata_json, content_hash, created_at, valid_from, valid_until, record_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     searchable_text,
                     memory_type,
@@ -84,6 +86,8 @@ impl<T: MemoryRecord> MemoryStore<T> {
                     metadata_json,
                     content_hash,
                     created_at,
+                    valid_from,
+                    valid_until,
                     record_json,
                 ],
             )?;
@@ -127,6 +131,8 @@ impl<T: MemoryRecord> MemoryStore<T> {
         } else {
             Some(serde_json::to_string(&record.metadata())?)
         };
+        let valid_from = record_valid_from(record);
+        let valid_until = record_valid_until(record);
 
         db.with_writer(|conn| {
             let rows = conn.execute(
@@ -139,8 +145,10 @@ impl<T: MemoryRecord> MemoryStore<T> {
                     content_hash = ?6,
                     embedding_status = 'pending',
                     updated_at = datetime('now'),
-                    record_json = ?7
-                WHERE id = ?8",
+                    valid_from = ?7,
+                    valid_until = ?8,
+                    record_json = ?9
+                WHERE id = ?10",
                 params![
                     searchable_text,
                     memory_type,
@@ -148,6 +156,8 @@ impl<T: MemoryRecord> MemoryStore<T> {
                     category,
                     metadata_json,
                     content_hash,
+                    valid_from,
+                    valid_until,
                     record_json,
                     id,
                 ],
@@ -198,6 +208,26 @@ impl<T: MemoryRecord> MemoryStore<T> {
         hasher.update(text.as_bytes());
         format!("{:x}", hasher.finalize())
     }
+}
+
+#[cfg(feature = "temporal")]
+fn record_valid_from<T: MemoryRecord>(record: &T) -> Option<String> {
+    record.valid_from().map(|value| value.to_rfc3339())
+}
+
+#[cfg(not(feature = "temporal"))]
+fn record_valid_from<T: MemoryRecord>(_record: &T) -> Option<String> {
+    None
+}
+
+#[cfg(feature = "temporal")]
+fn record_valid_until<T: MemoryRecord>(record: &T) -> Option<String> {
+    record.valid_until().map(|value| value.to_rfc3339())
+}
+
+#[cfg(not(feature = "temporal"))]
+fn record_valid_until<T: MemoryRecord>(_record: &T) -> Option<String> {
+    None
 }
 
 #[cfg(test)]

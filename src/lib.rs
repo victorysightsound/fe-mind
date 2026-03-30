@@ -68,7 +68,7 @@ pub mod prelude {
     pub use crate::memory::store::StoreResult;
     pub use crate::search::{
         QueryIntent, QueryRoute, SearchBuilder, SearchDepth, SearchMode, SearchResult,
-        TemporalPolicy,
+        StateConflictPolicy, TemporalPolicy,
     };
     pub use crate::traits::{MemoryMeta, MemoryRecord, MemoryType};
 }

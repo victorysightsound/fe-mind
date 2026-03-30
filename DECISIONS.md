@@ -622,6 +622,44 @@ aggregation, exact-detail, and abstention-style questions independently.
 
 ---
 
+## Decision 026: Explicit State/Conflict Retrieval Policy
+
+**Date:** 2026-03-30
+
+**Decision:** Treat supersession and validity windows as first-class retrieval
+signals, not just incidental graph metadata.
+
+**Context:** After `QueryIntent` routing and temporal bias landed, FeMind still
+handled changed facts too bluntly. Current-state queries mostly benefited from
+recency, while graph filtering always demoted superseded facts regardless of
+whether the caller wanted the current answer or the earlier one. The search
+builder also exposed `valid_at(...)` without actually enforcing it.
+
+**Rationale:**
+- Current-state and historical-state questions need different conflict behavior,
+  not only different timestamp bias
+- Supersession links should help retrieval in both directions:
+  forward to the replacement fact for current-state questions, and backward to
+  the prior fact for historical-state questions
+- Validity windows have to affect real retrieval if FeMind is going to model
+  state over time cleanly
+
+**Consequences:**
+- Query routes now carry a `state_conflict_policy` alongside `QueryIntent` and
+  temporal policy
+- Current-state routes demote superseded memories and can walk forward through
+  `SupersededBy` links to the replacement fact
+- Historical-state routes can walk backward through `SupersededBy` links to the
+  prior state and demote current-state replacements when appropriate
+- `SearchBuilder::valid_at(...)` now filters against `valid_from` /
+  `valid_until` instead of being a no-op
+- Memory store writes now persist `valid_from` / `valid_until` when the
+  `temporal` feature is enabled
+- Practical evaluation summaries now record state/conflict policy statistics in
+  addition to intent-level breakdowns
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

@@ -25,6 +25,16 @@ The research signal from 2025-2026 is consistent: top memory systems are not jus
 - evaluated with retrieval diagnostics, not only end scores
 - hardened against persistent memory poisoning
 
+As of the current FeMind pass, the first layer of that roadmap is already in place:
+
+- `QueryIntent` routing is live
+- route-level temporal policy is live
+- route-level state/conflict policy is live
+- `valid_at(...)` now enforces validity windows during retrieval
+
+That means the next temporal work should focus on deeper state modeling, not on
+re-adding the basic routing layer.
+
 ---
 
 ## Recommended Next Priorities

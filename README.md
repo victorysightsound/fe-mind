@@ -57,6 +57,12 @@ The practical live-validation path is now established and repeatable:
   current-state queries mildly favor newer evidence, historical-state queries
   mildly favor older evidence, and exact-detail / abstention routes stay
   temporally neutral unless the caller overrides them
+- routed retrieval now also includes an explicit state/conflict policy:
+  current-state routes demote superseded memories and can walk forward to the
+  replacement fact, while historical-state routes can walk backward to prior
+  states through supersession links
+- `SearchBuilder::valid_at(...)` is now enforced against stored `valid_from` /
+  `valid_until` windows instead of being a no-op
 
 ## Migration
 

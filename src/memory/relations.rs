@@ -1,3 +1,4 @@
+use chrono::{DateTime, NaiveDateTime, Utc};
 use rusqlite::params;
 
 use crate::error::Result;
@@ -60,6 +61,30 @@ impl RelationType {
 
 /// Graph relationship operations on memories.
 pub struct GraphMemory;
+
+/// Snapshot of a memory's current state/conflict markers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StateConflictSnapshot {
+    /// This memory has been superseded by a newer memory.
+    pub is_superseded: bool,
+    /// This memory supersedes at least one older memory.
+    pub supersedes_other: bool,
+    /// This memory participates in at least one explicit conflict edge.
+    pub has_conflict: bool,
+    /// Optional temporal validity start.
+    pub valid_from: Option<DateTime<Utc>>,
+    /// Optional temporal validity end.
+    pub valid_until: Option<DateTime<Utc>>,
+}
+
+impl StateConflictSnapshot {
+    /// Returns true when the memory is valid at the specified time.
+    pub fn is_valid_at(&self, at: DateTime<Utc>) -> bool {
+        let starts_ok = self.valid_from.is_none_or(|value| value <= at);
+        let ends_ok = self.valid_until.is_none_or(|value| value > at);
+        starts_ok && ends_ok
+    }
+}
 
 impl GraphMemory {
     /// Create a relationship between two memories.
@@ -162,6 +187,94 @@ impl GraphMemory {
         })
     }
 
+    /// Get direct supersession successors (`old -> new`) for a memory.
+    pub fn superseded_successors(db: &Database, memory_id: i64) -> Result<Vec<i64>> {
+        db.with_reader(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT target_id FROM memory_relations
+                 WHERE source_id = ?1
+                   AND relation = 'superseded_by'
+                   AND (valid_until IS NULL OR valid_until > datetime('now'))",
+            )?;
+
+            let ids: Vec<i64> = stmt
+                .query_map([memory_id], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok(ids)
+        })
+    }
+
+    /// Get direct supersession predecessors (`old -> new`) for a memory.
+    pub fn superseded_predecessors(db: &Database, memory_id: i64) -> Result<Vec<i64>> {
+        db.with_reader(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT source_id FROM memory_relations
+                 WHERE target_id = ?1
+                   AND relation = 'superseded_by'
+                   AND (valid_until IS NULL OR valid_until > datetime('now'))",
+            )?;
+
+            let ids: Vec<i64> = stmt
+                .query_map([memory_id], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok(ids)
+        })
+    }
+
+    /// Load the current state/conflict markers for a memory.
+    pub fn state_conflict_snapshot(
+        db: &Database,
+        memory_id: i64,
+    ) -> Result<Option<StateConflictSnapshot>> {
+        db.with_reader(|conn| {
+            let result = conn.query_row(
+                "SELECT
+                    EXISTS(
+                        SELECT 1 FROM memory_relations r
+                        WHERE r.source_id = m.id
+                          AND r.relation = 'superseded_by'
+                          AND (r.valid_until IS NULL OR r.valid_until > datetime('now'))
+                    ) AS is_superseded,
+                    EXISTS(
+                        SELECT 1 FROM memory_relations r
+                        WHERE r.target_id = m.id
+                          AND r.relation = 'superseded_by'
+                          AND (r.valid_until IS NULL OR r.valid_until > datetime('now'))
+                    ) AS supersedes_other,
+                    EXISTS(
+                        SELECT 1 FROM memory_relations r
+                        WHERE (r.source_id = m.id OR r.target_id = m.id)
+                          AND r.relation = 'conflicts_with'
+                          AND (r.valid_until IS NULL OR r.valid_until > datetime('now'))
+                    ) AS has_conflict,
+                    m.valid_from,
+                    m.valid_until
+                 FROM memories m
+                 WHERE m.id = ?1",
+                [memory_id],
+                |row| {
+                    Ok(StateConflictSnapshot {
+                        is_superseded: row.get::<_, bool>(0)?,
+                        supersedes_other: row.get::<_, bool>(1)?,
+                        has_conflict: row.get::<_, bool>(2)?,
+                        valid_from: parse_optional_temporal(row.get(3)?),
+                        valid_until: parse_optional_temporal(row.get(4)?),
+                    })
+                },
+            );
+
+            match result {
+                Ok(snapshot) => Ok(Some(snapshot)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e.into()),
+            }
+        })
+    }
+
     /// Compute a scoring boost for connected memories.
     ///
     /// Returns `1.0 / (depth + 1)`:
@@ -170,6 +283,17 @@ impl GraphMemory {
     pub fn depth_boost(depth: u32) -> f32 {
         1.0 / (depth as f32 + 1.0)
     }
+}
+
+fn parse_optional_temporal(value: Option<String>) -> Option<DateTime<Utc>> {
+    let value = value?;
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(&value) {
+        return Some(parsed.with_timezone(&Utc));
+    }
+    if let Ok(parsed) = NaiveDateTime::parse_from_str(&value, "%Y-%m-%d %H:%M:%S") {
+        return Some(DateTime::<Utc>::from_naive_utc_and_offset(parsed, Utc));
+    }
+    None
 }
 
 /// A node in the memory graph.
@@ -288,6 +412,36 @@ mod tests {
         assert!((GraphMemory::depth_boost(1) - 0.5).abs() < 0.01);
         assert!((GraphMemory::depth_boost(2) - 0.333).abs() < 0.01);
         assert!((GraphMemory::depth_boost(0) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn supersession_helpers_expose_predecessors_and_successors() {
+        let db = setup();
+        GraphMemory::relate(&db, 1, 2, &RelationType::SupersededBy).expect("1→2");
+
+        let successors = GraphMemory::superseded_successors(&db, 1).expect("successors");
+        let predecessors = GraphMemory::superseded_predecessors(&db, 2).expect("predecessors");
+
+        assert_eq!(successors, vec![2]);
+        assert_eq!(predecessors, vec![1]);
+    }
+
+    #[test]
+    fn state_snapshot_reports_supersession_flags() {
+        let db = setup();
+        GraphMemory::relate(&db, 1, 2, &RelationType::SupersededBy).expect("1→2");
+
+        let old = GraphMemory::state_conflict_snapshot(&db, 1)
+            .expect("snapshot")
+            .expect("present");
+        let current = GraphMemory::state_conflict_snapshot(&db, 2)
+            .expect("snapshot")
+            .expect("present");
+
+        assert!(old.is_superseded);
+        assert!(!old.supersedes_other);
+        assert!(!current.is_superseded);
+        assert!(current.supersedes_other);
     }
 
     #[test]

@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use crate::embeddings::EmbeddingBackend;
 use crate::engine::VectorSearchMode;
 use crate::error::Result;
+use crate::memory::GraphMemory;
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
 use crate::search::vector::VectorSearch;
@@ -94,6 +95,30 @@ impl std::fmt::Display for TemporalPolicy {
     }
 }
 
+/// Route-level state/conflict preference applied after first-stage retrieval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum StateConflictPolicy {
+    Neutral,
+    PreferCurrent,
+    PreferHistorical,
+}
+
+impl StateConflictPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Neutral => "neutral",
+            Self::PreferCurrent => "prefer-current",
+            Self::PreferHistorical => "prefer-historical",
+        }
+    }
+}
+
+impl std::fmt::Display for StateConflictPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl std::fmt::Display for QueryIntent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -107,6 +132,7 @@ pub struct QueryRoute {
     pub mode: SearchMode,
     pub depth: SearchDepth,
     pub temporal_policy: TemporalPolicy,
+    pub state_conflict_policy: StateConflictPolicy,
     pub strict_grounding: bool,
     pub query_alignment: bool,
     pub rerank_limit: usize,
@@ -134,6 +160,10 @@ impl QueryRoute {
 
     pub fn temporal_policy_name(&self) -> &'static str {
         self.temporal_policy.as_str()
+    }
+
+    pub fn state_conflict_policy_name(&self) -> &'static str {
+        self.state_conflict_policy.as_str()
     }
 }
 
@@ -319,13 +349,16 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
     /// Return the effective routed plan for this query.
     pub fn query_route(&self) -> QueryRoute {
-        let intent = self.query_intent.unwrap_or_else(|| infer_query_intent(&self.query));
+        let intent = self
+            .query_intent
+            .unwrap_or_else(|| infer_query_intent(&self.query));
         if !self.routing_enabled {
             return QueryRoute {
                 intent,
                 mode: self.mode.clone(),
                 depth: self.depth,
                 temporal_policy: TemporalPolicy::Neutral,
+                state_conflict_policy: StateConflictPolicy::Neutral,
                 strict_grounding: self.strict_grounding_enabled,
                 query_alignment: self.query_alignment_enabled,
                 rerank_limit: self.rerank_limit,
@@ -354,7 +387,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let strict_grounding = if self.strict_grounding_overridden {
             self.strict_grounding_enabled
         } else {
-            matches!(intent, QueryIntent::ExactDetail | QueryIntent::AbstentionRisk)
+            matches!(
+                intent,
+                QueryIntent::ExactDetail | QueryIntent::AbstentionRisk
+            )
         };
 
         let temporal_policy = match intent {
@@ -366,10 +402,22 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             | QueryIntent::AbstentionRisk => TemporalPolicy::Neutral,
         };
 
+        let state_conflict_policy = match intent {
+            QueryIntent::CurrentState => StateConflictPolicy::PreferCurrent,
+            QueryIntent::HistoricalState => StateConflictPolicy::PreferHistorical,
+            QueryIntent::General
+            | QueryIntent::ExactDetail
+            | QueryIntent::Aggregation
+            | QueryIntent::AbstentionRisk => StateConflictPolicy::Neutral,
+        };
+
         let query_alignment = if self.query_alignment_overridden {
             self.query_alignment_enabled
         } else {
-            !matches!(intent, QueryIntent::Aggregation | QueryIntent::AbstentionRisk)
+            !matches!(
+                intent,
+                QueryIntent::Aggregation | QueryIntent::AbstentionRisk
+            )
         };
 
         let rerank_limit = if self.rerank_limit_overridden {
@@ -387,9 +435,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let note = match intent {
             QueryIntent::General => "default hybrid-style retrieval",
-            QueryIntent::ExactDetail => {
-                "exact-detail query; keep grounding and compact reranking"
-            }
+            QueryIntent::ExactDetail => "exact-detail query; keep grounding and compact reranking",
             QueryIntent::CurrentState => {
                 "current-state query; widen reranking and favor current-state evidence"
             }
@@ -409,6 +455,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             mode,
             depth,
             temporal_policy,
+            state_conflict_policy,
             strict_grounding,
             query_alignment,
             rerank_limit,
@@ -500,6 +547,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let mut results = self.apply_filters(fts_results);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
+        apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
 
         // Apply min_score filter
         if let Some(threshold) = self.min_score {
@@ -528,6 +576,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let mut results = self.apply_filters(fts_results);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
+        apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         results.retain(|r| r.score >= min_score);
         Ok(results)
     }
@@ -554,6 +603,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let mut results = self.apply_filters(vector_results);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
+        apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         if route.strict_grounding {
             apply_strict_detail_query_filter(self.db, &self.query, &mut results);
         }
@@ -606,6 +656,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let mut results = self.apply_filters(merged);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
+        apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
 
         // Reranking disabled — RRF + vector weighting provides better ranking
         // rerank_results(self.db, &mut results, &self.query);
@@ -750,6 +801,15 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         // Apply post-search scoring if a strategy is configured
         if let Some(ref scoring) = self.scoring {
             self.apply_scoring(&mut results, scoring);
+        }
+
+        if let Some(valid_at) = self.valid_at {
+            results.retain(|result| {
+                GraphMemory::state_conflict_snapshot(self.db, result.memory_id)
+                    .ok()
+                    .flatten()
+                    .is_none_or(|snapshot| snapshot.is_valid_at(valid_at))
+            });
         }
 
         // Re-sort by final score (descending)
@@ -998,6 +1058,86 @@ fn apply_temporal_route_bias(
             TemporalPolicy::PreferNewer => 0.9 + 0.2 * normalized_recent,
             TemporalPolicy::PreferOlder => 0.9 + 0.2 * (1.0 - normalized_recent),
         };
+        result.score *= multiplier;
+    }
+
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
+fn apply_state_conflict_route_bias(
+    db: &Database,
+    results: &mut [SearchResult],
+    policy: StateConflictPolicy,
+) {
+    if results.len() < 2 || matches!(policy, StateConflictPolicy::Neutral) {
+        return;
+    }
+
+    let now = Utc::now();
+    for result in results.iter_mut() {
+        let Some(snapshot) = GraphMemory::state_conflict_snapshot(db, result.memory_id)
+            .ok()
+            .flatten()
+        else {
+            continue;
+        };
+
+        let mut multiplier = match policy {
+            StateConflictPolicy::Neutral => 1.0,
+            StateConflictPolicy::PreferCurrent => {
+                let mut value = 1.0;
+                if snapshot.is_superseded {
+                    value *= 0.42;
+                }
+                if snapshot.supersedes_other {
+                    value *= 1.18;
+                }
+                if snapshot
+                    .valid_until
+                    .is_some_and(|valid_until| valid_until <= now)
+                {
+                    value *= 0.6;
+                }
+                if snapshot
+                    .valid_from
+                    .is_some_and(|valid_from| valid_from > now)
+                {
+                    value *= 0.75;
+                }
+                value
+            }
+            StateConflictPolicy::PreferHistorical => {
+                let mut value = 1.0;
+                if snapshot.is_superseded {
+                    value *= 1.3;
+                }
+                if snapshot.supersedes_other {
+                    value *= 0.82;
+                }
+                if snapshot
+                    .valid_until
+                    .is_some_and(|valid_until| valid_until <= now)
+                {
+                    value *= 1.08;
+                }
+                if snapshot
+                    .valid_from
+                    .is_some_and(|valid_from| valid_from > now)
+                {
+                    value *= 0.7;
+                }
+                value
+            }
+        };
+
+        if snapshot.has_conflict {
+            multiplier *= 0.97;
+        }
+
         result.score *= multiplier;
     }
 
@@ -1351,7 +1491,7 @@ fn canonical_token(token: &str) -> Option<String> {
         | "its" | "still" | "then" | "than" | "because" | "what" | "which" | "who" | "should"
         | "not" | "do" | "does" | "did" | "yet" | "after" | "before" | "over" | "under"
         | "with" | "without" | "from" | "into" | "about" | "no" | "current" | "earlier" => {
-            return None
+            return None;
         }
         "keep" | "used" | "use" => "prefer",
         "tried" | "try" => "first",
@@ -1764,6 +1904,7 @@ mod tests {
     use crate::memory::MemoryStore;
     use crate::storage::migrations;
     use chrono::Utc;
+    use rusqlite::params;
 
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     struct TestMem {
@@ -2009,8 +2150,7 @@ mod tests {
     #[test]
     fn lexical_grounding_accepts_source_of_truth_db_path() {
         let query = "Is the primary local source of truth file femind_architecture.sql?";
-        let supporting_hit =
-            "The primary local source of truth is .docs/femind_spec.db. The markdown docs in the repo should stay aligned with that database.";
+        let supporting_hit = "The primary local source of truth is .docs/femind_spec.db. The markdown docs in the repo should stay aligned with that database.";
 
         assert!(query_requires_strict_grounding(query));
         assert!(lexical_grounding_ok(query, supporting_hit));
@@ -2019,8 +2159,7 @@ mod tests {
     #[test]
     fn query_alignment_boosts_negative_limit_text() {
         let negative_query = "What did benchmark work not prove reliably?";
-        let negative_hit =
-            "Benchmarks did not test LLM fact extraction quality, graph-based retrieval, or real conversation memory.";
+        let negative_hit = "Benchmarks did not test LLM fact extraction quality, graph-based retrieval, or real conversation memory.";
         let positive_hit = "Benchmarks validated the core search pipeline.";
 
         assert!(
@@ -2032,8 +2171,7 @@ mod tests {
     #[test]
     fn query_alignment_treats_prefer_as_preference_signal() {
         let query = "What embedding path is preferred for evaluation workflows?";
-        let preference_hit =
-            "Update: for benchmark and evaluation workflows, prefer DeepInfra MiniLM embeddings because they are much faster and cheap enough.";
+        let preference_hit = "Update: for benchmark and evaluation workflows, prefer DeepInfra MiniLM embeddings because they are much faster and cheap enough.";
         let non_preference_hit =
             "Benchmark and evaluation workflows were discussed during the last planning review.";
 
@@ -2046,8 +2184,7 @@ mod tests {
     #[test]
     fn lexical_grounding_allows_generic_embedding_path_preference_text() {
         let query = "What embedding path is preferred for evaluation workflows?";
-        let supporting_hit =
-            "Update: for benchmark and evaluation workflows, prefer DeepInfra MiniLM embeddings because they are much faster and cheap enough.";
+        let supporting_hit = "Update: for benchmark and evaluation workflows, prefer DeepInfra MiniLM embeddings because they are much faster and cheap enough.";
 
         assert!(lexical_grounding_ok(query, supporting_hit));
     }
@@ -2063,7 +2200,9 @@ mod tests {
             QueryIntent::ExactDetail
         );
         assert_eq!(
-            infer_query_intent("What exact token count threshold triggers the lexical-grounding filter?"),
+            infer_query_intent(
+                "What exact token count threshold triggers the lexical-grounding filter?"
+            ),
             QueryIntent::ExactDetail
         );
         assert_eq!(
@@ -2099,8 +2238,8 @@ mod tests {
     #[test]
     fn query_route_adjusts_plan_for_abstention_queries() {
         let db = setup();
-        let route = SearchBuilder::<TestMem>::new(&db, "Did we ever mention Redis at all?")
-            .query_route();
+        let route =
+            SearchBuilder::<TestMem>::new(&db, "Did we ever mention Redis at all?").query_route();
         assert_eq!(route.intent, QueryIntent::AbstentionRisk);
         assert!(matches!(route.mode, SearchMode::Keyword));
         assert!(route.strict_grounding);
@@ -2111,14 +2250,22 @@ mod tests {
     #[test]
     fn query_route_widens_reranking_for_state_queries() {
         let db = setup();
-        let current = SearchBuilder::<TestMem>::new(&db, "What is the current preferred path?")
-            .query_route();
-        let historical = SearchBuilder::<TestMem>::new(&db, "What was the preferred path before?")
-            .query_route();
+        let current =
+            SearchBuilder::<TestMem>::new(&db, "What is the current preferred path?").query_route();
+        let historical =
+            SearchBuilder::<TestMem>::new(&db, "What was the preferred path before?").query_route();
         assert_eq!(current.intent, QueryIntent::CurrentState);
         assert_eq!(historical.intent, QueryIntent::HistoricalState);
         assert_eq!(current.temporal_policy, TemporalPolicy::PreferNewer);
         assert_eq!(historical.temporal_policy, TemporalPolicy::PreferOlder);
+        assert_eq!(
+            current.state_conflict_policy,
+            StateConflictPolicy::PreferCurrent
+        );
+        assert_eq!(
+            historical.state_conflict_policy,
+            StateConflictPolicy::PreferHistorical
+        );
         assert!(current.query_alignment);
         assert!(historical.query_alignment);
         assert_eq!(current.rerank_limit, 30);
@@ -2258,5 +2405,182 @@ mod tests {
         ];
         apply_temporal_route_bias(&db, &mut results, TemporalPolicy::PreferOlder);
         assert_eq!(results[0].memory_id, older_id);
+    }
+
+    #[test]
+    fn state_conflict_bias_prefers_current_for_current_queries() {
+        use crate::memory::{GraphMemory, RelationType};
+
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let older = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "desktop-first was the earlier plan".to_string(),
+                    category: None,
+                    created_at: Utc::now() - chrono::Duration::days(7),
+                },
+            )
+            .expect("store old");
+        let newer = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "current plan starts with femind".to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store new");
+
+        let older_id = match older {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let newer_id = match newer {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        GraphMemory::relate(&db, older_id, newer_id, &RelationType::SupersededBy).expect("relate");
+
+        let mut results = vec![
+            SearchResult {
+                memory_id: older_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: newer_id,
+                score: 1.0,
+            },
+        ];
+        apply_state_conflict_route_bias(&db, &mut results, StateConflictPolicy::PreferCurrent);
+        assert_eq!(results[0].memory_id, newer_id);
+    }
+
+    #[test]
+    fn state_conflict_bias_prefers_prior_state_for_historical_queries() {
+        use crate::memory::{GraphMemory, RelationType};
+
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let older = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "before the rename the repo was mindcore".to_string(),
+                    category: None,
+                    created_at: Utc::now() - chrono::Duration::days(30),
+                },
+            )
+            .expect("store old");
+        let newer = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "the repo is now fe-mind".to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store new");
+
+        let older_id = match older {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let newer_id = match newer {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        GraphMemory::relate(&db, older_id, newer_id, &RelationType::SupersededBy).expect("relate");
+
+        let mut results = vec![
+            SearchResult {
+                memory_id: newer_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: older_id,
+                score: 1.0,
+            },
+        ];
+        apply_state_conflict_route_bias(&db, &mut results, StateConflictPolicy::PreferHistorical);
+        assert_eq!(results[0].memory_id, older_id);
+    }
+
+    #[test]
+    fn valid_at_filters_out_memories_outside_validity_window() {
+        let db = setup();
+        let historical = "2026-03-01T00:00:00Z";
+        let current = "2026-03-25T00:00:00Z";
+        db.with_writer(|conn| {
+            conn.execute(
+                "INSERT INTO memories (
+                    searchable_text, memory_type, content_hash, created_at, valid_from, valid_until, record_json
+                 ) VALUES (?1, 'semantic', ?2, ?3, ?4, ?5, '{}')",
+                params![
+                    "repo was mindcore before the rename",
+                    "valid_old",
+                    historical,
+                    historical,
+                    current,
+                ],
+            )?;
+            conn.execute(
+                "INSERT INTO memories (
+                    searchable_text, memory_type, content_hash, created_at, valid_from, record_json
+                 ) VALUES (?1, 'semantic', ?2, ?3, ?4, '{}')",
+                params![
+                    "repo is now fe-mind",
+                    "valid_new",
+                    current,
+                    current,
+                ],
+            )?;
+            Ok::<(), crate::error::FemindError>(())
+        })
+        .expect("insert");
+
+        let results = SearchBuilder::<TestMem>::new(&db, "repo")
+            .valid_at(
+                chrono::DateTime::parse_from_rfc3339("2026-03-20T00:00:00Z")
+                    .expect("parse")
+                    .with_timezone(&Utc),
+            )
+            .limit(10)
+            .execute()
+            .expect("search");
+
+        assert_eq!(results.len(), 1);
+        let text = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [results[0].memory_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(crate::error::FemindError::Database)
+            })
+            .expect("load");
+        assert!(text.contains("mindcore"));
     }
 }

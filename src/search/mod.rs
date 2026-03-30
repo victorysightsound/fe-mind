@@ -9,7 +9,7 @@ pub mod vector;
 pub use ann::AnnIndex;
 pub use builder::{
     QueryIntent, QueryRoute, SearchBuilder, SearchDepth, SearchMode, SearchResult,
-    TemporalPolicy,
+    StateConflictPolicy, TemporalPolicy,
 };
 pub use fts5::{FtsResult, FtsSearch};
 pub use hybrid::rrf_merge;

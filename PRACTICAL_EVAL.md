@@ -160,16 +160,24 @@ The summary now also records:
 - check-type pass-rate breakdowns
 - scenario-category pass-rate breakdowns
 - query-intent pass-rate breakdowns
+- state/conflict-policy pass-rate breakdowns
 - per-check routed search plans showing inferred intent, mode, depth,
-  temporal policy, grounding, query-alignment, and rerank settings
+  temporal policy, state/conflict policy, grounding, query-alignment, and
+  rerank settings
 
 That routed plan is now part of the actual retrieval behavior, not just a
 diagnostic label:
 
 - current-state routes mildly favor newer evidence by `created_at`
 - historical-state routes mildly favor older evidence by `created_at`
+- current-state routes explicitly demote superseded memories and can follow
+  supersession links forward to the replacement fact
+- historical-state routes can follow supersession links backward to earlier
+  states instead of only favoring older timestamps
 - exact-detail and abstention-focused routes stay temporally neutral unless a
   caller overrides the search settings directly
+- `valid_at(...)` searches now respect stored `valid_from` / `valid_until`
+  windows, so time-scoped retrieval is part of the real engine path
 
 Graph-focused follow-up validation can be enabled explicitly:
 
