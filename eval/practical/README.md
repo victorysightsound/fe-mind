@@ -25,6 +25,7 @@ Each scenario includes:
 - `records`
 - optional `records[].key` for explicit graph-linked scenarios
 - `records[].memory_type` (`episodic`, `semantic`, or `procedural`)
+- optional `records[].metadata`, including trust markers such as `source_trust`
 - optional `records[].valid_from` / `records[].valid_until` (RFC3339)
 - optional `relations` for explicit source-record graph links
 - `relations[].from` / `relations[].to` refer to `records[].key`
@@ -105,6 +106,7 @@ The summary artifact now includes:
   - temporal policy
   - state/conflict policy
   - graph depth
+  - composed-answer confidence and abstention rationale when available
 
 The graph-connected scenario now relies on routed graph depth rather than a
 scenario-level forced graph override, so the practical set checks that the
@@ -119,8 +121,9 @@ Current local baseline:
 - retrieval-only `exact` mode is the standard regression path
 - latest fully green summary: `target/practical-eval/retrieval-exact.json`
 - the practical set now includes explicit linked supersession/history,
-  aggregation, graph-connected, and provenance/abstention scenarios
-- reranker-aware remote-fallback regression is currently green at `15/15`
+  aggregation, graph-connected, provenance/abstention, and
+  trust/procedural-safety scenarios
+- reranker-aware remote-fallback regression is currently green at `17/17`
 - latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

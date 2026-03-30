@@ -16,7 +16,11 @@ pub fn canonical_reranker_name(model: &str) -> String {
 pub fn compatibility_reranker_names(model: &str) -> Vec<String> {
     let canonical = canonical_reranker_name(model);
     let mut names = vec![canonical];
-    for alias in [RERANKER_CANONICAL_NAME, RERANKER_SHORT_NAME, RERANKER_MODEL_REPO] {
+    for alias in [
+        RERANKER_CANONICAL_NAME,
+        RERANKER_SHORT_NAME,
+        RERANKER_MODEL_REPO,
+    ] {
         if !names.iter().any(|name| name == alias) {
             names.push(alias.to_string());
         }

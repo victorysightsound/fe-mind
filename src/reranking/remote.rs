@@ -157,7 +157,10 @@ mod inner {
         pub fn verify_remote(&self) -> Result<RemoteRerankerVerificationReport> {
             let status = self.fetch_status()?;
             let accepted_models = crate::reranking::compatibility_reranker_names(&self.model);
-            if !accepted_models.iter().any(|candidate| candidate == &status.model) {
+            if !accepted_models
+                .iter()
+                .any(|candidate| candidate == &status.model)
+            {
                 return Err(FemindError::Embedding(format!(
                     "remote reranker model mismatch: expected one of {:?} but got '{}'",
                     accepted_models, status.model
@@ -189,13 +192,13 @@ mod inner {
             if let Some(token) = self.auth_token.as_deref() {
                 request = request.set("Authorization", &format!("Bearer {token}"));
             }
-            let response = request
-                .call()
-                .map_err(|e| FemindError::Embedding(format!("remote reranker status request failed: {e}")))?;
+            let response = request.call().map_err(|e| {
+                FemindError::Embedding(format!("remote reranker status request failed: {e}"))
+            })?;
 
-            response
-                .into_json::<RemoteRerankerStatus>()
-                .map_err(|e| FemindError::Embedding(format!("remote reranker status parse failed: {e}")))
+            response.into_json::<RemoteRerankerStatus>().map_err(|e| {
+                FemindError::Embedding(format!("remote reranker status parse failed: {e}"))
+            })
         }
 
         fn call_rerank(&self, query: &str, documents: &[&str]) -> Result<Vec<f32>> {
@@ -207,7 +210,10 @@ mod inner {
                 "expected_reranker_profile": self.expected_profile,
             });
 
-            let mut request = self.agent.post(&url).set("Content-Type", "application/json");
+            let mut request = self
+                .agent
+                .post(&url)
+                .set("Content-Type", "application/json");
             if let Some(token) = self.auth_token.as_deref() {
                 request = request.set("Authorization", &format!("Bearer {token}"));
             }
@@ -239,7 +245,11 @@ mod inner {
     }
 
     impl RerankerBackend for RemoteRerankerBackend {
-        fn rerank(&self, query: &str, candidates: Vec<RerankCandidate>) -> Result<Vec<ScoredResult>> {
+        fn rerank(
+            &self,
+            query: &str,
+            candidates: Vec<RerankCandidate>,
+        ) -> Result<Vec<ScoredResult>> {
             let documents = candidates
                 .iter()
                 .map(|candidate| candidate.text.as_str())

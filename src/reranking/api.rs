@@ -64,7 +64,11 @@ mod inner {
     }
 
     impl RerankerBackend for ApiRerankerBackend {
-        fn rerank(&self, query: &str, candidates: Vec<RerankCandidate>) -> Result<Vec<ScoredResult>> {
+        fn rerank(
+            &self,
+            query: &str,
+            candidates: Vec<RerankCandidate>,
+        ) -> Result<Vec<ScoredResult>> {
             let documents = candidates
                 .iter()
                 .map(|candidate| candidate.text.as_str())

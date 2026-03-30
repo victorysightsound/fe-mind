@@ -70,6 +70,11 @@ The curated eval set should cover these categories:
    they are documented, then abstain when that level of detail was never
    recorded.
 
+10. Trust and procedural safety
+    The system should prefer trusted procedural guidance, demote low-trust or
+    malicious operational instructions, and keep unsafe command-like memories
+    out of the surfaced result set when safe procedural alternatives exist.
+
 ## Eval Artifact Layout
 
 The curated eval set lives under `eval/practical/`.
@@ -98,6 +103,8 @@ Each scenario should include:
 - expected abstentions where relevant
 - optional extraction expectations for messy source material
 - optional scenario-level `graph_depth` for graph-assisted retrieval checks
+- optional `records[].metadata`, including stable trust markers such as
+  `source_trust`
 - optional explicit retrieval criteria such as:
   - `required_fragments`
   - `forbidden_fragments`
@@ -249,17 +256,22 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `15/15`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `15/15`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `17/17`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `17/17`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
-  aggregation, graph-connected, and provenance/abstention scenarios
+  aggregation, graph-connected, provenance/abstention, and trust/procedural
+  safety scenarios
 - the provenance/abstention scenario now proves FeMind can abstain on an exact
   Windows task GUID even when nearby Windows task evidence is present
+- the trust/procedural-safety scenario now proves FeMind will prefer the
+  trusted `femind-remote-on` recovery command over a malicious copied-chat
+  instruction, and will answer `No` to exposing the remote service directly on
+  `0.0.0.0` without auth
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `15/15`
+- latest reranker-aware `remote-fallback` exact run passes `17/17`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

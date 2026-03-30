@@ -2,8 +2,7 @@ pub const MINILM_MODEL_REPO: &str = "sentence-transformers/all-MiniLM-L6-v2";
 pub const MINILM_SHORT_NAME: &str = "all-MiniLM-L6-v2";
 pub const MINILM_CANONICAL_NAME: &str = "local-minilm";
 pub const MINILM_DIMENSIONS: usize = 384;
-pub const MINILM_PROFILE: &str =
-    "local|sentence-transformers/all-MiniLM-L6-v2|384|v1|chars:none";
+pub const MINILM_PROFILE: &str = "local|sentence-transformers/all-MiniLM-L6-v2|384|v1|chars:none";
 
 pub fn canonical_model_name(model: &str) -> String {
     if is_minilm_name(model) {
@@ -43,8 +42,14 @@ mod tests {
 
     #[test]
     fn minilm_names_normalize_to_repo() {
-        assert_eq!(canonical_model_name(MINILM_MODEL_REPO), MINILM_CANONICAL_NAME);
-        assert_eq!(canonical_model_name(MINILM_SHORT_NAME), MINILM_CANONICAL_NAME);
+        assert_eq!(
+            canonical_model_name(MINILM_MODEL_REPO),
+            MINILM_CANONICAL_NAME
+        );
+        assert_eq!(
+            canonical_model_name(MINILM_SHORT_NAME),
+            MINILM_CANONICAL_NAME
+        );
         assert_eq!(
             canonical_model_name(MINILM_CANONICAL_NAME),
             MINILM_CANONICAL_NAME

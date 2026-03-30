@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 
 /// Cognitive memory type classification (CoALA framework).

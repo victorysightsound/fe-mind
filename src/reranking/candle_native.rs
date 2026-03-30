@@ -6,8 +6,8 @@ mod inner {
     use hf_hub::api::sync::Api;
     use hf_hub::{Repo, RepoType};
     use std::path::Path;
-    use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
     use tokenizers::utils::truncation::TruncationParams;
+    use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer};
 
     use crate::embeddings::{
         LocalEmbeddingDevice, describe_device, execution_mode_from_label, select_device,
@@ -53,7 +53,13 @@ mod inner {
                 .get("model.safetensors")
                 .map_err(|e| FemindError::ModelNotAvailable(format!("model.safetensors: {e}")))?;
 
-            Self::from_paths(&config_path, &tokenizer_path, &weights_path, device, device_label)
+            Self::from_paths(
+                &config_path,
+                &tokenizer_path,
+                &weights_path,
+                device,
+                device_label,
+            )
         }
 
         pub fn from_path(model_dir: impl AsRef<Path>) -> Result<Self> {
@@ -165,8 +171,8 @@ mod inner {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            let token_ids =
-                Tensor::stack(&token_ids, 0).map_err(|e| FemindError::Embedding(format!("reranker stack ids: {e}")))?;
+            let token_ids = Tensor::stack(&token_ids, 0)
+                .map_err(|e| FemindError::Embedding(format!("reranker stack ids: {e}")))?;
             let token_type_ids = Tensor::stack(&token_type_ids, 0)
                 .map_err(|e| FemindError::Embedding(format!("reranker stack type ids: {e}")))?;
             let attention_mask = Tensor::stack(&attention_masks, 0)
@@ -198,7 +204,11 @@ mod inner {
     }
 
     impl RerankerBackend for CandleReranker {
-        fn rerank(&self, query: &str, candidates: Vec<RerankCandidate>) -> Result<Vec<ScoredResult>> {
+        fn rerank(
+            &self,
+            query: &str,
+            candidates: Vec<RerankCandidate>,
+        ) -> Result<Vec<ScoredResult>> {
             let documents = candidates
                 .iter()
                 .map(|candidate| candidate.text.as_str())

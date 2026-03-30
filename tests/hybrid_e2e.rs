@@ -8,8 +8,8 @@
 //! End-to-end test for hybrid FTS5 + vector search with RRF merge.
 
 use chrono::{DateTime, Utc};
-use femind::embeddings::pooling::normalize_l2;
 use femind::embeddings::EmbeddingBackend;
+use femind::embeddings::pooling::normalize_l2;
 use femind::engine::MemoryEngine;
 use femind::memory::store::StoreResult;
 use femind::search::{SearchMode, VectorSearch};

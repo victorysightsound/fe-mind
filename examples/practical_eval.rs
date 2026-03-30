@@ -6,7 +6,7 @@
     feature = "remote-embeddings"
 ))]
 mod app {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -62,6 +62,7 @@ mod app {
         created_at: DateTime<Utc>,
         valid_from: Option<DateTime<Utc>>,
         valid_until: Option<DateTime<Utc>>,
+        metadata: HashMap<String, String>,
     }
 
     impl MemoryRecord for EvalMemory {
@@ -89,6 +90,10 @@ mod app {
             Some(&self.source)
         }
 
+        fn metadata(&self) -> HashMap<String, String> {
+            self.metadata.clone()
+        }
+
         #[cfg(feature = "temporal")]
         fn valid_from(&self) -> Option<DateTime<Utc>> {
             self.valid_from
@@ -112,6 +117,8 @@ mod app {
         valid_from: Option<String>,
         #[serde(default)]
         valid_until: Option<String>,
+        #[serde(default)]
+        metadata: HashMap<String, String>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -1873,6 +1880,7 @@ mod app {
             created_at: DateTime::parse_from_rfc3339(&record.timestamp)?.with_timezone(&Utc),
             valid_from: parse_optional_timestamp(record.valid_from.as_deref())?,
             valid_until: parse_optional_timestamp(record.valid_until.as_deref())?,
+            metadata: record.metadata.clone(),
         })
     }
 

@@ -128,7 +128,11 @@ impl EmbeddingBackend for FallbackBackend {
         self.primary
             .as_ref()
             .map(|b| b.compatibility_model_names())
-            .or_else(|| self.fallback.as_ref().map(|b| b.compatibility_model_names()))
+            .or_else(|| {
+                self.fallback
+                    .as_ref()
+                    .map(|b| b.compatibility_model_names())
+            })
             .unwrap_or_else(|| vec!["none".to_string()])
     }
 }

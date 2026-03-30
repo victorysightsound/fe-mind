@@ -68,9 +68,10 @@ mod inner {
             let vectors = db.with_reader(|conn| {
                 let mut stmt = conn.prepare(&sql)?;
                 let rows: Vec<(i64, Vec<u8>)> = stmt
-                    .query_map(rusqlite::params_from_iter(compatibility_model_names.iter()), |row| {
-                        Ok((row.get(0)?, row.get(1)?))
-                    })?
+                    .query_map(
+                        rusqlite::params_from_iter(compatibility_model_names.iter()),
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?
                     .filter_map(|r| r.ok())
                     .collect();
                 Ok::<_, crate::error::FemindError>(rows)
@@ -194,7 +195,7 @@ pub use inner::AnnIndex;
 mod tests {
     use super::*;
     use crate::embeddings::pooling::{normalize_l2, vec_to_bytes};
-    use crate::storage::{migrations, Database};
+    use crate::storage::{Database, migrations};
 
     fn setup() -> Database {
         let db = Database::open_in_memory().expect("open");

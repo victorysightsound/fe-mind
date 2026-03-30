@@ -71,7 +71,13 @@ mod inner {
                 .get("model.safetensors")
                 .map_err(|e| FemindError::ModelNotAvailable(format!("model.safetensors: {e}")))?;
 
-            Self::from_paths(&config_path, &tokenizer_path, &weights_path, device, device_label)
+            Self::from_paths(
+                &config_path,
+                &tokenizer_path,
+                &weights_path,
+                device,
+                device_label,
+            )
         }
 
         /// Create from pre-downloaded model files.
@@ -347,6 +353,6 @@ mod inner {
 }
 
 #[cfg(feature = "local-embeddings")]
-pub(crate) use inner::{describe_device, execution_mode_from_label, select_device};
-#[cfg(feature = "local-embeddings")]
 pub use inner::{CandleNativeBackend, LocalEmbeddingDevice};
+#[cfg(feature = "local-embeddings")]
+pub(crate) use inner::{describe_device, execution_mode_from_label, select_device};

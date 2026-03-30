@@ -207,7 +207,10 @@ mod inner {
         pub fn verify_remote(&self) -> Result<RemoteVerificationReport> {
             let status = self.fetch_status()?;
             let accepted_models = crate::embeddings::compatibility_model_names(&self.model);
-            if !accepted_models.iter().any(|candidate| candidate == &status.model) {
+            if !accepted_models
+                .iter()
+                .any(|candidate| candidate == &status.model)
+            {
                 return Err(FemindError::Embedding(format!(
                     "remote embedding service model mismatch: expected one of {:?} but got '{}'",
                     accepted_models, status.model
@@ -247,9 +250,9 @@ mod inner {
             if let Some(token) = self.auth_token.as_deref() {
                 request = request.set("Authorization", &format!("Bearer {token}"));
             }
-            let response = request
-                .call()
-                .map_err(|e| FemindError::Embedding(format!("remote status request failed: {e}")))?;
+            let response = request.call().map_err(|e| {
+                FemindError::Embedding(format!("remote status request failed: {e}"))
+            })?;
 
             response
                 .into_json::<RemoteStatus>()
@@ -264,7 +267,10 @@ mod inner {
                 "encoding_format": "float",
             });
 
-            let mut request = self.agent.post(&url).set("Content-Type", "application/json");
+            let mut request = self
+                .agent
+                .post(&url)
+                .set("Content-Type", "application/json");
             if let Some(token) = self.auth_token.as_deref() {
                 request = request.set("Authorization", &format!("Bearer {token}"));
             }
@@ -438,7 +444,10 @@ mod inner {
             let backend = RemoteEmbeddingBackend::minilm(base_url, None)?;
             let vector = backend.embed("hello world")?;
             assert_eq!(vector.len(), crate::embeddings::MINILM_DIMENSIONS);
-            assert_eq!(backend.model_name(), crate::embeddings::MINILM_CANONICAL_NAME);
+            assert_eq!(
+                backend.model_name(),
+                crate::embeddings::MINILM_CANONICAL_NAME
+            );
             Ok(())
         }
 
@@ -473,7 +482,9 @@ mod inner {
                 crate::embeddings::MINILM_DIMENSIONS,
                 crate::embeddings::MINILM_PROFILE.to_string(),
                 None,
-                Some(Box::new(NoopBackend::new(crate::embeddings::MINILM_DIMENSIONS))),
+                Some(Box::new(NoopBackend::new(
+                    crate::embeddings::MINILM_DIMENSIONS,
+                ))),
                 false,
             )?;
 

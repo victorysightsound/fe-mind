@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{FemindError, Result};
-use crate::storage::migrations;
 use crate::storage::Database;
+use crate::storage::migrations;
 
 /// Two-tier memory database manager.
 ///

@@ -111,7 +111,8 @@ impl VectorSearch {
         let placeholders = std::iter::repeat_n("?", model_names.len())
             .collect::<Vec<_>>()
             .join(", ");
-        let sql = format!("SELECT COUNT(*) FROM memory_vectors WHERE model_name IN ({placeholders})");
+        let sql =
+            format!("SELECT COUNT(*) FROM memory_vectors WHERE model_name IN ({placeholders})");
 
         db.with_reader(|conn| {
             let count: i64 =
@@ -173,8 +174,8 @@ mod tests {
 
         // Search with a query similar to v1
         let query = normalize_l2(&[1.0, 0.0, 0.0]);
-        let results = VectorSearch::search(&db, &query, &[String::from("test-model")], 10)
-            .expect("search");
+        let results =
+            VectorSearch::search(&db, &query, &[String::from("test-model")], 10).expect("search");
 
         assert_eq!(results.len(), 3);
         // v1 should be most similar (identical)
@@ -192,8 +193,8 @@ mod tests {
         VectorSearch::store_vector(&db, 1, &v, "model-a", "h1").expect("store");
         VectorSearch::store_vector(&db, 2, &v, "model-b", "h2").expect("store");
 
-        let results = VectorSearch::search(&db, &v, &[String::from("model-a")], 10)
-            .expect("search");
+        let results =
+            VectorSearch::search(&db, &v, &[String::from("model-a")], 10).expect("search");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].memory_id, 1);
     }

@@ -32,7 +32,11 @@ mod tests {
     struct IdentityReranker;
 
     impl RerankerBackend for IdentityReranker {
-        fn rerank(&self, _query: &str, candidates: Vec<RerankCandidate>) -> Result<Vec<ScoredResult>> {
+        fn rerank(
+            &self,
+            _query: &str,
+            candidates: Vec<RerankCandidate>,
+        ) -> Result<Vec<ScoredResult>> {
             Ok(candidates
                 .into_iter()
                 .map(|candidate| ScoredResult {

@@ -133,6 +133,15 @@ Before FeMind is treated as production-grade agent memory, it should gain:
 - poisoning-oriented regression cases
 - explicit tests for malicious retrieval triggers
 
+Current status after the 2026-03-30 trust/safety pass:
+
+- source-trust weighting is now implemented in the default scorer
+- procedural guidance isolation is now implemented for routed procedural
+  queries when safe alternatives exist
+- poisoning-oriented practical coverage now includes trusted vs untrusted
+  operational guidance
+- high-impact update review hooks still remain future work
+
 ### 6. Keep Evaluation Engine-Centric
 
 Daily tuning should continue to happen in FeMind's practical and real-world suites, not inside benchmark harnesses.

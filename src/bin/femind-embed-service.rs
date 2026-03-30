@@ -306,8 +306,11 @@ fn run_serve(args: &[String]) -> Result<(), String> {
             }
             "--auth-token-env-file" => {
                 i += 1;
-                auth_token_env_file =
-                    Some(PathBuf::from(required_value(args, i, "--auth-token-env-file")?));
+                auth_token_env_file = Some(PathBuf::from(required_value(
+                    args,
+                    i,
+                    "--auth-token-env-file",
+                )?));
             }
             "--device" => {
                 i += 1;
@@ -316,9 +319,9 @@ fn run_serve(args: &[String]) -> Result<(), String> {
             "--cuda-ordinal" => {
                 i += 1;
                 let value = required_value(args, i, "--cuda-ordinal")?;
-                options.cuda_ordinal = value.parse::<usize>().map_err(|error| {
-                    format!("invalid --cuda-ordinal value '{value}': {error}")
-                })?;
+                options.cuda_ordinal = value
+                    .parse::<usize>()
+                    .map_err(|error| format!("invalid --cuda-ordinal value '{value}': {error}"))?;
             }
             "--request-timeout-secs" => {
                 i += 1;
@@ -437,7 +440,10 @@ fn run_verify_remote_reranker(args: &[String]) -> Result<(), String> {
     }
 }
 
-fn load_config_and_format(args: &[String], command: &str) -> Result<(FileConfig, OutputFormat), String> {
+fn load_config_and_format(
+    args: &[String],
+    command: &str,
+) -> Result<(FileConfig, OutputFormat), String> {
     let mut config_path: Option<PathBuf> = None;
     let mut format = OutputFormat::Human;
     let mut i = 0;
@@ -506,7 +512,10 @@ fn build_status_output(config: &FileConfig) -> Result<StatusOutput, String> {
             model: MINILM_CANONICAL_NAME.to_string(),
             dimensions,
             embedding_profile,
-            local_device: embeddings.local.as_ref().and_then(|local| local.device.clone()),
+            local_device: embeddings
+                .local
+                .as_ref()
+                .and_then(|local| local.device.clone()),
             remote_service_base_url: Some(probe.base_url),
             remote_service_timeout_secs: probe.timeout_secs,
             remote_service_fallback_to_local: Some(probe.fallback_to_local),
@@ -522,7 +531,10 @@ fn build_status_output(config: &FileConfig) -> Result<StatusOutput, String> {
             model: MINILM_CANONICAL_NAME.to_string(),
             dimensions,
             embedding_profile,
-            local_device: embeddings.local.as_ref().and_then(|local| local.device.clone()),
+            local_device: embeddings
+                .local
+                .as_ref()
+                .and_then(|local| local.device.clone()),
             remote_service_base_url: None,
             remote_service_timeout_secs: None,
             remote_service_fallback_to_local: None,
@@ -566,7 +578,10 @@ fn build_rerank_status_output(config: &FileConfig) -> Result<Option<RerankStatus
             execution_mode,
             model,
             reranker_profile: RERANKER_PROFILE.to_string(),
-            local_device: reranking.local.as_ref().and_then(|local| local.device.clone()),
+            local_device: reranking
+                .local
+                .as_ref()
+                .and_then(|local| local.device.clone()),
             remote_service_base_url: Some(probe.base_url),
             remote_service_timeout_secs: probe.timeout_secs,
             remote_service_fallback_to_local: Some(probe.fallback_to_local),
@@ -580,7 +595,10 @@ fn build_rerank_status_output(config: &FileConfig) -> Result<Option<RerankStatus
             execution_mode,
             model,
             reranker_profile: RERANKER_PROFILE.to_string(),
-            local_device: reranking.local.as_ref().and_then(|local| local.device.clone()),
+            local_device: reranking
+                .local
+                .as_ref()
+                .and_then(|local| local.device.clone()),
             remote_service_base_url: None,
             remote_service_timeout_secs: None,
             remote_service_fallback_to_local: None,
@@ -668,7 +686,11 @@ fn remote_rerank_probe_from_config(config: &FileConfig) -> Result<RemoteRerankPr
 fn verify_remote_probe(probe: &RemoteProbeConfig) -> RemoteVerifyOutput {
     match fetch_remote_status(probe) {
         Ok(status) => {
-            let accepted_models = [MINILM_CANONICAL_NAME, "sentence-transformers/all-MiniLM-L6-v2", "all-MiniLM-L6-v2"];
+            let accepted_models = [
+                MINILM_CANONICAL_NAME,
+                "sentence-transformers/all-MiniLM-L6-v2",
+                "all-MiniLM-L6-v2",
+            ];
             let profile_match = accepted_models.contains(&status.model.as_str())
                 && status.dimensions == probe.dimensions
                 && status.embedding_profile == probe.embedding_profile;
@@ -687,7 +709,10 @@ fn verify_remote_probe(probe: &RemoteProbeConfig) -> RemoteVerifyOutput {
                 error: if profile_match {
                     None
                 } else {
-                    Some("remote embedding profile does not match expected FeMind MiniLM profile".to_string())
+                    Some(
+                        "remote embedding profile does not match expected FeMind MiniLM profile"
+                            .to_string(),
+                    )
                 },
             }
         }
@@ -797,7 +822,10 @@ fn load_config(path: &PathBuf) -> Result<FileConfig, String> {
         .map_err(|error| format!("failed to parse config '{}': {error}", path.display()))
 }
 
-fn resolve_secret(env_name: Option<&str>, env_file: Option<&std::path::Path>) -> Result<Option<String>, String> {
+fn resolve_secret(
+    env_name: Option<&str>,
+    env_file: Option<&std::path::Path>,
+) -> Result<Option<String>, String> {
     if let Some(env_name) = env_name
         && let Ok(value) = std::env::var(env_name)
         && !value.trim().is_empty()
@@ -871,7 +899,10 @@ fn parse_format(value: &str) -> Result<OutputFormat, String> {
     }
 }
 
-fn print_output<T: serde::Serialize + std::fmt::Debug>(value: &T, format: OutputFormat) -> Result<(), String> {
+fn print_output<T: serde::Serialize + std::fmt::Debug>(
+    value: &T,
+    format: OutputFormat,
+) -> Result<(), String> {
     match format {
         OutputFormat::Json => {
             let json = serde_json::to_string_pretty(value)

@@ -150,7 +150,9 @@ mod inner {
         execution_mode: String,
     }
 
-    pub fn serve_remote_embedding_service_blocking(options: EmbedServiceOptions) -> Result<(), String> {
+    pub fn serve_remote_embedding_service_blocking(
+        options: EmbedServiceOptions,
+    ) -> Result<(), String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -394,13 +396,17 @@ mod inner {
                     .enumerate()
                     .map(|(index, embedding)| EmbedItem { index, embedding })
                     .collect::<Vec<_>>();
-                (StatusCode::OK, Json(serde_json::json!(EmbedResponse {
-                    data,
-                    model: MINILM_CANONICAL_NAME.to_string(),
-                    dimensions: MINILM_DIMENSIONS,
-                    embedding_profile: MINILM_PROFILE.to_string(),
-                    execution_mode: state.status.execution_mode.clone(),
-                }))).into_response()
+                (
+                    StatusCode::OK,
+                    Json(serde_json::json!(EmbedResponse {
+                        data,
+                        model: MINILM_CANONICAL_NAME.to_string(),
+                        dimensions: MINILM_DIMENSIONS,
+                        embedding_profile: MINILM_PROFILE.to_string(),
+                        execution_mode: state.status.execution_mode.clone(),
+                    })),
+                )
+                    .into_response()
             }
         }
     }
@@ -518,12 +524,15 @@ mod inner {
                         relevance_score,
                     })
                     .collect::<Vec<_>>();
-                (StatusCode::OK, Json(serde_json::json!(RerankResponse {
-                    results,
-                    model: RERANKER_CANONICAL_NAME.to_string(),
-                    reranker_profile: RERANKER_PROFILE.to_string(),
-                    execution_mode: state.rerank_status.execution_mode.clone(),
-                })))
+                (
+                    StatusCode::OK,
+                    Json(serde_json::json!(RerankResponse {
+                        results,
+                        model: RERANKER_CANONICAL_NAME.to_string(),
+                        reranker_profile: RERANKER_PROFILE.to_string(),
+                        execution_mode: state.rerank_status.execution_mode.clone(),
+                    })),
+                )
                     .into_response()
             }
         }

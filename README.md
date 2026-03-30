@@ -27,8 +27,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `15/15`
-- retrieval-only practical eval in `ann` mode currently passes `15/15`
+- retrieval-only practical eval in `exact` mode currently passes `17/17`
+- retrieval-only practical eval in `ann` mode currently passes `17/17`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, and provenance/abstention coverage, not just text-only
   changed-fact scenarios
@@ -49,7 +49,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `15/15` practical, `58/58` live-library, and `90/90` memloft-slice
+  `17/17` practical, `58/58` live-library, and `90/90` memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
   benchmark-style evaluation is deferred to milestone checkpoints after
@@ -91,6 +91,15 @@ The practical live-validation path is now established and repeatable:
   - no evidence at all
   - related evidence exists but the exact detail was never recorded
   - related evidence exists but the surfaced detail still is not grounded
+- retrieval scoring now honors stable `metadata.source_trust` values carried on
+  memories, with the current contract:
+  - `trusted` / `verified` / `maintainer` / `system` / `high`
+  - `normal`
+  - `low` / `speculative`
+  - `untrusted` / `external` / `poisoned` / `unsafe`
+- procedural guidance queries now isolate low-trust procedural instructions when
+  a safer procedural alternative is present, so unsafe command-like memories do
+  not remain in the surfaced result set just because they are semantically close
 
 ## Migration
 

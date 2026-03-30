@@ -10,7 +10,10 @@ use crate::error::{FemindError, Result};
 use crate::memory::MemoryStore;
 use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
-use crate::scoring::{CompositeScorer, ImportanceScorer, MemoryTypeScorer, RecencyScorer};
+use crate::scoring::{
+    CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
+    SourceTrustScorer,
+};
 use crate::search::builder::SearchBuilder;
 use crate::storage::Database;
 use crate::storage::migrations;
@@ -1609,6 +1612,7 @@ fn text_implies_negative_state(text: &str) -> bool {
     normalized.contains("superseded")
         || normalized.contains("no longer")
         || normalized.contains("not active")
+        || normalized.contains("not directly")
         || normalized.contains("obsolete")
         || normalized.contains("replaced")
         || normalized.contains("rather than")
@@ -1938,6 +1942,8 @@ fn default_composite_scorer() -> CompositeScorer {
         Box::new(RecencyScorer::default_half_life()),
         Box::new(ImportanceScorer::default()),
         Box::new(MemoryTypeScorer::default()),
+        Box::new(SourceTrustScorer::default()),
+        Box::new(ProceduralSafetyScorer::default()),
     ])
 }
 

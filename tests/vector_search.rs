@@ -13,9 +13,9 @@
 use femind::embeddings::pooling::{bytes_to_vec, cosine_similarity, normalize_l2, vec_to_bytes};
 use femind::embeddings::{EmbeddingBackend, FallbackBackend, NoopBackend};
 use femind::search::FtsResult;
-use femind::search::{rrf_merge, VectorSearch};
-use femind::storage::migrations;
+use femind::search::{VectorSearch, rrf_merge};
 use femind::storage::Database;
+use femind::storage::migrations;
 
 fn setup_db() -> Database {
     let db = Database::open_in_memory().expect("open");
@@ -50,8 +50,8 @@ fn store_and_retrieve_vectors() {
     VectorSearch::store_vector(&db, 1, &v, "test-model", "hash_1").expect("store");
 
     let query = normalize_l2(&[1.0, 0.0, 0.0]);
-    let results = VectorSearch::search(&db, &query, &[String::from("test-model")], 10)
-        .expect("search");
+    let results =
+        VectorSearch::search(&db, &query, &[String::from("test-model")], 10).expect("search");
     assert_eq!(results.len(), 1);
     assert!(
         (results[0].score - 1.0).abs() < 0.01,
@@ -70,8 +70,7 @@ fn vector_model_isolation() {
     VectorSearch::store_vector(&db, 2, &v, "model-beta", "h2").expect("store");
 
     // Only vectors from matching model should be returned
-    let r = VectorSearch::search(&db, &v, &[String::from("model-alpha")], 10)
-        .expect("search");
+    let r = VectorSearch::search(&db, &v, &[String::from("model-alpha")], 10).expect("search");
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].memory_id, 1);
 }
