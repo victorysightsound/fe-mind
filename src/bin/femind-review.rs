@@ -304,7 +304,7 @@ fn parse_scope(flag: &str, value: &str) -> femind::error::Result<ReviewScope> {
 fn parse_policy_class(flag: &str, value: &str) -> femind::error::Result<ReviewPolicyClass> {
     ReviewPolicyClass::from_str(value).ok_or_else(|| {
         FemindError::Migration(format!(
-            "invalid {flag} value '{value}'. Expected operational-exception|network-exposure-exception|destructive-maintenance|secret-handling-exception|migration-exception."
+            "invalid {flag} value '{value}'. Expected operational-exception|network-exposure-exception|destructive-maintenance|secret-handling-exception|migration-exception|breakglass-exception|private-infrastructure-exception."
         ))
     })
 }
@@ -312,7 +312,7 @@ fn parse_policy_class(flag: &str, value: &str) -> femind::error::Result<ReviewPo
 fn parse_template(flag: &str, value: &str) -> femind::error::Result<ReviewApprovalTemplate> {
     ReviewApprovalTemplate::from_str(value).ok_or_else(|| {
         FemindError::Migration(format!(
-            "invalid {flag} value '{value}'. Expected staging-bridge|migration-bridge|lab-exception."
+            "invalid {flag} value '{value}'. Expected staging-bridge|migration-bridge|lab-exception|breakglass-ops|private-endpoint-bridge."
         ))
     })
 }
@@ -342,7 +342,7 @@ femind-review
 
 Usage:
   femind-review list --database <path> [--status <pending|allowed|denied|expired>] [--limit <n>] [--format <text|json>]
-  femind-review resolve --database <path> --memory-id <id> --status <pending|allowed|denied|expired> [--note <text>] [--reviewer <name>] [--scope <general|production|staging|lab|migration>] [--class <policy-class>] [--template <staging-bridge|migration-bridge|lab-exception>] [--replacement-id <id>] [--expires-at <rfc3339>] [--format <text|json>]
+  femind-review resolve --database <path> --memory-id <id> --status <pending|allowed|denied|expired> [--note <text>] [--reviewer <name>] [--scope <general|production|staging|lab|migration>] [--class <policy-class>] [--template <staging-bridge|migration-bridge|lab-exception|breakglass-ops|private-endpoint-bridge>] [--replacement-id <id>] [--expires-at <rfc3339>] [--format <text|json>]
   femind-review renew --database <path> --memory-id <id> [--note <text>] [--reviewer <name>] [--expires-at <rfc3339>] [--format <text|json>]
   femind-review revoke --database <path> --memory-id <id> [--note <text>] [--reviewer <name>] [--format <text|json>]
   femind-review replace --database <path> --memory-id <id> --replacement-id <id> [--note <text>] [--reviewer <name>] [--format <text|json>]

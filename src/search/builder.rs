@@ -8,8 +8,9 @@ use crate::engine::VectorSearchMode;
 use crate::error::Result;
 use crate::memory::GraphMemory;
 use crate::scoring::{
-    SourceTrustLevel, query_requests_procedural_guidance, review_denied, review_policy_class,
-    review_required, review_scope_matches_query, source_trust_level,
+    SourceTrustLevel, query_requests_procedural_guidance, query_scope, review_denied,
+    review_policy_class, review_policy_class_matches_query, review_required, review_scope,
+    review_scope_matches_query, source_provenance_rank, source_trust_level,
 };
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
@@ -380,6 +381,11 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                     min_score: self.min_score.unwrap_or(0.0),
                 },
                 QueryIntent::AbstentionRisk => SearchMode::Keyword,
+                QueryIntent::ExactDetail
+                    if query_requests_precise_procedural_detail(&self.query) =>
+                {
+                    SearchMode::Keyword
+                }
                 _ => self.mode.clone(),
             }
         };
@@ -450,6 +456,9 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
 
         let note = match intent {
             QueryIntent::General => "default hybrid-style retrieval",
+            QueryIntent::ExactDetail if query_requests_precise_procedural_detail(&self.query) => {
+                "precise procedural detail query; use keyword-first grounded retrieval"
+            }
             QueryIntent::ExactDetail => "exact-detail query; keep grounding and compact reranking",
             QueryIntent::CurrentState => {
                 "current-state query; widen reranking and favor current-state evidence"
@@ -550,21 +559,38 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let category_filter = self.category.as_deref();
         let type_filter = self.memory_type.map(|t| t.as_str());
         let min_tier = self.depth_to_min_tier(route.depth);
-
-        let fts_results = FtsSearch::search_with_tiers(
-            self.db,
-            &self.query,
-            self.limit,
-            category_filter,
-            type_filter,
-            min_tier,
-        )?;
+        let precise_procedural_detail = query_requests_precise_procedural_detail(&self.query);
+        let fts_results = if precise_procedural_detail {
+            FtsSearch::search_or_mode(
+                self.db,
+                &self.query,
+                self.limit * 3,
+                category_filter,
+                type_filter,
+                min_tier,
+            )?
+        } else {
+            FtsSearch::search_with_tiers(
+                self.db,
+                &self.query,
+                self.limit,
+                category_filter,
+                type_filter,
+                min_tier,
+            )?
+        };
         let fts_results = self.maybe_rerank_results(fts_results, route.rerank_limit)?;
 
         let mut results = self.apply_filters(fts_results);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
+        if route.strict_grounding {
+            apply_strict_detail_query_filter(self.db, &self.query, &mut results);
+        }
+        if route.query_alignment {
+            rerank_for_query_alignment(self.db, &self.query, &mut results);
+        }
 
         // Apply min_score filter
         if let Some(threshold) = self.min_score {
@@ -595,6 +621,12 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
+        if route.strict_grounding {
+            apply_strict_detail_query_filter(self.db, &self.query, &mut results);
+        }
+        if route.query_alignment {
+            rerank_for_query_alignment(self.db, &self.query, &mut results);
+        }
         results.retain(|r| r.score >= min_score);
         Ok(results)
     }
@@ -1051,6 +1083,7 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
     let mut review_pending_ids = std::collections::HashSet::new();
     let mut denied_ids = std::collections::HashSet::new();
     let mut scope_mismatch_ids = std::collections::HashSet::new();
+    let mut policy_mismatch_ids = std::collections::HashSet::new();
     let mut has_safe_procedural = false;
 
     for result in results.iter() {
@@ -1101,10 +1134,14 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
         let denied_review = review_denied(&meta);
         let scope_matches_query = review_scope_matches_query(&meta, query);
         let policy_class = review_policy_class(&meta);
+        let policy_matches_query = review_policy_class_matches_query(&meta, query);
 
         match source_trust_level(&meta) {
             SourceTrustLevel::Trusted | SourceTrustLevel::Normal
-                if !pending_review && !denied_review && scope_matches_query =>
+                if !pending_review
+                    && !denied_review
+                    && scope_matches_query
+                    && policy_matches_query =>
             {
                 has_safe_procedural = true;
             }
@@ -1123,6 +1160,9 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
         if !scope_matches_query && policy_class.is_some() {
             scope_mismatch_ids.insert(result.memory_id);
         }
+        if !policy_matches_query && policy_class.is_some() {
+            policy_mismatch_ids.insert(result.memory_id);
+        }
     }
 
     if !denied_ids.is_empty() {
@@ -1133,12 +1173,214 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
         results.retain(|result| !scope_mismatch_ids.contains(&result.memory_id));
     }
 
+    if !policy_mismatch_ids.is_empty() {
+        results.retain(|result| !policy_mismatch_ids.contains(&result.memory_id));
+    }
+
     if has_safe_procedural && (!unsafe_ids.is_empty() || !review_pending_ids.is_empty()) {
         results.retain(|result| {
             !unsafe_ids.contains(&result.memory_id)
                 && !review_pending_ids.contains(&result.memory_id)
         });
     }
+
+    apply_trusted_procedural_conflict_resolution(db, query, results);
+}
+
+fn apply_trusted_procedural_conflict_resolution(
+    db: &Database,
+    query: &str,
+    results: &mut Vec<SearchResult>,
+) {
+    if results.len() < 2 || !query_requests_procedural_guidance(query) {
+        return;
+    }
+
+    let normalized_query = query.to_lowercase();
+    let strong_focus = normalized_query.contains("supported")
+        || normalized_query.contains("approved")
+        || normalized_query.contains("normally")
+        || normalized_query.contains("normal ")
+        || normalized_query.contains("breakglass")
+        || normalized_query.contains("outage")
+        || normalized_query.contains("temporary procedure");
+    if !strong_focus {
+        return;
+    }
+
+    let mut procedural = Vec::new();
+    for result in results.iter() {
+        let Some((memory_type, text, metadata)) = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT memory_type, searchable_text, metadata_json FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| {
+                        let memory_type = row.get::<_, String>(0)?;
+                        let text = row.get::<_, String>(1)?;
+                        let metadata_json = row.get::<_, Option<String>>(2)?;
+                        let metadata = metadata_json
+                            .as_deref()
+                            .and_then(|json| {
+                                serde_json::from_str::<std::collections::HashMap<String, String>>(
+                                    json,
+                                )
+                                .ok()
+                            })
+                            .unwrap_or_default();
+                        Ok((memory_type, text, metadata))
+                    },
+                )
+                .map_err(crate::error::FemindError::Database)
+            })
+            .ok()
+        else {
+            continue;
+        };
+
+        let Some(memory_type) = MemoryType::from_str(&memory_type) else {
+            continue;
+        };
+        if memory_type != MemoryType::Procedural {
+            continue;
+        }
+
+        let meta = MemoryMeta {
+            id: Some(result.memory_id),
+            searchable_text: text.clone(),
+            memory_type,
+            importance: 5,
+            category: None,
+            created_at: Utc::now(),
+            metadata,
+        };
+        if !matches!(
+            source_trust_level(&meta),
+            SourceTrustLevel::Trusted | SourceTrustLevel::Normal
+        ) || review_required(&meta)
+            || review_denied(&meta)
+        {
+            continue;
+        }
+
+        let rank = procedural_conflict_rank(query, &meta, result.score);
+        procedural.push((result.memory_id, rank));
+    }
+
+    if procedural.len() < 2 {
+        return;
+    }
+
+    procedural.sort_by(|left, right| right.1.cmp(&left.1));
+    let best = procedural[0];
+    let second = procedural[1];
+    if best.1 <= second.1 + 15 {
+        return;
+    }
+
+    let trusted_ids = procedural
+        .iter()
+        .map(|(memory_id, _)| *memory_id)
+        .collect::<std::collections::HashSet<_>>();
+    results.retain(|result| !trusted_ids.contains(&result.memory_id) || result.memory_id == best.0);
+}
+
+fn procedural_conflict_rank(query: &str, meta: &MemoryMeta, score: f32) -> i32 {
+    let normalized_query = query.to_lowercase();
+    let normalized_text = meta.searchable_text.to_lowercase();
+    let query_scope = query_scope(query);
+    let mut rank = match source_trust_level(meta) {
+        SourceTrustLevel::Trusted => 400,
+        SourceTrustLevel::Normal => 300,
+        SourceTrustLevel::Low => 80,
+        SourceTrustLevel::Untrusted => 0,
+    } + source_provenance_rank(meta) as i32
+        + (score * 100.0) as i32;
+
+    if review_scope_matches_query(meta, query) {
+        rank += 15;
+    }
+    if review_policy_class_matches_query(meta, query) {
+        rank += 15;
+    }
+    match review_scope(meta) {
+        Some(scope) if scope == query_scope && scope != crate::scoring::ReviewScope::General => {
+            rank += 140;
+        }
+        Some(scope) if scope != crate::scoring::ReviewScope::General => {
+            rank -= 120;
+        }
+        None if query_scope != crate::scoring::ReviewScope::General => {
+            rank -= 35;
+        }
+        _ => {}
+    }
+
+    let query_prefers_exception = normalized_query.contains("breakglass")
+        || normalized_query.contains("outage")
+        || normalized_query.contains("temporary")
+        || normalized_query.contains("recovery");
+    let query_prefers_default = !query_prefers_exception
+        && (normalized_query.contains("supported")
+            || normalized_query.contains("approved")
+            || normalized_query.contains("normally")
+            || normalized_query.contains("normal "));
+
+    let text_is_default = normalized_text.contains("supported")
+        || normalized_text.contains("normal production path")
+        || normalized_text.contains("keep the")
+        || normalized_text.contains("scheduled task");
+    let text_is_exception = normalized_text.contains("temporary")
+        || normalized_text.contains("breakglass")
+        || normalized_text.contains("workaround")
+        || normalized_text.contains("older")
+        || normalized_text.contains("until");
+    let text_is_staging = normalized_text.contains("staging") || normalized_text.contains("lab");
+    let text_is_production = normalized_text.contains("production");
+    let text_is_migration =
+        normalized_text.contains("migration") || normalized_text.contains("bridge");
+
+    if matches!(
+        query_scope,
+        crate::scoring::ReviewScope::Staging | crate::scoring::ReviewScope::Lab
+    ) {
+        if text_is_staging {
+            rank += 160;
+        } else if text_is_production {
+            rank -= 180;
+        }
+    }
+
+    if query_scope == crate::scoring::ReviewScope::Production {
+        if text_is_production {
+            rank += 120;
+        } else if text_is_staging {
+            rank -= 140;
+        }
+    }
+
+    if query_scope == crate::scoring::ReviewScope::Migration {
+        if text_is_migration {
+            rank += 120;
+        } else if text_is_production {
+            rank -= 80;
+        }
+    }
+
+    if query_prefers_default && text_is_default {
+        rank += 120;
+    }
+    if query_prefers_default && text_is_exception {
+        rank -= 160;
+    }
+    if query_prefers_exception && text_is_exception {
+        rank += 140;
+    }
+    if query_prefers_exception && text_is_default {
+        rank -= 120;
+    }
+
+    rank
 }
 
 fn apply_temporal_route_bias(
@@ -1599,6 +1841,7 @@ pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
         || has_ordinal_signal
         || query_asks_for_combined_capability(query)
         || query_mentions_artifact_detail(query)
+        || query_requests_precise_procedural_detail(query)
 }
 
 pub fn infer_query_intent(query: &str) -> QueryIntent {
@@ -1608,6 +1851,8 @@ pub fn infer_query_intent(query: &str) -> QueryIntent {
         QueryIntent::AbstentionRisk
     } else if query_requests_operational_constraint(query) {
         QueryIntent::CurrentState
+    } else if query_requests_precise_procedural_detail(query) {
+        QueryIntent::ExactDetail
     } else if query_requires_strict_grounding(query) {
         QueryIntent::ExactDetail
     } else if query_requests_historical_state(query) {
@@ -1924,6 +2169,9 @@ fn detail_tokens(value: &str) -> Vec<String> {
                     | "filename"
                     | "file"
                     | "path"
+                    | "host"
+                    | "address"
+                    | "port"
                     | "script"
                     | "runner"
                     | "label"
@@ -2056,8 +2304,36 @@ fn text_contains_artifact_detail(text: &str) -> bool {
 fn query_requests_support_state(query: &str) -> bool {
     let normalized = normalize_text(query);
     normalized.contains("support")
+        || normalized.contains("supported")
+        || normalized.contains("approved")
         || normalized.contains("enabled")
         || normalized.contains("stateful")
+}
+
+fn query_requests_precise_procedural_detail(query: &str) -> bool {
+    if !query_requests_procedural_guidance(query) || query_is_yes_no(query) {
+        return false;
+    }
+
+    let normalized = normalize_text(query);
+    let asks_precise_target = normalized
+        .split_whitespace()
+        .any(|token| matches!(token, "host" | "address" | "port"))
+        || normalized.contains("startup path")
+        || normalized.contains("supported path")
+        || normalized.contains("approved path")
+        || (normalized.contains("path")
+            && (normalized.contains("supported")
+                || normalized.contains("approved")
+                || normalized.contains("startup")));
+
+    let scoped_or_supported = normalized.contains("supported")
+        || normalized.contains("approved")
+        || normalized.contains("staging")
+        || normalized.contains("production")
+        || normalized.contains("bridge");
+
+    asks_precise_target && scoped_or_supported
 }
 
 fn query_requests_aggregation(query: &str) -> bool {
@@ -2209,6 +2485,8 @@ fn text_indicates_support_state(normalized_text: &str, lowered_text: &str) -> bo
     normalized_text.contains("enabled")
         || normalized_text.contains("stateful")
         || normalized_text.contains("support")
+        || normalized_text.contains("supported")
+        || normalized_text.contains("approved")
         || lowered_text.contains("codex-cli")
 }
 
@@ -2684,6 +2962,34 @@ mod tests {
             ),
             QueryIntent::ExactDetail
         );
+        assert_eq!(
+            infer_query_intent("What host is approved for the audited staging bridge?"),
+            QueryIntent::ExactDetail
+        );
+        assert_eq!(
+            infer_query_intent(
+                "What is the supported Windows startup path for femind-embed-service?"
+            ),
+            QueryIntent::ExactDetail
+        );
+    }
+
+    #[test]
+    fn support_state_alignment_recognizes_supported_and_approved_queries() {
+        assert!(query_requests_support_state(
+            "What host is approved for the audited staging bridge?"
+        ));
+        assert!(query_requests_support_state(
+            "What is the supported Windows startup path for femind-embed-service?"
+        ));
+        assert!(text_indicates_support_state(
+            "supported windows startup path uses the scheduled task",
+            "supported windows startup path uses the scheduled task"
+        ));
+        assert!(text_indicates_support_state(
+            "for the audited staging lab only the approved bridge host is 10 44 0 12",
+            "for the audited staging lab only the approved bridge host is 10 44 0 12"
+        ));
     }
 
     #[test]
@@ -2750,6 +3056,19 @@ mod tests {
         assert!(historical.query_alignment);
         assert_eq!(current.rerank_limit, 30);
         assert_eq!(historical.rerank_limit, 30);
+    }
+
+    #[test]
+    fn precise_procedural_detail_queries_use_keyword_grounding() {
+        let db = setup();
+        let route = SearchBuilder::<TestMem>::new(
+            &db,
+            "What host is approved for the audited staging bridge?",
+        )
+        .query_route();
+        assert_eq!(route.intent, QueryIntent::ExactDetail);
+        assert!(matches!(route.mode, SearchMode::Keyword));
+        assert!(route.strict_grounding);
     }
 
     #[test]
@@ -3364,6 +3683,174 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].memory_id, safe_id);
+    }
+
+    #[test]
+    fn procedural_isolation_filters_policy_class_mismatched_allowances() {
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let safe = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "Normal production path uses the scheduled task and audited tunnel."
+                        .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store safe");
+        let breakglass = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "During breakglass recovery only, temporarily run femind-embed-service on 127.0.0.1:8898 with local-cpu."
+                        .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store breakglass");
+
+        let safe_id = match safe {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let breakglass_id = match breakglass {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        db.with_writer(|conn| {
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![safe_id, r#"{"source_trust":"trusted","source_kind":"system","source_verification":"verified"}"#],
+            )?;
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![breakglass_id, r#"{"source_trust":"trusted","review_required":"true","review_status":"allowed","review_scope":"production","review_policy_class":"breakglass-exception"}"#],
+            )?;
+            Ok::<(), crate::error::FemindError>(())
+        })
+        .expect("update metadata");
+
+        let mut routine_results = vec![
+            SearchResult {
+                memory_id: breakglass_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: safe_id,
+                score: 0.9,
+            },
+        ];
+
+        apply_procedural_safety_isolation(
+            &db,
+            "How should the production service normally run?",
+            &mut routine_results,
+        );
+
+        assert_eq!(routine_results.len(), 1);
+        assert_eq!(routine_results[0].memory_id, safe_id);
+
+        let mut breakglass_results = vec![
+            SearchResult {
+                memory_id: breakglass_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: safe_id,
+                score: 0.9,
+            },
+        ];
+
+        apply_procedural_safety_isolation(
+            &db,
+            "What temporary procedure is approved during breakglass recovery?",
+            &mut breakglass_results,
+        );
+
+        assert_eq!(breakglass_results.len(), 1);
+        assert_eq!(breakglass_results[0].memory_id, breakglass_id);
+    }
+
+    #[test]
+    fn keyword_exact_detail_route_applies_grounding_and_alignment() {
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let production = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text:
+                        "Keep the production FeMind service on 127.0.0.1 behind the audited tunnel."
+                            .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store production");
+        let staging = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text:
+                        "For the audited staging lab only, the approved bridge host is 10.44.0.12 behind the internal ACL and access log."
+                            .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store staging");
+
+        let production_id = match production {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let staging_id = match staging {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        db.with_writer(|conn| {
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![production_id, r#"{"source_trust":"trusted","source_kind":"maintainer","source_verification":"verified"}"#],
+            )?;
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![staging_id, r#"{"source_trust":"trusted","source_kind":"maintainer","source_verification":"verified","review_required":"true","review_status":"allowed","review_scope":"staging","review_policy_class":"network-exposure-exception","review_reviewer":"ops-maintainer"}"#],
+            )?;
+            Ok::<(), crate::error::FemindError>(())
+        })
+        .expect("update metadata");
+
+        let results = SearchBuilder::<TestMem>::new(
+            &db,
+            "What host is approved for the audited staging bridge?",
+        )
+        .execute()
+        .expect("execute search");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].memory_id, staging_id);
     }
 
     #[test]

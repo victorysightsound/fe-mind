@@ -266,8 +266,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `27/27`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `27/27`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `30/30`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `30/30`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
@@ -287,6 +287,9 @@ Current validated baseline:
   `expired` transitions for high-impact procedural memories
 - review-state policy coverage now also includes scoped allowed exceptions, so
   environment-specific overrides do not leak into general production answers
+- review-policy coverage now also includes:
+  - breakglass exceptions that surface only for explicit outage-recovery queries
+  - scoped trusted-source conflict resolution for supported-path questions
 - temporary review allowances can now be modeled with `review_expires_at`
   timestamps and inspected through the operator review CLI
 - review operations now also support template-driven approvals plus
@@ -298,8 +301,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `27/27`
-- latest reranker-aware `remote-fallback` ANN run passes `27/27`
+- latest reranker-aware `remote-fallback` exact run passes `30/30`
+- latest reranker-aware `remote-fallback` ANN run passes `30/30`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

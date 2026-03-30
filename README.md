@@ -27,8 +27,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `27/27`
-- retrieval-only practical eval in `ann` mode currently passes `27/27`
+- retrieval-only practical eval in `exact` mode currently passes `30/30`
+- retrieval-only practical eval in `ann` mode currently passes `30/30`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
@@ -51,7 +51,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `27/27` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `30/30` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and

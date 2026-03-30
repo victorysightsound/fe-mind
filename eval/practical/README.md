@@ -153,8 +153,8 @@ Current local baseline:
   review-policy-transition scenarios
 - the practical set now also includes trusted private-endpoint conflict
   coverage with exact-detail abstention on sensitive infrastructure values
-- reranker-aware remote-fallback regression is currently green at `27/27`
-- reranker-aware remote-fallback ANN regression is also green at `27/27`
+- reranker-aware remote-fallback regression is currently green at `30/30`
+- reranker-aware remote-fallback ANN regression is also green at `30/30`
 - latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

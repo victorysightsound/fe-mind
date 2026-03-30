@@ -1,4 +1,7 @@
 use crate::scoring::procedural_safety::query_requests_procedural_guidance;
+use crate::scoring::secret_policy::{
+    query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
+};
 use crate::traits::{MemoryMeta, MemoryType, ScoringStrategy};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -166,6 +169,8 @@ pub enum ReviewPolicyClass {
     DestructiveMaintenance,
     SecretHandlingException,
     MigrationException,
+    BreakglassException,
+    PrivateInfrastructureException,
 }
 
 impl ReviewPolicyClass {
@@ -176,6 +181,8 @@ impl ReviewPolicyClass {
             Self::DestructiveMaintenance => "destructive-maintenance",
             Self::SecretHandlingException => "secret-handling-exception",
             Self::MigrationException => "migration-exception",
+            Self::BreakglassException => "breakglass-exception",
+            Self::PrivateInfrastructureException => "private-infrastructure-exception",
         }
     }
 
@@ -196,6 +203,12 @@ impl ReviewPolicyClass {
             "migration-exception" | "migration_exception" | "migration" => {
                 Some(Self::MigrationException)
             }
+            "breakglass-exception" | "breakglass_exception" | "breakglass" => {
+                Some(Self::BreakglassException)
+            }
+            "private-infrastructure-exception"
+            | "private_infrastructure_exception"
+            | "private-infrastructure" => Some(Self::PrivateInfrastructureException),
             _ => None,
         }
     }
@@ -212,6 +225,8 @@ pub enum ReviewApprovalTemplate {
     StagingBridge,
     MigrationBridge,
     LabException,
+    BreakglassOps,
+    PrivateEndpointBridge,
 }
 
 impl ReviewApprovalTemplate {
@@ -220,6 +235,8 @@ impl ReviewApprovalTemplate {
             Self::StagingBridge => "staging-bridge",
             Self::MigrationBridge => "migration-bridge",
             Self::LabException => "lab-exception",
+            Self::BreakglassOps => "breakglass-ops",
+            Self::PrivateEndpointBridge => "private-endpoint-bridge",
         }
     }
 
@@ -228,6 +245,10 @@ impl ReviewApprovalTemplate {
             "staging-bridge" | "staging_bridge" | "staging" => Some(Self::StagingBridge),
             "migration-bridge" | "migration_bridge" | "migration" => Some(Self::MigrationBridge),
             "lab-exception" | "lab_exception" | "lab" => Some(Self::LabException),
+            "breakglass-ops" | "breakglass_ops" | "breakglass" => Some(Self::BreakglassOps),
+            "private-endpoint-bridge" | "private_endpoint_bridge" | "private-endpoint" => {
+                Some(Self::PrivateEndpointBridge)
+            }
             _ => None,
         }
     }
@@ -237,6 +258,8 @@ impl ReviewApprovalTemplate {
             Self::StagingBridge => ReviewScope::Staging,
             Self::MigrationBridge => ReviewScope::Migration,
             Self::LabException => ReviewScope::Lab,
+            Self::BreakglassOps => ReviewScope::Production,
+            Self::PrivateEndpointBridge => ReviewScope::Production,
         }
     }
 
@@ -245,6 +268,8 @@ impl ReviewApprovalTemplate {
             Self::StagingBridge => ReviewPolicyClass::NetworkExposureException,
             Self::MigrationBridge => ReviewPolicyClass::MigrationException,
             Self::LabException => ReviewPolicyClass::OperationalException,
+            Self::BreakglassOps => ReviewPolicyClass::BreakglassException,
+            Self::PrivateEndpointBridge => ReviewPolicyClass::PrivateInfrastructureException,
         }
     }
 
@@ -253,6 +278,8 @@ impl ReviewApprovalTemplate {
             Self::StagingBridge => 14,
             Self::MigrationBridge => 7,
             Self::LabException => 30,
+            Self::BreakglassOps => 1,
+            Self::PrivateEndpointBridge => 14,
         };
         now + chrono::Duration::days(days)
     }
@@ -341,6 +368,13 @@ pub(crate) fn query_scope(query: &str) -> ReviewScope {
         ReviewScope::Staging
     } else if normalized.contains(" lab") || normalized.contains("lab ") {
         ReviewScope::Lab
+    } else if normalized.contains("breakglass")
+        || normalized.contains("outage")
+        || normalized.contains("emergency")
+        || normalized.contains("restore")
+        || normalized.contains("recovery")
+    {
+        ReviewScope::Production
     } else if normalized.contains("migration")
         || normalized.contains("temporary")
         || normalized.contains("bridge")
@@ -362,6 +396,66 @@ pub(crate) fn review_scope_matches_query(record: &MemoryMeta, query: &str) -> bo
         ReviewScope::Staging => matches!(query_scope, ReviewScope::Staging | ReviewScope::Lab),
         ReviewScope::Lab => matches!(query_scope, ReviewScope::Lab | ReviewScope::Staging),
         ReviewScope::Migration => matches!(query_scope, ReviewScope::Migration),
+    }
+}
+
+pub(crate) fn review_policy_class_matches_query(record: &MemoryMeta, query: &str) -> bool {
+    let Some(policy_class) = review_policy_class(record) else {
+        return true;
+    };
+    let normalized = query.to_lowercase();
+
+    match policy_class {
+        ReviewPolicyClass::OperationalException => true,
+        ReviewPolicyClass::NetworkExposureException => {
+            normalized.contains("host")
+                || normalized.contains("bind")
+                || normalized.contains("listen")
+                || normalized.contains("service")
+                || normalized.contains("port")
+                || normalized.contains("0.0.0.0")
+                || normalized.contains("localhost")
+        }
+        ReviewPolicyClass::DestructiveMaintenance => {
+            normalized.contains("delete")
+                || normalized.contains("drop")
+                || normalized.contains("reset")
+                || normalized.contains("rebuild")
+                || normalized.contains("prune")
+                || normalized.contains("cleanup")
+                || normalized.contains("rollback")
+                || normalized.contains("remove")
+        }
+        ReviewPolicyClass::SecretHandlingException => {
+            query_requests_secret_location_or_reference(query)
+                || normalized.contains("token")
+                || normalized.contains("password")
+                || normalized.contains("secret")
+                || normalized.contains("credential")
+                || normalized.contains("vault")
+                || normalized.contains("env")
+        }
+        ReviewPolicyClass::MigrationException => {
+            normalized.contains("migration")
+                || normalized.contains("cutover")
+                || normalized.contains("bridge")
+                || normalized.contains("temporary")
+        }
+        ReviewPolicyClass::BreakglassException => {
+            normalized.contains("breakglass")
+                || normalized.contains("outage")
+                || normalized.contains("emergency")
+                || normalized.contains("temporary recovery")
+                || normalized.contains("temporary procedure")
+                || normalized.contains("restore")
+        }
+        ReviewPolicyClass::PrivateInfrastructureException => {
+            query_requests_private_infra_guidance(query)
+                || normalized.contains("relay")
+                || normalized.contains("internal host")
+                || normalized.contains("endpoint")
+                || normalized.contains("tunnel")
+        }
     }
 }
 
@@ -509,6 +603,33 @@ mod tests {
         assert_eq!(flag.severity, ReviewSeverity::Critical);
         assert!(flag.tags.contains(&"network-exposure"));
         assert!(flag.tags.contains(&"auth-disable"));
+    }
+
+    #[test]
+    fn review_policy_class_matches_breakglass_query_shape() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "review_policy_class".to_string(),
+            "breakglass-exception".to_string(),
+        );
+        let record = meta("Temporary breakglass recovery path", metadata);
+
+        assert!(review_policy_class_matches_query(
+            &record,
+            "What temporary procedure is approved during breakglass recovery?"
+        ));
+        assert!(!review_policy_class_matches_query(
+            &record,
+            "How should the production service normally run?"
+        ));
+    }
+
+    #[test]
+    fn breakglass_queries_resolve_to_production_scope() {
+        assert_eq!(
+            query_scope("What temporary procedure is approved during breakglass recovery?"),
+            ReviewScope::Production
+        );
     }
 
     #[test]

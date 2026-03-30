@@ -23,8 +23,9 @@ pub use review_safety::{
     ReviewStatus,
 };
 pub(crate) use review_safety::{
-    detect_review_flag, effective_review_status, review_denied, review_expires_at,
-    review_policy_class, review_required, review_scope_matches_query,
+    detect_review_flag, effective_review_status, query_scope, review_denied, review_expires_at,
+    review_policy_class, review_policy_class_matches_query, review_required, review_scope,
+    review_scope_matches_query,
 };
 pub use secret_policy::{
     SecretClass, evidence_contains_secret_material, query_requests_private_infra_detail,

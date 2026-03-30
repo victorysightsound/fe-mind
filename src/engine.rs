@@ -18,7 +18,8 @@ use crate::scoring::{
     effective_review_status, evidence_contains_secret_material,
     query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
-    secret_class_from_metadata, source_provenance_rank, source_trust_level,
+    review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
+    source_provenance_rank, source_trust_level,
 };
 use crate::search::builder::SearchBuilder;
 use crate::storage::Database;
@@ -1766,7 +1767,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             });
         }
 
-        let top = &evidence[0];
+        let top = select_best_evidence(query, &evidence);
         if evidence_explicitly_lacks_requested_detail(query, &evidence) {
             return Ok(ComposedAnswerResult {
                 answer: "I don’t have the exact grounded detail needed to answer that.".to_string(),
@@ -1802,7 +1803,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             route.intent,
             crate::search::QueryIntent::CurrentState | crate::search::QueryIntent::HistoricalState
         ) {
-            compose_stateful_answer(&evidence)
+            compose_stateful_answer(query, &evidence)
         } else if requires_strict_grounding {
             (
                 top.text.trim().to_string(),
@@ -2186,8 +2187,28 @@ fn text_contradicts_yes_no_query(query: &str, text: &str) -> bool {
             && (normalized_text.contains("expired") || normalized_text.contains("return to")))
 }
 
-fn select_yes_no_evidence<'a>(query: &str, evidence: &'a [AggregatedMatch]) -> &'a AggregatedMatch {
+fn select_best_evidence<'a>(query: &str, evidence: &'a [AggregatedMatch]) -> &'a AggregatedMatch {
     let best = &evidence[0];
+    if evidence.len() < 2 || !query_prefers_trusted_guidance(query) {
+        return best;
+    }
+
+    evidence
+        .iter()
+        .max_by(|left, right| {
+            evidence_selection_rank(query, left)
+                .cmp(&evidence_selection_rank(query, right))
+                .then_with(|| {
+                    left.score
+                        .partial_cmp(&right.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        })
+        .unwrap_or(best)
+}
+
+fn select_yes_no_evidence<'a>(query: &str, evidence: &'a [AggregatedMatch]) -> &'a AggregatedMatch {
+    let best = select_best_evidence(query, evidence);
     let grounded = evidence
         .iter()
         .max_by(|left, right| {
@@ -2231,9 +2252,10 @@ fn query_literal_grounding_score(query: &str, text: &str) -> usize {
 }
 
 fn compose_stateful_answer(
+    query: &str,
     evidence: &[AggregatedMatch],
 ) -> (String, &'static str, CompositionConfidence, &'static str) {
-    let best = &evidence[0];
+    let best = select_best_evidence(query, evidence);
     let confidence = if has_conflicting_state_evidence("", evidence) {
         CompositionConfidence::Medium
     } else {
@@ -2251,6 +2273,35 @@ fn compose_stateful_answer(
         confidence,
         rationale,
     )
+}
+
+fn query_prefers_trusted_guidance(query: &str) -> bool {
+    crate::scoring::query_requests_procedural_guidance(query)
+        || query_requests_secret_location_or_reference(query)
+        || query_requests_private_infra_guidance(query)
+}
+
+fn evidence_selection_rank(query: &str, candidate: &AggregatedMatch) -> u16 {
+    let meta = candidate_memory_meta(candidate);
+    let trust_rank = match source_trust_level(&meta) {
+        crate::scoring::SourceTrustLevel::Trusted => 400_u16,
+        crate::scoring::SourceTrustLevel::Normal => 320_u16,
+        crate::scoring::SourceTrustLevel::Low => 120_u16,
+        crate::scoring::SourceTrustLevel::Untrusted => 0_u16,
+    };
+    let provenance_rank = source_provenance_rank(&meta) as u16;
+    let scope_rank = if review_scope_matches_query(&meta, query) {
+        20
+    } else {
+        0
+    };
+    let policy_rank = if review_policy_class_matches_query(&meta, query) {
+        20
+    } else {
+        0
+    };
+
+    trust_rank + provenance_rank + scope_rank + policy_rank
 }
 
 fn text_implies_negative_state(text: &str) -> bool {
@@ -2355,8 +2406,8 @@ fn is_sensitive_guidance_class(secret_class: Option<SecretClass>) -> bool {
     )
 }
 
-fn trusted_guidance_rank(candidate: &AggregatedMatch) -> u8 {
-    let meta = MemoryMeta {
+fn candidate_memory_meta(candidate: &AggregatedMatch) -> MemoryMeta {
+    MemoryMeta {
         id: Some(candidate.memory_id),
         searchable_text: candidate.text.clone(),
         memory_type: crate::traits::MemoryType::Procedural,
@@ -2364,7 +2415,11 @@ fn trusted_guidance_rank(candidate: &AggregatedMatch) -> u8 {
         category: candidate.category.clone(),
         created_at: Utc::now(),
         metadata: candidate.metadata.clone(),
-    };
+    }
+}
+
+fn trusted_guidance_rank(candidate: &AggregatedMatch) -> u8 {
+    let meta = candidate_memory_meta(candidate);
 
     match source_trust_level(&meta) {
         crate::scoring::SourceTrustLevel::Trusted | crate::scoring::SourceTrustLevel::Normal => {
@@ -3634,6 +3689,41 @@ mod tests {
 
         assert_eq!(evidence.len(), 1);
         assert_eq!(evidence[0].memory_id, 1);
+    }
+
+    #[test]
+    fn trusted_procedural_guidance_prefers_higher_provenance_source() {
+        let evidence = vec![
+            AggregatedMatch {
+                memory_id: 1,
+                text: "Supported Windows startup path: use the Scheduled Task to launch femind-embed-service at logon.".to_string(),
+                category: None,
+                score: 0.81,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                ]),
+            },
+            AggregatedMatch {
+                memory_id: 2,
+                text: "Older workaround note: use a login shell hook to start femind-embed-service when Windows signs in.".to_string(),
+                category: None,
+                score: 0.82,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "maintainer".to_string()),
+                    ("source_verification".to_string(), "declared".to_string()),
+                ]),
+            },
+        ];
+
+        let best = select_best_evidence(
+            "What is the supported Windows startup path for femind-embed-service?",
+            &evidence,
+        );
+
+        assert_eq!(best.memory_id, 1);
     }
 
     #[test]

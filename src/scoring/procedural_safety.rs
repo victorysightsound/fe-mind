@@ -68,6 +68,13 @@ impl ScoringStrategy for ProceduralSafetyScorer {
 pub(crate) fn query_requests_procedural_guidance(query: &str) -> bool {
     let normalized = query.to_lowercase();
     let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    let procedural_focus = (normalized.contains("supported") || normalized.contains("approved"))
+        && (normalized.contains("path")
+            || normalized.contains("startup")
+            || normalized.contains("host")
+            || normalized.contains("address")
+            || normalized.contains("port")
+            || normalized.contains("bridge"));
 
     tokens.windows(2).any(|pair| {
         matches!(
@@ -82,10 +89,17 @@ pub(crate) fn query_requests_procedural_guidance(query: &str) -> bool {
                 | ["which", "address"]
                 | ["what", "port"]
                 | ["which", "port"]
+                | ["what", "procedure"]
+                | ["which", "procedure"]
+                | ["what", "path"]
+                | ["which", "path"]
                 | ["what", "steps"]
                 | ["which", "steps"]
         )
-    }) || normalized.contains("restart")
+    }) || procedural_focus
+        || normalized.contains("temporary procedure")
+        || normalized.contains("startup path")
+        || normalized.contains("restart")
         || normalized.contains("start ")
         || normalized.contains("stop ")
         || normalized.contains("run ")
@@ -155,5 +169,15 @@ mod tests {
             1.0,
         );
         assert!(m < 1.0);
+    }
+
+    #[test]
+    fn procedural_guidance_detection_covers_supported_path_queries() {
+        assert!(query_requests_procedural_guidance(
+            "What is the supported Windows startup path for femind-embed-service?"
+        ));
+        assert!(query_requests_procedural_guidance(
+            "What temporary procedure is approved during breakglass recovery?"
+        ));
     }
 }

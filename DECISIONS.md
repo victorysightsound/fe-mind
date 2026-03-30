@@ -1198,6 +1198,62 @@ internal hostnames.
 
 ---
 
+## Decision 039: Policy Classes Must Actively Route Retrieval for Scoped Guidance
+
+**Date:** 2026-03-30
+
+**Decision:** Treat review policy classes, scoped exception types, and trusted
+procedural source conflicts as active retrieval constraints rather than
+passive review metadata.
+
+**Context:** FeMind already had review status, scoped allowances, lifecycle
+actions, and provenance-aware sensitive guidance. The remaining failures were
+operational: scoped support-path queries could still surface generic defaults,
+breakglass exceptions could be filtered by the wrong scope, and keyword
+exact-detail routes were skipping the same grounding/alignment passes used by
+hybrid retrieval.
+
+**Rationale:**
+- breakglass, staging, and supported-path questions need different procedural
+  guidance even when the records are all trusted
+- scoped exceptions are only safe if retrieval enforces their intended use
+- strong keyword exact-detail routes still need grounding and alignment passes
+- trusted-source conflict resolution must favor explicit scoped/support-state
+  evidence over generic defaults when the query is specific
+
+**Consequences:**
+- review policy classes now also include:
+  - `breakglass-exception`
+  - `private-infrastructure-exception`
+- procedural queries now recognize:
+  - supported/approved host-path questions
+  - startup-path questions
+  - breakglass procedure questions
+- precise procedural detail queries now route as:
+  - `QueryIntent::ExactDetail`
+  - keyword-first retrieval
+  - strict grounding enabled
+- keyword and exhaustive retrieval paths now apply the same:
+  - strict grounding
+  - query-alignment reranking
+  used by vector and hybrid retrieval
+- trusted procedural conflict pruning now considers:
+  - explicit review scope
+  - query scope
+  - support/default-vs-exception intent
+  - provenance rank
+  - staging/production/migration text cues
+- breakglass recovery queries now resolve to production scope unless the query
+  explicitly says staging, lab, or migration
+- practical coverage now includes:
+  - breakglass policy routing
+  - scoped trusted procedural conflict resolution
+- Remote-GPU validation is green after the change:
+  practical `30/30` exact, practical `30/30` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

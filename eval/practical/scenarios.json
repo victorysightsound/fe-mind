@@ -666,6 +666,115 @@
     ]
   },
   {
+    "id": "breakglass-policy-routing",
+    "title": "Breakglass exceptions should surface only for outage recovery queries",
+    "category": "review-policy-transitions",
+    "goal": "Keep temporary production breakglass guidance out of routine answers while still surfacing it during explicit outage recovery queries.",
+    "records": [
+      {
+        "timestamp": "2026-03-29T12:31:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified"
+        },
+        "text": "Normal production path: keep the FeMind service on 127.0.0.1 behind the scheduled task and audited tunnel."
+      },
+      {
+        "timestamp": "2026-03-29T12:32:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "review_required": "true",
+          "review_status": "allowed",
+          "review_severity": "critical",
+          "review_reason": "temporary outage recovery",
+          "review_tags": "network-exposure,breakglass",
+          "review_scope": "production",
+          "review_policy_class": "breakglass-exception",
+          "review_template": "breakglass-ops",
+          "review_reviewer": "ops-maintainer"
+        },
+        "text": "During authenticated breakglass recovery only, temporarily run femind-embed-service on 127.0.0.1:8898 with local-cpu until the GPU relay is restored."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How should the production FeMind service normally run?",
+        "expected_answer": "Keep the FeMind service on 127.0.0.1 behind the scheduled task and audited tunnel.",
+        "required_fragments": [
+          "127.0.0.1",
+          "scheduled task",
+          "audited tunnel"
+        ],
+        "forbidden_fragments": [
+          "breakglass recovery",
+          "127.0.0.1:8898",
+          "local-cpu"
+        ]
+      },
+      {
+        "query": "What temporary procedure is approved during an authenticated breakglass recovery?",
+        "expected_answer": "Temporarily run femind-embed-service on 127.0.0.1:8898 with local-cpu until the GPU relay is restored.",
+        "required_fragments": [
+          "127.0.0.1:8898",
+          "local-cpu"
+        ],
+        "forbidden_fragments": [
+          "scheduled task"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "trusted-procedural-conflict-resolution",
+    "title": "Trusted procedural conflicts should prefer the stronger provenance source",
+    "category": "trust-and-procedural-safety",
+    "goal": "When multiple trusted procedural memories disagree, FeMind should prefer the higher-provenance supported path.",
+    "records": [
+      {
+        "timestamp": "2026-03-29T12:33:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified"
+        },
+        "text": "Supported Windows startup path: use the Scheduled Task to launch femind-embed-service at logon."
+      },
+      {
+        "timestamp": "2026-03-29T12:33:30Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared"
+        },
+        "text": "Older workaround note: use a login shell hook to start femind-embed-service when Windows signs in."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the supported Windows startup path for femind-embed-service?",
+        "expected_answer": "Use the Scheduled Task to launch femind-embed-service at logon.",
+        "required_fragments": [
+          "Scheduled Task",
+          "logon"
+        ],
+        "forbidden_fragments": [
+          "login shell hook"
+        ]
+      }
+    ]
+  },
+  {
     "id": "trusted-private-endpoint-conflict",
     "title": "Trusted sensitive guidance should prefer stronger provenance and abstain on exact infra detail",
     "category": "provenance-and-secret-guardrails",
