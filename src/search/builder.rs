@@ -370,6 +370,9 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             self.mode.clone()
         } else {
             match intent {
+                QueryIntent::Aggregation => SearchMode::Exhaustive {
+                    min_score: self.min_score.unwrap_or(0.0),
+                },
                 QueryIntent::AbstentionRisk => SearchMode::Keyword,
                 _ => self.mode.clone(),
             }
@@ -443,7 +446,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                 "historical-state query; widen reranking and favor earlier-state evidence"
             }
             QueryIntent::Aggregation => {
-                "aggregation query; preserve broad coverage and bypass reranking"
+                "aggregation query; use exhaustive coverage and bypass reranking"
             }
             QueryIntent::AbstentionRisk => {
                 "abstention-risk query; use keyword-first strict grounding"
@@ -2452,6 +2455,23 @@ mod tests {
         assert!(route.strict_grounding);
         assert!(!route.query_alignment);
         assert_eq!(route.rerank_limit, 0);
+    }
+
+    #[test]
+    fn query_route_switches_aggregation_queries_to_exhaustive_mode() {
+        let db = setup();
+        let route = SearchBuilder::<TestMem>::new(
+            &db,
+            "Which providers were evaluated for extraction and how many were there?",
+        )
+        .query_route();
+        assert_eq!(route.intent, QueryIntent::Aggregation);
+        assert!(matches!(
+            route.mode,
+            SearchMode::Exhaustive { min_score: 0.0 }
+        ));
+        assert_eq!(route.rerank_limit, 0);
+        assert_eq!(route.depth, SearchDepth::Deep);
     }
 
     #[test]

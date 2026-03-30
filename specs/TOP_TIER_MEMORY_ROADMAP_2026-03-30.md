@@ -33,6 +33,8 @@ As of the current FeMind pass, the first layer of that roadmap is already in pla
 - `valid_at(...)` now enforces validity windows during retrieval
 - practical scenarios can now seed explicit supersession/conflict links, so
   linked state-history behavior is part of the real regression loop
+- practical evaluation now includes explicit aggregation, graph-connected, and
+  provenance/abstention scenarios with coverage-sensitive pass criteria
 
 That means the next temporal work should focus on deeper state modeling, not on
 re-adding the basic routing layer.

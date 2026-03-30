@@ -695,6 +695,46 @@ by the real engine-first regression loop.
 
 ---
 
+## Decision 028: Practical Eval Needs Coverage-Sensitive Retrieval Criteria
+
+**Date:** 2026-03-30
+
+**Decision:** Extend the practical eval harness so retrieval checks can express
+coverage-sensitive criteria like required fragments, forbidden fragments,
+minimum hit counts, and scenario-level graph depth instead of relying only on
+loose expected-answer overlap.
+
+**Context:** After the routed temporal and state/conflict work stabilized,
+FeMind needed broader engine-first coverage for aggregation, graph-assisted, and
+provenance-heavy questions. The older practical checks could tell us whether a
+query roughly matched, but they were too coarse to say whether an aggregation
+query surfaced the full provider set or whether a provenance query stayed
+grounded to the right artifact detail.
+
+**Rationale:**
+- Aggregation and provenance scenarios need more than semantic similarity to be
+  useful tuning signals
+- Graph-assisted scenarios should be able to opt into graph depth without
+  forcing that behavior across the whole suite
+- Practical summaries should explain why a check failed so tuning work can
+  target routing, graph expansion, grounding, or hit coverage directly
+
+**Consequences:**
+- Aggregation routes now switch to exhaustive search when the caller has not
+  explicitly overridden the mode
+- Practical scenarios can declare `graph_depth` per scenario or per check
+- Retrieval checks can declare `required_fragments`, `forbidden_fragments`, and
+  `min_observed_hits`
+- Practical summaries now include mode, temporal-policy, and graph-depth
+  pass-rate breakdowns
+- Per-check output now records retrieval-criteria diagnostics so aggregation and
+  provenance regressions fail for explicit reasons instead of only by token
+  overlap
+- The practical suite now includes explicit aggregation, multi-hop graph, and
+  provenance/abstention scenarios in addition to linked state-history coverage
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

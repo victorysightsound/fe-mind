@@ -17,10 +17,10 @@ mod app {
     #[cfg(feature = "api-embeddings")]
     use femind::embeddings::ApiBackend;
     use femind::embeddings::EmbeddingBackend;
-    #[cfg(feature = "remote-embeddings")]
-    use femind::embeddings::RemoteEmbeddingBackend;
     #[cfg(feature = "api-embeddings")]
     use femind::embeddings::MINILM_DIMENSIONS;
+    #[cfg(feature = "remote-embeddings")]
+    use femind::embeddings::RemoteEmbeddingBackend;
     #[cfg(feature = "local-embeddings")]
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
     use femind::engine::{EngineConfig, MemoryEngine, VectorSearchMode};
@@ -36,7 +36,7 @@ mod app {
     use femind::reranking::CandleReranker;
     #[cfg(feature = "remote-reranking")]
     use femind::reranking::RemoteRerankerBackend;
-    use femind::reranking::{RerankerRuntime, RERANKER_CANONICAL_NAME};
+    use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
     use femind::search::{QueryRoute, SearchMode};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
@@ -125,6 +125,14 @@ mod app {
     struct RetrievalCheck {
         query: String,
         expected_answer: String,
+        #[serde(default)]
+        required_fragments: Vec<String>,
+        #[serde(default)]
+        forbidden_fragments: Vec<String>,
+        #[serde(default)]
+        min_observed_hits: Option<usize>,
+        #[serde(default)]
+        graph_depth: Option<u32>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -136,6 +144,8 @@ mod app {
     struct AbstentionCheck {
         query: String,
         expected_behavior: String,
+        #[serde(default)]
+        graph_depth: Option<u32>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -147,6 +157,8 @@ mod app {
         records: Vec<ScenarioRecord>,
         #[serde(default)]
         relations: Vec<ScenarioRelation>,
+        #[serde(default)]
+        graph_depth: Option<u32>,
         #[serde(default)]
         retrieval_checks: Vec<RetrievalCheck>,
         #[serde(default)]
@@ -651,13 +663,31 @@ mod app {
     }
 
     #[derive(Debug, Serialize)]
+    struct RetrievalCriteriaReport {
+        expected_match: bool,
+        required_fragments_ok: bool,
+        forbidden_fragments_ok: bool,
+        hit_count_ok: bool,
+        observed_hit_count: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min_observed_hits: Option<usize>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        missing_required_fragments: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        present_forbidden_fragments: Vec<String>,
+    }
+
+    #[derive(Debug, Serialize)]
     struct CheckReport {
         query: String,
         passed: bool,
         expected: String,
         observed: Vec<ObservedHit>,
+        graph_depth: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
         route: Option<RoutedSearchPlan>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        criteria: Option<RetrievalCriteriaReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
         explain: Option<RetrievalExplain>,
     }
@@ -704,7 +734,10 @@ mod app {
         check_type_stats: BTreeMap<String, AggregateStats>,
         category_stats: BTreeMap<String, AggregateStats>,
         intent_stats: BTreeMap<String, AggregateStats>,
+        mode_stats: BTreeMap<String, AggregateStats>,
+        temporal_policy_stats: BTreeMap<String, AggregateStats>,
         state_policy_stats: BTreeMap<String, AggregateStats>,
+        graph_depth_stats: BTreeMap<String, AggregateStats>,
         reports: Vec<ScenarioReport>,
     }
 
@@ -805,8 +838,15 @@ mod app {
         println!("summary: {passed_checks}/{total_checks} checks passed");
 
         let duration_ms = started_at.elapsed().as_millis();
-        let (check_type_stats, category_stats, intent_stats, state_policy_stats) =
-            summarize_reports(&reports);
+        let (
+            check_type_stats,
+            category_stats,
+            intent_stats,
+            mode_stats,
+            temporal_policy_stats,
+            state_policy_stats,
+            graph_depth_stats,
+        ) = summarize_reports(&reports);
         let summary = RunSummary {
             metadata: RunMetadata {
                 generated_at: Utc::now(),
@@ -856,7 +896,10 @@ mod app {
             check_type_stats,
             category_stats,
             intent_stats,
+            mode_stats,
+            temporal_policy_stats,
             state_policy_stats,
+            graph_depth_stats,
             reports,
         };
 
@@ -908,17 +951,13 @@ mod app {
         let mut retrieval = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.retrieval_checks {
+                let graph_depth = check
+                    .graph_depth
+                    .or(scenario.graph_depth)
+                    .unwrap_or(config.graph_depth);
                 let route = Some(routed_search_plan(&engine, &check.query));
-                let observed = top_hits(&engine, &check.query, config.top_k, config.graph_depth)?;
-                let combined = observed
-                    .iter()
-                    .map(|hit| hit.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let passed = observed
-                    .iter()
-                    .any(|hit| expected_match(&hit.text, &check.query, &check.expected_answer))
-                    || expected_match(&combined, &check.query, &check.expected_answer);
+                let observed = top_hits(&engine, &check.query, config.top_k, graph_depth)?;
+                let (passed, criteria) = evaluate_retrieval_check(&observed, &check.query, check);
                 let explain = if !passed && config.explain_failures {
                     Some(explain_retrieval(&engine, &check.query, config.top_k)?)
                 } else {
@@ -929,7 +968,9 @@ mod app {
                     passed,
                     expected: check.expected_answer.clone(),
                     observed,
+                    graph_depth,
                     route,
+                    criteria: Some(criteria),
                     explain,
                 });
             }
@@ -963,7 +1004,9 @@ mod app {
                         .into_iter()
                         .map(|text| ObservedHit { text, score: 1.0 })
                         .collect(),
+                    graph_depth: 0,
                     route: None,
+                    criteria: None,
                     explain: None,
                 });
             }
@@ -972,15 +1015,21 @@ mod app {
         let mut abstention = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.abstention_checks {
+                let graph_depth = check
+                    .graph_depth
+                    .or(scenario.graph_depth)
+                    .unwrap_or(config.graph_depth);
                 let route = Some(routed_search_plan(&engine, &check.query));
-                let observed = top_hits(&engine, &check.query, config.top_k, config.graph_depth)?;
+                let observed = top_hits(&engine, &check.query, config.top_k, graph_depth)?;
                 let passed = check.expected_behavior == "abstain" && observed.is_empty();
                 abstention.push(CheckReport {
                     query: check.query.clone(),
                     passed,
                     expected: check.expected_behavior.clone(),
                     observed,
+                    graph_depth,
                     route,
+                    criteria: None,
                     explain: None,
                 });
             }
@@ -1008,11 +1057,17 @@ mod app {
         BTreeMap<String, AggregateStats>,
         BTreeMap<String, AggregateStats>,
         BTreeMap<String, AggregateStats>,
+        BTreeMap<String, AggregateStats>,
+        BTreeMap<String, AggregateStats>,
+        BTreeMap<String, AggregateStats>,
     ) {
         let mut check_type_stats = BTreeMap::new();
         let mut category_stats = BTreeMap::new();
         let mut intent_stats = BTreeMap::new();
+        let mut mode_stats = BTreeMap::new();
+        let mut temporal_policy_stats = BTreeMap::new();
         let mut state_policy_stats = BTreeMap::new();
+        let mut graph_depth_stats = BTreeMap::new();
 
         for report in reports {
             let retrieval_total = report.retrieval.len();
@@ -1067,6 +1122,13 @@ mod app {
                         1,
                         usize::from(check.passed),
                     );
+                    record_stat(&mut mode_stats, &route.mode, 1, usize::from(check.passed));
+                    record_stat(
+                        &mut temporal_policy_stats,
+                        &route.temporal_policy,
+                        1,
+                        usize::from(check.passed),
+                    );
                     record_stat(
                         &mut state_policy_stats,
                         &route.state_conflict_policy,
@@ -1074,18 +1136,30 @@ mod app {
                         usize::from(check.passed),
                     );
                 }
+                record_stat(
+                    &mut graph_depth_stats,
+                    &check.graph_depth.to_string(),
+                    1,
+                    usize::from(check.passed),
+                );
             }
         }
 
         finalize_stats(&mut check_type_stats);
         finalize_stats(&mut category_stats);
         finalize_stats(&mut intent_stats);
+        finalize_stats(&mut mode_stats);
+        finalize_stats(&mut temporal_policy_stats);
         finalize_stats(&mut state_policy_stats);
+        finalize_stats(&mut graph_depth_stats);
         (
             check_type_stats,
             category_stats,
             intent_stats,
+            mode_stats,
+            temporal_policy_stats,
             state_policy_stats,
+            graph_depth_stats,
         )
     }
 
@@ -1375,7 +1449,7 @@ mod app {
                 .limit(top_k)
                 .execute()?;
 
-            for result in results {
+            for result in results.into_iter().take(top_k) {
                 let text = engine.database().with_reader(|conn| {
                     conn.query_row(
                         "SELECT searchable_text FROM memories WHERE id = ?1",
@@ -1391,6 +1465,64 @@ mod app {
             }
         }
         Ok(hits)
+    }
+
+    fn evaluate_retrieval_check(
+        observed: &[ObservedHit],
+        query: &str,
+        check: &RetrievalCheck,
+    ) -> (bool, RetrievalCriteriaReport) {
+        let combined = observed
+            .iter()
+            .map(|hit| hit.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let expected_match = observed
+            .iter()
+            .any(|hit| expected_match(&hit.text, query, &check.expected_answer))
+            || expected_match(&combined, query, &check.expected_answer);
+
+        let missing_required_fragments = check
+            .required_fragments
+            .iter()
+            .filter(|fragment| !fragment_present(fragment, observed, &combined))
+            .cloned()
+            .collect::<Vec<_>>();
+        let present_forbidden_fragments = check
+            .forbidden_fragments
+            .iter()
+            .filter(|fragment| fragment_present(fragment, observed, &combined))
+            .cloned()
+            .collect::<Vec<_>>();
+        let required_fragments_ok = missing_required_fragments.is_empty();
+        let forbidden_fragments_ok = present_forbidden_fragments.is_empty();
+        let hit_count_ok = check
+            .min_observed_hits
+            .is_none_or(|min_hits| observed.len() >= min_hits);
+
+        let criteria = RetrievalCriteriaReport {
+            expected_match,
+            required_fragments_ok,
+            forbidden_fragments_ok,
+            hit_count_ok,
+            observed_hit_count: observed.len(),
+            min_observed_hits: check.min_observed_hits,
+            missing_required_fragments,
+            present_forbidden_fragments,
+        };
+        let passed = criteria.expected_match
+            && criteria.required_fragments_ok
+            && criteria.forbidden_fragments_ok
+            && criteria.hit_count_ok;
+        (passed, criteria)
+    }
+
+    fn fragment_present(fragment: &str, observed: &[ObservedHit], combined: &str) -> bool {
+        let normalized_fragment = normalize(fragment);
+        normalize(combined).contains(&normalized_fragment)
+            || observed
+                .iter()
+                .any(|hit| normalize(&hit.text).contains(&normalized_fragment))
     }
 
     fn explain_retrieval(

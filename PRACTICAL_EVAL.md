@@ -56,6 +56,20 @@ The curated eval set should cover these categories:
 6. Abstention
    The system should avoid confident fabrication when the answer is missing.
 
+7. Aggregation
+   The system should preserve broad coverage for rollup questions instead of
+   collapsing onto one top hit.
+
+8. Multi-hop / graph retrieval
+   The system should answer some questions because linked records can be
+   traversed together, not only because one record happens to contain every
+   keyword.
+
+9. Provenance and exact artifact detail
+   The system should ground exact paths, ports, filenames, and identifiers when
+   they are documented, then abstain when that level of detail was never
+   recorded.
+
 ## Eval Artifact Layout
 
 The curated eval set lives under `eval/practical/`.
@@ -83,6 +97,11 @@ Each scenario should include:
 - expected current answers
 - expected abstentions where relevant
 - optional extraction expectations for messy source material
+- optional scenario-level `graph_depth` for graph-assisted retrieval checks
+- optional explicit retrieval criteria such as:
+  - `required_fragments`
+  - `forbidden_fragments`
+  - `min_observed_hits`
 
 ## Release Use
 
@@ -160,10 +179,16 @@ The summary now also records:
 - check-type pass-rate breakdowns
 - scenario-category pass-rate breakdowns
 - query-intent pass-rate breakdowns
+- routed-mode pass-rate breakdowns
+- temporal-policy pass-rate breakdowns
 - state/conflict-policy pass-rate breakdowns
+- graph-depth pass-rate breakdowns
 - per-check routed search plans showing inferred intent, mode, depth,
   temporal policy, state/conflict policy, grounding, query-alignment, and
   rerank settings
+- per-check retrieval criteria reports showing whether the expected answer
+  matched, whether required fragments were present, whether forbidden fragments
+  leaked in, and whether enough hits surfaced for coverage-sensitive checks
 
 That routed plan is now part of the actual retrieval behavior, not just a
 diagnostic label:
@@ -208,14 +233,14 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `11/11`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `11/11`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `15/15`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `15/15`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
-- practical coverage now includes an explicit linked supersession/history
-  scenario that seeds graph relations directly through the eval harness
+- practical coverage now includes explicit linked supersession/history,
+  aggregation, graph-connected, and provenance/abstention scenarios
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `local-cpu` exact run passes `11/11`
-- reranker-aware summary artifact: `target/practical-eval/retrieval-exact-remote-rerank.json`
+- latest reranker-aware `remote-fallback` exact run passes `15/15`
+- reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`
 - live-library summary artifact: `target/live-library/live-library-exact.json`

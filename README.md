@@ -27,10 +27,11 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `11/11`
-- retrieval-only practical eval in `ann` mode currently passes `11/11`
-- practical eval now includes explicit graph-linked state-history coverage, not
-  just text-only changed-fact scenarios
+- retrieval-only practical eval in `exact` mode currently passes `15/15`
+- retrieval-only practical eval in `ann` mode currently passes `15/15`
+- practical eval now includes explicit graph-linked state-history, aggregation,
+  graph-connected, and provenance/abstention coverage, not just text-only
+  changed-fact scenarios
 - larger real-world follow-up library now lives under `eval/live-library/`
 - larger real-world library now covers 18 scenarios and 58 retrieval checks
 - larger real-world library currently passes `58/58` in the standard
@@ -47,15 +48,19 @@ The practical live-validation path is now established and repeatable:
 - the recommended high-precision retrieval path is remote MiniLM plus remote
   MiniLM reranking with local fallback when the Windows GPU service is
   available
-- this pass revalidated the engine-first suites on local CPU at `11/11`
-  practical, `58/58` live-library, and `90/90` memloft-slice
+- this pass revalidated the engine-first suites on remote GPU fallback at
+  `15/15` practical, `58/58` live-library, and `90/90` memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
   benchmark-style evaluation is deferred to milestone checkpoints after
   meaningful engine changes
 - practical evaluation summaries now include pass-rate breakdowns by check type,
-  scenario category, and inferred query intent, along with the routed search
-  plan used for each retrieval-style check
+  scenario category, inferred query intent, routed mode, temporal policy,
+  state/conflict policy, and graph depth, along with the routed search plan
+  used for each retrieval-style check
+- retrieval-style checks can now declare required fragments, forbidden
+  fragments, and minimum observed-hit counts so aggregation and provenance
+  regressions fail for the right reason instead of only by loose token overlap
 - routed retrieval now includes an explicit temporal policy:
   current-state queries mildly favor newer evidence, historical-state queries
   mildly favor older evidence, and exact-detail / abstention routes stay

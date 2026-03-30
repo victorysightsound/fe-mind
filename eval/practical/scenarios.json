@@ -213,6 +213,133 @@
     ]
   },
   {
+    "id": "aggregation-provider-rollup",
+    "title": "Aggregation queries should preserve broad provider coverage",
+    "category": "aggregation",
+    "goal": "Return the full provider set for rollup questions instead of overfitting to a single top hit.",
+    "records": [
+      {
+        "timestamp": "2026-03-17T09:00:00Z",
+        "source": "evaluation-note",
+        "memory_type": "semantic",
+        "text": "DeepInfra was evaluated as one extraction provider during the early smoke tests."
+      },
+      {
+        "timestamp": "2026-03-17T10:00:00Z",
+        "source": "evaluation-note",
+        "memory_type": "semantic",
+        "text": "OpenRouter was also evaluated as an extraction provider during the comparison pass."
+      },
+      {
+        "timestamp": "2026-03-17T11:00:00Z",
+        "source": "evaluation-note",
+        "memory_type": "semantic",
+        "text": "Anthropic was evaluated briefly as a third extraction provider before narrowing the lane."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How many providers were evaluated for extraction and which ones were they?",
+        "expected_answer": "Three providers were evaluated for extraction: DeepInfra, OpenRouter, and Anthropic.",
+        "required_fragments": [
+          "DeepInfra",
+          "OpenRouter",
+          "Anthropic"
+        ],
+        "min_observed_hits": 3
+      }
+    ]
+  },
+  {
+    "id": "graph-client-connectivity",
+    "title": "Graph-linked retrieval should bridge client, tunnel, and host notes",
+    "category": "multi-hop-graph",
+    "goal": "Answer a connectivity question that spans several linked records rather than one self-contained note.",
+    "graph_depth": 2,
+    "records": [
+      {
+        "key": "librona-client",
+        "timestamp": "2026-03-29T10:00:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "Librona now verifies against the FeMind remote embedding service instead of its earlier service assumptions."
+      },
+      {
+        "key": "windows-host",
+        "timestamp": "2026-03-29T10:05:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The stable GPU embedding path now comes from hosting the FeMind remote service natively on Windows on calvaryav."
+      },
+      {
+        "key": "mac-tunnel",
+        "timestamp": "2026-03-29T10:10:00Z",
+        "source": "integration-note",
+        "memory_type": "procedural",
+        "text": "Mac clients reach it through an SSH tunnel to Windows localhost on calvaryav."
+      }
+    ],
+    "relations": [
+      {
+        "from": "librona-client",
+        "to": "windows-host",
+        "relation": "related_to"
+      },
+      {
+        "from": "windows-host",
+        "to": "mac-tunnel",
+        "relation": "depends_on"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How does Librona reach the stable GPU embedding service now?",
+        "expected_answer": "It reaches the service through an SSH tunnel to Windows localhost on calvaryav.",
+        "required_fragments": [
+          "SSH tunnel",
+          "Windows localhost",
+          "calvaryav"
+        ],
+        "min_observed_hits": 2
+      }
+    ]
+  },
+  {
+    "id": "provenance-and-hard-abstention",
+    "title": "Exact artifact details should be grounded and unsupported identifiers should abstain",
+    "category": "provenance-and-abstention",
+    "goal": "Return documented local artifact details while refusing exact identifiers that were never recorded.",
+    "records": [
+      {
+        "timestamp": "2026-03-29T11:30:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "text": "The stable FeMind tunnel helper lives at /Users/johndeaton/bin/femind-remote-on."
+      },
+      {
+        "timestamp": "2026-03-29T11:35:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "text": "The launchd agent file that keeps the FeMind tunnel alive is /Users/johndeaton/Library/LaunchAgents/com.user.femind-embed-tunnel.plist."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "Which launchd plist keeps the FeMind tunnel alive?",
+        "expected_answer": "The launchd plist is /Users/johndeaton/Library/LaunchAgents/com.user.femind-embed-tunnel.plist.",
+        "required_fragments": [
+          "com.user.femind-embed-tunnel.plist"
+        ]
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What exact scheduled task GUID keeps the same tunnel alive on Windows?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
     "id": "abstention-missing-info",
     "title": "System should abstain when the answer is not present",
     "category": "abstention",

@@ -29,9 +29,15 @@ Each scenario includes:
 - optional `relations` for explicit source-record graph links
 - `relations[].from` / `relations[].to` refer to `records[].key`
 - `relations[].relation` uses the stored relation name such as `superseded_by` or `conflicts_with`
+- optional `graph_depth` to request graph-assisted retrieval for the scenario
 - `retrieval_checks`
+- optional `retrieval_checks[].required_fragments`
+- optional `retrieval_checks[].forbidden_fragments`
+- optional `retrieval_checks[].min_observed_hits`
+- optional `retrieval_checks[].graph_depth` to override scenario/default graph depth
 - optional `extraction_checks`
 - optional `abstention_checks`
+- optional `abstention_checks[].graph_depth`
 
 ## Review Workflow
 
@@ -87,6 +93,19 @@ FEMIND_EVAL_EXPLAIN_FAILURES=1 \
 scripts/run-practical-eval.sh
 ```
 
+The summary artifact now includes:
+
+- per-check routed plans
+- per-check retrieval criteria diagnostics
+- pass-rate breakdowns by:
+  - check type
+  - scenario category
+  - query intent
+  - routed mode
+  - temporal policy
+  - state/conflict policy
+  - graph depth
+
 ## Scope
 
 This is the primary real-world validation set for `femind`.
@@ -95,10 +114,10 @@ Current local baseline:
 
 - retrieval-only `exact` mode is the standard regression path
 - latest fully green summary: `target/practical-eval/retrieval-exact.json`
-- the practical set now includes an explicit linked supersession/history
-  scenario seeded through graph relations
-- reranker-aware local-cpu regression is currently green at `11/11`
-- latest reranker-aware summary: `target/practical-eval/retrieval-exact-remote-rerank.json`
+- the practical set now includes explicit linked supersession/history,
+  aggregation, graph-connected, and provenance/abstention scenarios
+- reranker-aware remote-fallback regression is currently green at `15/15`
+- latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary
 comparison or regression tools after this set is behaving well.
