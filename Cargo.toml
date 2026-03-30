@@ -181,3 +181,7 @@ type_complexity = "allow"
 name = "femind-embed-service"
 path = "src/bin/femind-embed-service.rs"
 required-features = ["embed-service"]
+
+[[bin]]
+name = "femind-review"
+path = "src/bin/femind-review.rs"

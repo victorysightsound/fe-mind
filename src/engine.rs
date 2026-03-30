@@ -13,8 +13,11 @@ use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{
     CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
-    ReviewSafetyScorer, ReviewSeverity, ReviewStatus, SourceProvenanceScorer, SourceTrustScorer,
-    detect_review_flag,
+    ReviewSafetyScorer, ReviewSeverity, ReviewStatus, SecretClass, SourceProvenanceScorer,
+    SourceTrustScorer, detect_review_flag, effective_review_status,
+    evidence_contains_secret_material, query_requests_secret_location_or_reference,
+    query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
+    secret_class_from_metadata,
 };
 use crate::search::builder::SearchBuilder;
 use crate::storage::Database;
@@ -49,6 +52,8 @@ pub struct AggregatedMatch {
     pub category: Option<String>,
     /// Combined relevance score from retrieval.
     pub score: f32,
+    /// Optional metadata carried on the stored memory row.
+    pub metadata: std::collections::HashMap<String, String>,
 }
 
 /// Aggregation-oriented retrieval result.
@@ -98,6 +103,12 @@ pub struct ReviewItem {
     pub tags: Vec<String>,
     /// Review status.
     pub status: ReviewStatus,
+    /// When the review state was last updated.
+    pub updated_at: Option<DateTime<Utc>>,
+    /// Optional expiry for temporary allowances.
+    pub expires_at: Option<DateTime<Utc>>,
+    /// Optional maintainer note explaining the review decision.
+    pub note: Option<String>,
     /// Original text snippet.
     pub text: String,
     /// Creation timestamp from the stored memory row.
@@ -420,17 +431,25 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
     /// Return pending high-impact review items, newest first.
     pub fn pending_review_items(&self, limit: usize) -> Result<Vec<ReviewItem>> {
-        let mut items = self.review_items(usize::MAX)?;
-        items.retain(|item| matches!(item.status, ReviewStatus::Pending | ReviewStatus::Expired));
-        if limit > 0 && items.len() > limit {
-            items.truncate(limit);
-        }
-        Ok(items)
+        self.review_items_with_status(limit, Some(ReviewStatus::Pending))
     }
 
     /// Return review items regardless of review state, newest first.
     pub fn review_items(&self, limit: usize) -> Result<Vec<ReviewItem>> {
+        self.review_items_with_status(limit, None)
+    }
+
+    /// Return review items filtered by effective review state, newest first.
+    ///
+    /// `status = Some(Pending)` includes both explicit `pending` items and
+    /// temporary allowances whose `review_expires_at` has elapsed.
+    pub fn review_items_with_status(
+        &self,
+        limit: usize,
+        status: Option<ReviewStatus>,
+    ) -> Result<Vec<ReviewItem>> {
         self.db.with_reader(|conn| {
+            let now = Utc::now();
             let mut stmt = conn.prepare(
                 "SELECT id, searchable_text, created_at, metadata_json
                  FROM memories
@@ -468,10 +487,18 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     continue;
                 }
 
-                let status = metadata
-                    .get("review_status")
-                    .and_then(|value| ReviewStatus::from_str(value))
-                    .unwrap_or(ReviewStatus::Pending);
+                let effective_status =
+                    effective_review_status(&metadata, now).unwrap_or(ReviewStatus::Pending);
+                let filter_match = match status {
+                    Some(ReviewStatus::Pending) => {
+                        matches!(effective_status, ReviewStatus::Pending | ReviewStatus::Expired)
+                    }
+                    Some(filter_status) => effective_status == filter_status,
+                    None => true,
+                };
+                if !filter_match {
+                    continue;
+                }
 
                 let severity = match metadata
                     .get("review_severity")
@@ -497,6 +524,12 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
+                let updated_at = metadata
+                    .get("review_updated_at")
+                    .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.with_timezone(&Utc));
+                let expires_at = review_expires_at(&metadata);
+                let note = metadata.get("review_note").cloned();
                 let created_at = DateTime::parse_from_rfc3339(&created_at)
                     .map(|value| value.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now());
@@ -506,7 +539,10 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     severity,
                     reason,
                     tags,
-                    status,
+                    status: effective_status,
+                    updated_at,
+                    expires_at,
+                    note,
                     text,
                     created_at,
                 });
@@ -518,6 +554,12 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
             Ok(items)
         })
+    }
+
+    /// Return a single review item by memory ID, if it exists and requires review.
+    pub fn review_item(&self, memory_id: i64) -> Result<Option<ReviewItem>> {
+        let mut items = self.review_items_with_status(usize::MAX, None)?;
+        Ok(items.drain(..).find(|item| item.memory_id == memory_id))
     }
 
     /// Count pending review items.
@@ -532,33 +574,115 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         status: ReviewStatus,
         note: Option<&str>,
     ) -> Result<()> {
-        self.db.with_writer(|conn| {
-            let existing = conn.query_row(
-                "SELECT metadata_json FROM memories WHERE id = ?1",
-                [memory_id],
-                |row| row.get::<_, Option<String>>(0),
-            )?;
+        self.resolve_review_item(memory_id, status, note, None)
+            .map(|_| ())
+    }
 
-            let mut metadata = existing
-                .as_deref()
-                .and_then(|json| {
-                    serde_json::from_str::<std::collections::HashMap<String, String>>(json).ok()
+    /// Resolve a stored review item with optional note and expiry.
+    pub fn resolve_review_item(
+        &self,
+        memory_id: i64,
+        status: ReviewStatus,
+        note: Option<&str>,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<ReviewItem> {
+        self.db
+            .with_writer(|conn| {
+                let existing = conn.query_row(
+                    "SELECT metadata_json FROM memories WHERE id = ?1",
+                    [memory_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )?;
+
+                let mut metadata = existing
+                    .as_deref()
+                    .and_then(|json| {
+                        serde_json::from_str::<std::collections::HashMap<String, String>>(json).ok()
+                    })
+                    .unwrap_or_default();
+
+                metadata.insert("review_required".to_string(), "true".to_string());
+                metadata.insert("review_status".to_string(), status.to_string());
+                metadata.insert("review_updated_at".to_string(), Utc::now().to_rfc3339());
+                if let Some(note) = note {
+                    metadata.insert("review_note".to_string(), note.to_string());
+                } else {
+                    metadata.remove("review_note");
+                }
+                if let Some(expires_at) = expires_at {
+                    metadata.insert("review_expires_at".to_string(), expires_at.to_rfc3339());
+                } else if !matches!(status, ReviewStatus::Allowed) {
+                    metadata.remove("review_expires_at");
+                }
+
+                let metadata_json = serde_json::to_string(&metadata)?;
+                conn.execute(
+                    "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
+                    rusqlite::params![metadata_json, memory_id],
+                )?;
+                Ok(())
+            })
+            .and_then(|_| {
+                self.review_item(memory_id)?.ok_or_else(|| {
+                    FemindError::Migration(format!(
+                        "review item {memory_id} was updated but could not be reloaded"
+                    ))
                 })
-                .unwrap_or_default();
+            })
+    }
 
-            metadata.insert("review_required".to_string(), "true".to_string());
-            metadata.insert("review_status".to_string(), status.to_string());
-            metadata.insert("review_updated_at".to_string(), Utc::now().to_rfc3339());
-            if let Some(note) = note {
-                metadata.insert("review_note".to_string(), note.to_string());
+    /// Mark any temporary review allowances that have passed their expiry as expired.
+    pub fn expire_due_review_items(&self, now: DateTime<Utc>) -> Result<u64> {
+        self.db.with_writer(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, metadata_json
+                 FROM memories
+                 WHERE metadata_json IS NOT NULL",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+            })?;
+
+            let mut expired = 0_u64;
+            for row in rows {
+                let (memory_id, metadata_json) = row?;
+                let Some(metadata_json) = metadata_json else {
+                    continue;
+                };
+                let Ok(mut metadata) = serde_json::from_str::<
+                    std::collections::HashMap<String, String>,
+                >(&metadata_json) else {
+                    continue;
+                };
+
+                let stored_status = metadata
+                    .get("review_status")
+                    .and_then(|value| ReviewStatus::from_str(value));
+                let effective_status = effective_review_status(&metadata, now);
+                if !matches!(stored_status, Some(ReviewStatus::Allowed))
+                    || !matches!(effective_status, Some(ReviewStatus::Expired))
+                {
+                    continue;
+                }
+
+                metadata.insert(
+                    "review_status".to_string(),
+                    ReviewStatus::Expired.to_string(),
+                );
+                metadata.insert("review_updated_at".to_string(), now.to_rfc3339());
+                metadata
+                    .entry("review_note".to_string())
+                    .or_insert_with(|| "Temporary review allowance expired.".to_string());
+
+                let metadata_json = serde_json::to_string(&metadata)?;
+                conn.execute(
+                    "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
+                    rusqlite::params![metadata_json, memory_id],
+                )?;
+                expired += 1;
             }
 
-            let metadata_json = serde_json::to_string(&metadata)?;
-            conn.execute(
-                "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
-                rusqlite::params![metadata_json, memory_id],
-            )?;
-            Ok(())
+            Ok(expired)
         })
     }
 
@@ -1360,9 +1484,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
         let results = self.search_with_config(query, config)?;
         let evidence = self.collect_distinct_aggregated_matches(results, max_matches)?;
-        let sensitive_secret_request = query_requests_sensitive_secret_detail(query);
 
-        if sensitive_secret_request {
+        if query_requests_sensitive_secret_detail(query) {
             return Ok(ComposedAnswerResult {
                 answer: "I won't surface secret or credential material from memory.".to_string(),
                 kind: "abstain",
@@ -1477,6 +1600,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             )
         };
 
+        let answer = apply_secret_response_policy(query, &evidence, answer);
+
         Ok(ComposedAnswerResult {
             answer,
             kind,
@@ -1590,16 +1715,29 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     fn load_aggregated_match(&self, memory_id: i64, score: f32) -> Result<Option<AggregatedMatch>> {
         self.db.with_reader(|conn| {
             let row = conn.query_row(
-                "SELECT searchable_text, category FROM memories WHERE id = ?1",
+                "SELECT searchable_text, category, metadata_json FROM memories WHERE id = ?1",
                 [memory_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
             );
             match row {
-                Ok((text, category)) => Ok(Some(AggregatedMatch {
+                Ok((text, category, metadata_json)) => Ok(Some(AggregatedMatch {
                     memory_id,
                     text,
                     category,
                     score,
+                    metadata: metadata_json
+                        .as_deref()
+                        .and_then(|json| {
+                            serde_json::from_str::<std::collections::HashMap<String, String>>(json)
+                                .ok()
+                        })
+                        .unwrap_or_default(),
                 })),
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
                 Err(error) => Err(error.into()),
@@ -1977,50 +2115,37 @@ fn query_requests_count_or_list(query: &str) -> bool {
         || normalized.contains("what were they")
 }
 
-fn query_requests_sensitive_secret_detail(query: &str) -> bool {
-    let normalized = normalize_query(query);
-    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+fn apply_secret_response_policy(
+    query: &str,
+    evidence: &[AggregatedMatch],
+    answer: String,
+) -> String {
+    let should_redact = evidence.iter().any(|match_| {
+        evidence_contains_secret_material(&match_.text, &match_.metadata)
+            || matches!(
+                secret_class_from_metadata(&match_.metadata),
+                Some(
+                    SecretClass::CredentialMaterial
+                        | SecretClass::CredentialLocation
+                        | SecretClass::SecretReference
+                )
+            )
+    });
 
-    let secret_signal = normalized.contains("password")
-        || normalized.contains("passphrase")
-        || normalized.contains("api key")
-        || normalized.contains("access key")
-        || normalized.contains("secret")
-        || normalized.contains("token")
-        || normalized.contains("credential")
-        || normalized.contains("private key")
-        || normalized.contains("ssh key")
-        || normalized.contains("client secret")
-        || normalized.contains("bearer token");
-
-    if !secret_signal {
-        return false;
+    if !should_redact {
+        return answer;
     }
 
-    let location_signal = tokens.contains(&"where")
-        || normalized.contains("stored")
-        || normalized.contains("storage")
-        || normalized.contains("which file")
-        || normalized.contains("which vault")
-        || normalized.contains("which item")
-        || normalized.contains("how should")
-        || normalized.contains("should i");
+    let mut redacted = answer;
+    for match_ in evidence {
+        redacted = redact_secret_material(&redacted, &match_.metadata);
+    }
 
-    let reveal_signal = normalized.contains("exact")
-        || normalized.contains("actual")
-        || normalized.contains("full")
-        || normalized.contains("raw")
-        || normalized.contains("literal")
-        || normalized.contains("complete")
-        || tokens.contains(&"value")
-        || tokens.contains(&"show")
-        || tokens.contains(&"print")
-        || tokens.contains(&"paste")
-        || tokens.contains(&"reveal")
-        || normalized.contains("what is")
-        || normalized.contains("give me");
-
-    !location_signal && reveal_signal
+    if query_requests_secret_location_or_reference(query) {
+        redacted
+    } else {
+        redacted
+    }
 }
 
 fn normalize_query(value: &str) -> String {
@@ -2874,6 +2999,55 @@ mod tests {
     }
 
     #[test]
+    fn compose_answer_redacts_secret_material_for_safe_location_queries() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+        engine
+            .store(&rich_mem(
+                "The raw credential file still contains FEMIND_REMOTE_EMBED_TOKEN=sk-prod-123 in ~/.config/recallbench/femind-remote.env for local testing only.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                    ("content_secret_class", "credential-material"),
+                ],
+            ))
+            .expect("store");
+        engine
+            .store(&rich_mem(
+                "The FeMind remote embed token is loaded from ~/.config/recallbench/femind-remote.env and should never be pasted into logs or chat.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                    ("content_secret_class", "credential-location"),
+                ],
+            ))
+            .expect("store");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "Where is the FeMind remote embed token loaded from?",
+                &AssemblyConfig::default(),
+                3,
+            )
+            .expect("compose");
+
+        assert!(!answer.abstained);
+        assert!(
+            answer
+                .answer
+                .contains("~/.config/recallbench/femind-remote.env")
+        );
+        assert!(!answer.answer.contains("sk-prod-123"));
+    }
+
+    #[test]
     fn high_impact_procedural_memories_enter_review_queue() {
         let engine = MemoryEngine::<RichTestMem>::builder()
             .build()
@@ -2957,6 +3131,53 @@ mod tests {
     }
 
     #[test]
+    fn allowed_review_items_expire_from_timestamp_metadata() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+        let past = (Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
+        let StoreResult::Added(memory_id) = engine
+            .store(&rich_mem(
+                "Temporary bridge host 10.44.0.99 may be used during migration.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                    ("review_required", "true"),
+                    ("review_status", "allowed"),
+                    ("review_severity", "high"),
+                    ("review_reason", "temporary bridge"),
+                    ("review_tags", "network-exposure"),
+                    ("review_expires_at", &past),
+                ],
+            ))
+            .expect("store")
+        else {
+            panic!("expected Added");
+        };
+
+        let pending = engine
+            .pending_review_items(10)
+            .expect("pending review items");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].memory_id, memory_id);
+        assert_eq!(pending[0].status, ReviewStatus::Expired);
+
+        let expired = engine
+            .expire_due_review_items(Utc::now())
+            .expect("expire due review items");
+        assert_eq!(expired, 1);
+
+        let reloaded = engine
+            .review_item(memory_id)
+            .expect("review item")
+            .expect("existing review item");
+        assert_eq!(reloaded.status, ReviewStatus::Expired);
+        assert_eq!(reloaded.expires_at.expect("expires_at").to_rfc3339(), past);
+    }
+
+    #[test]
     fn compose_answer_formats_negative_yes_no_state() {
         use crate::context::AssemblyConfig;
         use crate::memory::{GraphMemory, RelationType};
@@ -3016,12 +3237,14 @@ mod tests {
                 text: "For the audited staging lab only, the approved bridge host is 10.44.0.12 behind the internal ACL and access log.".to_string(),
                 category: None,
                 score: 0.58,
+                metadata: std::collections::HashMap::new(),
             },
             AggregatedMatch {
                 memory_id: 2,
                 text: "The temporary migration bridge allowance is expired; return to the audited tunnel on 127.0.0.1 for host 10.44.0.99.".to_string(),
                 category: None,
                 score: 0.57,
+                metadata: std::collections::HashMap::new(),
             },
         ];
 

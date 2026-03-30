@@ -1,5 +1,7 @@
 use crate::scoring::procedural_safety::query_requests_procedural_guidance;
 use crate::traits::{MemoryMeta, MemoryType, ScoringStrategy};
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 /// Penalize memories that require explicit human review before operational use.
 pub struct ReviewSafetyScorer {
@@ -134,24 +136,44 @@ pub(crate) fn review_required(record: &MemoryMeta) -> bool {
 }
 
 pub(crate) fn review_status(record: &MemoryMeta) -> Option<ReviewStatus> {
-    let review_required = record
-        .metadata
-        .get("review_required")
-        .is_some_and(|value| value.eq_ignore_ascii_case("true"));
-    let explicit = record
-        .metadata
-        .get("review_status")
-        .and_then(|value| ReviewStatus::from_str(value));
-
-    explicit.or(if review_required {
-        Some(ReviewStatus::Pending)
-    } else {
-        None
-    })
+    effective_review_status(&record.metadata, Utc::now())
 }
 
 pub(crate) fn review_denied(record: &MemoryMeta) -> bool {
     matches!(review_status(record), Some(ReviewStatus::Denied))
+}
+
+pub(crate) fn effective_review_status(
+    metadata: &HashMap<String, String>,
+    now: DateTime<Utc>,
+) -> Option<ReviewStatus> {
+    let review_required = metadata
+        .get("review_required")
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    let explicit = metadata
+        .get("review_status")
+        .and_then(|value| ReviewStatus::from_str(value))
+        .or(if review_required {
+            Some(ReviewStatus::Pending)
+        } else {
+            None
+        });
+
+    match explicit {
+        Some(ReviewStatus::Allowed)
+            if review_expires_at(metadata).is_some_and(|expires_at| expires_at <= now) =>
+        {
+            Some(ReviewStatus::Expired)
+        }
+        other => other,
+    }
+}
+
+pub(crate) fn review_expires_at(metadata: &HashMap<String, String>) -> Option<DateTime<Utc>> {
+    metadata
+        .get("review_expires_at")
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc))
 }
 
 pub(crate) fn review_severity(record: &MemoryMeta) -> ReviewSeverity {

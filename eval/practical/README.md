@@ -27,7 +27,7 @@ Each scenario includes:
 - `records[].memory_type` (`episodic`, `semantic`, or `procedural`)
 - optional `records[].metadata`, including trust/provenance markers such as
   `source_trust`, `source_kind`, `source_verification`, and
-  `content_sensitivity`
+  `content_sensitivity` / `content_secret_class`
 - optional `records[].valid_from` / `records[].valid_until` (RFC3339)
 - optional `relations` for explicit source-record graph links
 - `relations[].from` / `relations[].to` refer to `records[].key`
@@ -47,6 +47,16 @@ Each scenario includes:
 - optional `review_checks[].required_tags`
 - optional `review_checks[].required_fragments`
 - optional `review_checks[].forbidden_fragments`
+
+Useful review metadata keys for scenario records:
+
+- `review_required`
+- `review_status`
+- `review_severity`
+- `review_reason`
+- `review_tags`
+- `review_note`
+- `review_expires_at`
 
 ## Review Workflow
 
@@ -107,6 +117,7 @@ The summary artifact now includes:
 - per-check routed plans
 - per-check retrieval criteria diagnostics
 - per-check review-queue diagnostics when present
+- review-item `updated_at`, `expires_at`, and `note` when review checks are present
 - pass-rate breakdowns by:
   - check type
   - scenario category

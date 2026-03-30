@@ -37,6 +37,7 @@ mod app {
     #[cfg(feature = "remote-reranking")]
     use femind::reranking::RemoteRerankerBackend;
     use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
+    use femind::scoring::redact_secret_material;
     use femind::search::{QueryIntent, QueryRoute, SearchMode};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
@@ -725,6 +726,12 @@ mod app {
         reason: String,
         tags: Vec<String>,
         status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        updated_at: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expires_at: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
         text: String,
     }
 
@@ -1184,6 +1191,9 @@ mod app {
                         reason: item.reason.clone(),
                         tags: item.tags.clone(),
                         status: item.status.to_string(),
+                        updated_at: item.updated_at.map(|value| value.to_rfc3339()),
+                        expires_at: item.expires_at.map(|value| value.to_rfc3339()),
+                        note: item.note.clone(),
                         text: item.text.clone(),
                     })
                     .collect::<Vec<_>>();
@@ -1625,7 +1635,7 @@ mod app {
                 .evidence
                 .into_iter()
                 .map(|candidate| ObservedHit {
-                    text: candidate.text,
+                    text: redact_secret_material(&candidate.text, &candidate.metadata),
                     score: candidate.score,
                 })
                 .collect();
@@ -1652,7 +1662,7 @@ mod app {
                 .iter()
                 .take(top_k)
                 .map(|candidate| ObservedHit {
-                    text: candidate.text.clone(),
+                    text: redact_secret_material(&candidate.text, &candidate.metadata),
                     score: candidate.score,
                 })
                 .collect()
@@ -1689,14 +1699,19 @@ mod app {
             for result in results.into_iter().take(top_k) {
                 let text = engine.database().with_reader(|conn| {
                     conn.query_row(
-                        "SELECT searchable_text FROM memories WHERE id = ?1",
+                        "SELECT searchable_text, metadata_json FROM memories WHERE id = ?1",
                         [result.memory_id],
-                        |row| row.get::<_, String>(0),
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
                     )
                     .map_err(Into::into)
                 })?;
+                let metadata = text
+                    .1
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+                    .unwrap_or_default();
                 hits.push(ObservedHit {
-                    text,
+                    text: redact_secret_material(&text.0, &metadata),
                     score: result.score,
                 });
             }
@@ -1704,16 +1719,21 @@ mod app {
             let results = engine.search(query).limit(top_k).execute()?;
 
             for result in results.into_iter().take(top_k) {
-                let text = engine.database().with_reader(|conn| {
+                let row = engine.database().with_reader(|conn| {
                     conn.query_row(
-                        "SELECT searchable_text FROM memories WHERE id = ?1",
+                        "SELECT searchable_text, metadata_json FROM memories WHERE id = ?1",
                         [result.memory_id],
-                        |row| row.get::<_, String>(0),
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
                     )
                     .map_err(Into::into)
                 })?;
+                let metadata = row
+                    .1
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+                    .unwrap_or_default();
                 hits.push(ObservedHit {
-                    text,
+                    text: redact_secret_material(&row.0, &metadata),
                     score: result.score,
                 });
             }

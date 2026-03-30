@@ -273,10 +273,14 @@ Current validated baseline:
   Windows task GUID even when nearby Windows task evidence is present
 - the provenance/secret-guardrail scenario now proves FeMind can return
   grounded token-storage guidance while refusing to surface the token value
+- safe secret-location retrieval now also redacts raw credential-bearing hits in
+  the surfaced evidence list, not only in the composed answer
 - practical scenarios can now validate pending-review queue behavior for
   dangerous procedural memories alongside ordinary retrieval/abstention checks
 - review-state policy coverage now includes explicit `allowed`, `denied`, and
   `expired` transitions for high-impact procedural memories
+- temporary review allowances can now be modeled with `review_expires_at`
+  timestamps and inspected through the operator review CLI
 - the trust/procedural-safety scenario now proves FeMind will prefer the
   trusted `femind-remote-on` recovery command over a malicious copied-chat
   instruction, and will answer `No` to exposing the remote service directly on

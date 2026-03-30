@@ -151,8 +151,12 @@ Current status after the 2026-03-30 trust/safety pass:
   severity and tag metadata
 - review policy transitions are now implemented, including allow/deny/expire
   state handling during retrieval
-- the next safety step is to turn those review hooks into higher-level policy
-  actions and maintainer workflows, not to add the basic hooks themselves
+- review operations now include:
+  - `review_expires_at` timestamps for temporary allowances
+  - a FeMind-native `femind-review` operator CLI
+  - surfaced-evidence redaction for safe secret-location queries
+- the next safety step is to deepen policy automation and approval classes, not
+  just add more raw review hooks
 
 ### 6. Keep Evaluation Engine-Centric
 

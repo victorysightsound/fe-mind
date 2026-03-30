@@ -66,7 +66,7 @@ pub mod prelude {
     pub use crate::engine::{MemoryEngine, ReviewItem, VectorSearchMode};
     pub use crate::error::{FemindError, Result};
     pub use crate::memory::store::StoreResult;
-    pub use crate::scoring::{ReviewSeverity, ReviewStatus};
+    pub use crate::scoring::{ReviewSeverity, ReviewStatus, SecretClass};
     pub use crate::search::{
         QueryIntent, QueryRoute, SearchBuilder, SearchDepth, SearchMode, SearchResult,
         StateConflictPolicy, TemporalPolicy,

@@ -110,11 +110,20 @@ The practical live-validation path is now established and repeatable:
   - `allowed`
   - `denied`
   - `expired`
+- temporary review allowances can now carry `review_expires_at` timestamps and
+  be normalized back to `expired` automatically when the allowance window ends
+- `femind-review` now provides an operator CLI for:
+  - listing review items by status
+  - resolving them with notes and optional expiry timestamps
+  - expiring due temporary allowances
 - procedural guidance queries now keep review-state semantics through the
   original routed query instead of broadening into stripped variants that can
   reintroduce denied or expired guidance
 - deterministic composition now abstains on sensitive secret/credential value
   requests even when storage guidance for those values remains retrievable
+- surfaced safe-location answers and observed retrieval evidence now redact raw
+  credential material instead of only relying on abstention for exact-value
+  requests
 - procedural guidance queries now isolate low-trust procedural instructions when
   a safer procedural alternative is present, so unsafe command-like memories do
   not remain in the surfaced result set just because they are semantically close
@@ -186,7 +195,13 @@ Remote service operator surface:
     configured remote MiniLM service
 - `femind-embed-service verify-remote-reranker --config <path>`
   - checks auth, model identity, and reranker profile against a configured
-    remote MiniLM reranker service
+  remote MiniLM reranker service
+- `femind-review list --database <path>`
+  - lists review items from a FeMind database, optionally filtered by status
+- `femind-review resolve --database <path> --memory-id <id> --status <state>`
+  - resolves a review item with optional note and expiry timestamp
+- `femind-review expire-due --database <path>`
+  - marks temporary allowances as expired when their expiry timestamp has passed
 
 Lifecycle defaults:
 

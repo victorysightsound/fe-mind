@@ -1036,6 +1036,59 @@ reporting aid instead of an active policy surface.
 
 ---
 
+## Decision 036: Review Operations Need Expiry Timestamps and Surfaced Secret Redaction
+
+**Date:** 2026-03-30
+
+**Decision:** Extend FeMind's safety layer with operator-facing review commands,
+timestamped temporary review allowances, and deterministic secret redaction for
+surfaced evidence as well as composed answers.
+
+**Context:** Review-state policy was already affecting retrieval, but maintainers
+still lacked a FeMind-native way to list and resolve review items. Temporary
+allowances also had no concrete expiry timestamp beyond manually setting an item
+to `expired`. At the same time, safe secret-location answers were grounded, but
+the practical harness could still show raw credential-bearing hits in the
+observed evidence list.
+
+**Rationale:**
+- Review policy needs an operator workflow, not only library methods
+- Temporary allowances should expire from a timestamp, not only by manual state
+  flips
+- Secret handling should protect every surfaced layer, not just the final
+  composed answer
+- Safe secret-location questions should remain answerable without leaking raw
+  values into retrieval evidence
+
+**Consequences:**
+- `MemoryEngine` now supports:
+  - `review_items_with_status(...)`
+  - `review_item(...)`
+  - `resolve_review_item(...)`
+  - `expire_due_review_items(...)`
+- Review items now carry:
+  - `updated_at`
+  - `expires_at`
+  - `note`
+- Effective review status now treats `allowed` items whose
+  `review_expires_at <= now` as `expired`
+- `femind-review` is now available as a FeMind-native operator CLI for:
+  - listing review items
+  - resolving review items with notes and optional expiry timestamps
+  - expiring due temporary allowances
+- Secret sensitivity is now modeled with explicit classes such as:
+  - `credential-material`
+  - `credential-location`
+  - `secret-reference`
+- Surfaced evidence and composed answers now redact raw credential material for
+  safe location/reference questions instead of relying only on abstention for
+  exact-value requests
+- Remote-GPU validation remains green after the change:
+  practical `24/24` exact, `24/24` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing
