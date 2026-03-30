@@ -57,6 +57,9 @@ fn run() -> femind::error::Result<()> {
     match command.as_str() {
         "list" => cmd_list(command_args),
         "resolve" => cmd_resolve(command_args),
+        "renew" => cmd_renew(command_args),
+        "revoke" => cmd_revoke(command_args),
+        "replace" => cmd_replace(command_args),
         "expire-due" => cmd_expire_due(command_args),
         "--help" | "-h" | "help" => {
             print_usage();
@@ -107,12 +110,20 @@ fn cmd_list(args: &[String]) -> femind::error::Result<()> {
                 .policy_class
                 .map(|value| format!(" class={value}"))
                 .unwrap_or_default();
+            let template = item
+                .template
+                .map(|value| format!(" template={value}"))
+                .unwrap_or_default();
+            let replaced_by = item
+                .replaced_by
+                .map(|value| format!(" replaced_by=#{value}"))
+                .unwrap_or_default();
             let expires = item
                 .expires_at
                 .map(|value| format!(" expires_at={}", value.to_rfc3339()))
                 .unwrap_or_default();
             println!(
-                "#{id} [{status}] severity={severity} created_at={created_at} updated_at={updated_at}{expires}{scope}{policy_class}{reviewer}{note}\n  reason={reason}\n  tags={tags}\n  text={text}",
+                "#{id} [{status}] severity={severity} created_at={created_at} updated_at={updated_at}{expires}{scope}{policy_class}{template}{reviewer}{replaced_by}{note}\n  reason={reason}\n  tags={tags}\n  text={text}",
                 id = item.memory_id,
                 status = item.status,
                 severity = item.severity,
@@ -146,8 +157,14 @@ fn cmd_resolve(args: &[String]) -> femind::error::Result<()> {
     let scope = optional_arg(args, "--scope")
         .map(|value| parse_scope("--scope", &value))
         .transpose()?;
+    let template = optional_arg(args, "--template")
+        .map(|value| parse_template("--template", &value))
+        .transpose()?;
     let policy_class = optional_arg(args, "--class")
         .map(|value| parse_policy_class("--class", &value))
+        .transpose()?;
+    let replacement_id = optional_arg(args, "--replacement-id")
+        .map(|value| parse_i64("--replacement-id", &value))
         .transpose()?;
     let expires_at = optional_arg(args, "--expires-at")
         .map(|value| parse_datetime("--expires-at", &value))
@@ -163,25 +180,62 @@ fn cmd_resolve(args: &[String]) -> femind::error::Result<()> {
             reviewer,
             scope,
             policy_class,
+            template,
             expires_at,
+            replaced_by: replacement_id,
         },
     )?;
 
-    if format.eq_ignore_ascii_case("json") {
-        println!("{}", serde_json::to_string_pretty(&item)?);
-    } else {
-        println!(
-            "resolved #{id} as {status} (expires_at={expires})",
-            id = item.memory_id,
-            status = item.status,
-            expires = item
-                .expires_at
-                .map(|value| value.to_rfc3339())
-                .unwrap_or_else(|| "-".to_string())
-        );
-    }
+    print_review_resolution(&item, &format, "resolved")
+}
 
-    Ok(())
+fn cmd_renew(args: &[String]) -> femind::error::Result<()> {
+    let database = required_arg(args, "--database")?;
+    let memory_id = parse_i64("--memory-id", &required_arg(args, "--memory-id")?)?;
+    let note = optional_arg(args, "--note");
+    let reviewer = optional_arg(args, "--reviewer");
+    let expires_at = optional_arg(args, "--expires-at")
+        .map(|value| parse_datetime("--expires-at", &value))
+        .transpose()?;
+    let format = optional_arg(args, "--format").unwrap_or_else(|| "text".to_string());
+
+    let engine = open_engine(&database)?;
+    let item =
+        engine.renew_review_item(memory_id, reviewer.as_deref(), note.as_deref(), expires_at)?;
+
+    print_review_resolution(&item, &format, "renewed")
+}
+
+fn cmd_revoke(args: &[String]) -> femind::error::Result<()> {
+    let database = required_arg(args, "--database")?;
+    let memory_id = parse_i64("--memory-id", &required_arg(args, "--memory-id")?)?;
+    let note = optional_arg(args, "--note");
+    let reviewer = optional_arg(args, "--reviewer");
+    let format = optional_arg(args, "--format").unwrap_or_else(|| "text".to_string());
+
+    let engine = open_engine(&database)?;
+    let item = engine.revoke_review_item(memory_id, reviewer.as_deref(), note.as_deref())?;
+
+    print_review_resolution(&item, &format, "revoked")
+}
+
+fn cmd_replace(args: &[String]) -> femind::error::Result<()> {
+    let database = required_arg(args, "--database")?;
+    let memory_id = parse_i64("--memory-id", &required_arg(args, "--memory-id")?)?;
+    let replacement_id = parse_i64("--replacement-id", &required_arg(args, "--replacement-id")?)?;
+    let note = optional_arg(args, "--note");
+    let reviewer = optional_arg(args, "--reviewer");
+    let format = optional_arg(args, "--format").unwrap_or_else(|| "text".to_string());
+
+    let engine = open_engine(&database)?;
+    let item = engine.replace_review_item(
+        memory_id,
+        replacement_id,
+        reviewer.as_deref(),
+        note.as_deref(),
+    )?;
+
+    print_review_resolution(&item, &format, "replaced")
 }
 
 fn cmd_expire_due(args: &[String]) -> femind::error::Result<()> {
@@ -255,10 +309,24 @@ fn parse_policy_class(flag: &str, value: &str) -> femind::error::Result<ReviewPo
     })
 }
 
+fn parse_template(flag: &str, value: &str) -> femind::error::Result<ReviewApprovalTemplate> {
+    ReviewApprovalTemplate::from_str(value).ok_or_else(|| {
+        FemindError::Migration(format!(
+            "invalid {flag} value '{value}'. Expected staging-bridge|migration-bridge|lab-exception."
+        ))
+    })
+}
+
 fn parse_datetime(flag: &str, value: &str) -> femind::error::Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
         .map(|value| value.with_timezone(&Utc))
         .map_err(|_| FemindError::Migration(format!("invalid {flag} datetime '{value}'")))
+}
+
+fn parse_i64(flag: &str, value: &str) -> femind::error::Result<i64> {
+    value
+        .parse::<i64>()
+        .map_err(|_| FemindError::Migration(format!("invalid {flag} value '{value}'")))
 }
 
 fn parse_usize(flag: &str, value: &str) -> femind::error::Result<usize> {
@@ -274,8 +342,33 @@ femind-review
 
 Usage:
   femind-review list --database <path> [--status <pending|allowed|denied|expired>] [--limit <n>] [--format <text|json>]
-  femind-review resolve --database <path> --memory-id <id> --status <pending|allowed|denied|expired> [--note <text>] [--reviewer <name>] [--scope <general|production|staging|lab|migration>] [--class <policy-class>] [--expires-at <rfc3339>] [--format <text|json>]
+  femind-review resolve --database <path> --memory-id <id> --status <pending|allowed|denied|expired> [--note <text>] [--reviewer <name>] [--scope <general|production|staging|lab|migration>] [--class <policy-class>] [--template <staging-bridge|migration-bridge|lab-exception>] [--replacement-id <id>] [--expires-at <rfc3339>] [--format <text|json>]
+  femind-review renew --database <path> --memory-id <id> [--note <text>] [--reviewer <name>] [--expires-at <rfc3339>] [--format <text|json>]
+  femind-review revoke --database <path> --memory-id <id> [--note <text>] [--reviewer <name>] [--format <text|json>]
+  femind-review replace --database <path> --memory-id <id> --replacement-id <id> [--note <text>] [--reviewer <name>] [--format <text|json>]
   femind-review expire-due --database <path> [--now <rfc3339>] [--format <text|json>]
 "
     );
+}
+
+fn print_review_resolution(
+    item: &femind::engine::ReviewItem,
+    format: &str,
+    action: &str,
+) -> femind::error::Result<()> {
+    if format.eq_ignore_ascii_case("json") {
+        println!("{}", serde_json::to_string_pretty(item)?);
+    } else {
+        println!(
+            "{action} #{id} as {status} (expires_at={expires})",
+            id = item.memory_id,
+            status = item.status,
+            expires = item
+                .expires_at
+                .map(|value| value.to_rfc3339())
+                .unwrap_or_else(|| "-".to_string())
+        );
+    }
+
+    Ok(())
 }

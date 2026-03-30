@@ -129,6 +129,29 @@ pub(crate) fn source_verification(record: &MemoryMeta) -> SourceVerification {
     }
 }
 
+pub(crate) fn source_provenance_rank(record: &MemoryMeta) -> u8 {
+    let kind_rank = match source_kind(record) {
+        SourceKind::System => 60,
+        SourceKind::Maintainer => 55,
+        SourceKind::ProjectDoc => 50,
+        SourceKind::LocalObservation => 48,
+        SourceKind::UserNote => 44,
+        SourceKind::CopiedChat => 28,
+        SourceKind::ExternalWeb => 18,
+        SourceKind::ForumPost => 14,
+        SourceKind::Unknown => 32,
+    };
+    let verification_rank = match source_verification(record) {
+        SourceVerification::Verified => 20,
+        SourceVerification::Observed => 18,
+        SourceVerification::Declared => 10,
+        SourceVerification::Copied => 5,
+        SourceVerification::Unverified => 0,
+        SourceVerification::Unknown => 8,
+    };
+    kind_rank + verification_rank
+}
+
 fn normalize_tag(value: &str) -> String {
     value.trim().to_lowercase().replace('_', "-")
 }
@@ -172,5 +195,15 @@ mod tests {
         let scorer = SourceProvenanceScorer::default();
         let m = scorer.score_multiplier(&meta(Some("forum-post"), Some("unverified")), "q", 1.0);
         assert!(m < 1.0);
+    }
+
+    #[test]
+    fn provenance_rank_prefers_verified_system_sources() {
+        let system_verified = meta(Some("system"), Some("verified"));
+        let maintainer_declared = meta(Some("maintainer"), Some("declared"));
+
+        assert!(
+            source_provenance_rank(&system_verified) > source_provenance_rank(&maintainer_declared)
+        );
     }
 }

@@ -731,7 +731,11 @@ mod app {
         #[serde(skip_serializing_if = "Option::is_none")]
         policy_class: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        template: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         reviewer: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        replaced_by: Option<i64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         updated_at: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -1199,7 +1203,9 @@ mod app {
                         status: item.status.to_string(),
                         scope: item.scope.map(|value| value.to_string()),
                         policy_class: item.policy_class.map(|value| value.to_string()),
+                        template: item.template.map(|value| value.to_string()),
                         reviewer: item.reviewer.clone(),
+                        replaced_by: item.replaced_by,
                         updated_at: item.updated_at.map(|value| value.to_rfc3339()),
                         expires_at: item.expires_at.map(|value| value.to_rfc3339()),
                         note: item.note.clone(),

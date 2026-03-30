@@ -1139,6 +1139,65 @@ semantically close to the query.
 
 ---
 
+## Decision 038: Sensitive Guidance Needs Templates, Lifecycle Actions, and Provenance Resolution
+
+**Date:** 2026-03-30
+
+**Decision:** Extend FeMind's safety layer with template-driven review
+allowances, explicit renew/revoke/replace lifecycle actions, broader sensitive
+infrastructure classes, and provenance-based conflict resolution for competing
+trusted guidance.
+
+**Context:** Scoped approvals were in place, but operators still had to manage
+temporary allowances as raw status changes. At the same time, FeMind could
+prefer trusted secret-location guidance over untrusted advice, but it had no
+explicit policy for competing trusted sources around private endpoints or
+internal hostnames.
+
+**Rationale:**
+- repeated operational exceptions need reusable templates, not ad-hoc metadata
+- temporary allowances should support renewal and explicit revocation
+- dangerous procedural guidance should be able to point to a successor memory
+  when it is replaced
+- private endpoints and internal hostnames need the same protection model as
+  credential locations
+- when multiple trusted sources conflict, FeMind should prefer the stronger
+  provenance source deterministically instead of depending only on raw score
+
+**Consequences:**
+- review metadata now also supports:
+  - `review_template`
+  - `review_replaced_by`
+- FeMind now defines approval templates such as:
+  - `staging-bridge`
+  - `migration-bridge`
+  - `lab-exception`
+- `MemoryEngine` now supports:
+  - `renew_review_item(...)`
+  - `revoke_review_item(...)`
+  - `replace_review_item(...)`
+- `femind-review` now also supports:
+  - `renew`
+  - `revoke`
+  - `replace`
+- secret-policy classes now also include:
+  - `token-material`
+  - `key-material`
+  - `private-endpoint`
+  - `internal-hostname`
+- private endpoint and internal hostname answers now redact exact values when
+  policy requires abstention or safe surfacing
+- trusted sensitive-guidance conflicts are now resolved by provenance rank, so
+  stronger verified internal sources can suppress weaker trusted-but-declared
+  alternatives
+- practical eval now includes trusted private-endpoint conflict coverage plus
+  exact-detail abstention on sensitive infrastructure values
+- Remote-GPU validation remains green after the change:
+  practical `27/27` exact, `27/27` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

@@ -13,11 +13,12 @@ use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{
     CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
-    ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity, ReviewStatus, SecretClass,
-    SourceProvenanceScorer, SourceTrustScorer, detect_review_flag, effective_review_status,
-    evidence_contains_secret_material, query_requests_secret_location_or_reference,
+    ReviewApprovalTemplate, ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity,
+    ReviewStatus, SecretClass, SourceProvenanceScorer, SourceTrustScorer, detect_review_flag,
+    effective_review_status, evidence_contains_secret_material,
+    query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
-    secret_class_from_metadata, source_trust_level,
+    secret_class_from_metadata, source_provenance_rank, source_trust_level,
 };
 use crate::search::builder::SearchBuilder;
 use crate::storage::Database;
@@ -107,8 +108,12 @@ pub struct ReviewItem {
     pub scope: Option<ReviewScope>,
     /// High-level policy class for the review decision.
     pub policy_class: Option<ReviewPolicyClass>,
+    /// Optional approval template used to populate scope/class/expiry defaults.
+    pub template: Option<ReviewApprovalTemplate>,
     /// Human reviewer or maintainer who resolved the item.
     pub reviewer: Option<String>,
+    /// Optional replacement memory ID when this review item was superseded by another memory.
+    pub replaced_by: Option<i64>,
     /// When the review state was last updated.
     pub updated_at: Option<DateTime<Utc>>,
     /// Optional expiry for temporary allowances.
@@ -129,7 +134,9 @@ pub struct ReviewResolution {
     pub reviewer: Option<String>,
     pub scope: Option<ReviewScope>,
     pub policy_class: Option<ReviewPolicyClass>,
+    pub template: Option<ReviewApprovalTemplate>,
     pub expires_at: Option<DateTime<Utc>>,
+    pub replaced_by: Option<i64>,
 }
 
 /// Confidence label for deterministic composed answers.
@@ -547,7 +554,13 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 let policy_class = metadata
                     .get("review_policy_class")
                     .and_then(|value| ReviewPolicyClass::from_str(value));
+                let template = metadata
+                    .get("review_template")
+                    .and_then(|value| ReviewApprovalTemplate::from_str(value));
                 let reviewer = metadata.get("review_reviewer").cloned();
+                let replaced_by = metadata
+                    .get("review_replaced_by")
+                    .and_then(|value| value.parse::<i64>().ok());
                 let updated_at = metadata
                     .get("review_updated_at")
                     .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
@@ -566,7 +579,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     status: effective_status,
                     scope,
                     policy_class,
+                    template,
                     reviewer,
+                    replaced_by,
                     updated_at,
                     expires_at,
                     note,
@@ -621,7 +636,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 reviewer: None,
                 scope: None,
                 policy_class: None,
+                template: None,
                 expires_at,
+                replaced_by: None,
             },
         )
     }
@@ -634,6 +651,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     ) -> Result<ReviewItem> {
         self.db
             .with_writer(|conn| {
+                let now = Utc::now();
                 let existing = conn.query_row(
                     "SELECT metadata_json FROM memories WHERE id = ?1",
                     [memory_id],
@@ -647,9 +665,47 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     })
                     .unwrap_or_default();
 
+                let resolved_template = resolution.template.or_else(|| {
+                    metadata
+                        .get("review_template")
+                        .and_then(|value| ReviewApprovalTemplate::from_str(value))
+                });
+                let resolved_scope = resolution.scope.or_else(|| {
+                    resolved_template
+                        .map(ReviewApprovalTemplate::default_scope)
+                        .or_else(|| {
+                            metadata
+                                .get("review_scope")
+                                .and_then(|value| ReviewScope::from_str(value))
+                        })
+                });
+                let resolved_policy_class = resolution.policy_class.or_else(|| {
+                    resolved_template
+                        .map(ReviewApprovalTemplate::default_policy_class)
+                        .or_else(|| {
+                            metadata
+                                .get("review_policy_class")
+                                .and_then(|value| ReviewPolicyClass::from_str(value))
+                        })
+                });
+                let resolved_expires_at = resolution.expires_at.or_else(|| {
+                    if matches!(resolution.status, ReviewStatus::Allowed) {
+                        resolved_template
+                            .map(|template| template.default_expiry(now))
+                            .or_else(|| review_expires_at(&metadata))
+                    } else {
+                        None
+                    }
+                });
+                let resolved_replaced_by = resolution.replaced_by.or_else(|| {
+                    metadata
+                        .get("review_replaced_by")
+                        .and_then(|value| value.parse::<i64>().ok())
+                });
+
                 metadata.insert("review_required".to_string(), "true".to_string());
                 metadata.insert("review_status".to_string(), resolution.status.to_string());
-                metadata.insert("review_updated_at".to_string(), Utc::now().to_rfc3339());
+                metadata.insert("review_updated_at".to_string(), now.to_rfc3339());
                 if let Some(note) = resolution.note.as_deref() {
                     metadata.insert("review_note".to_string(), note.to_string());
                 } else {
@@ -660,20 +716,30 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 } else {
                     metadata.remove("review_reviewer");
                 }
-                if let Some(scope) = resolution.scope {
+                if let Some(template) = resolved_template {
+                    metadata.insert("review_template".to_string(), template.to_string());
+                } else {
+                    metadata.remove("review_template");
+                }
+                if let Some(scope) = resolved_scope {
                     metadata.insert("review_scope".to_string(), scope.to_string());
                 } else {
                     metadata.remove("review_scope");
                 }
-                if let Some(policy_class) = resolution.policy_class {
+                if let Some(policy_class) = resolved_policy_class {
                     metadata.insert("review_policy_class".to_string(), policy_class.to_string());
                 } else {
                     metadata.remove("review_policy_class");
                 }
-                if let Some(expires_at) = resolution.expires_at {
+                if let Some(expires_at) = resolved_expires_at {
                     metadata.insert("review_expires_at".to_string(), expires_at.to_rfc3339());
                 } else if !matches!(resolution.status, ReviewStatus::Allowed) {
                     metadata.remove("review_expires_at");
+                }
+                if let Some(replaced_by) = resolved_replaced_by {
+                    metadata.insert("review_replaced_by".to_string(), replaced_by.to_string());
+                } else {
+                    metadata.remove("review_replaced_by");
                 }
 
                 let metadata_json = serde_json::to_string(&metadata)?;
@@ -745,6 +811,97 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
             Ok(expired)
         })
+    }
+
+    /// Renew a temporary review allowance, preserving existing template/scope/class when present.
+    pub fn renew_review_item(
+        &self,
+        memory_id: i64,
+        reviewer: Option<&str>,
+        note: Option<&str>,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<ReviewItem> {
+        let current = self.review_item(memory_id)?.ok_or_else(|| {
+            FemindError::Migration(format!("review item {memory_id} does not exist"))
+        })?;
+
+        self.resolve_review_item_with_resolution(
+            memory_id,
+            ReviewResolution {
+                status: ReviewStatus::Allowed,
+                note: note.map(ToString::to_string).or(current.note.clone()),
+                reviewer: reviewer
+                    .map(ToString::to_string)
+                    .or_else(|| current.reviewer.clone()),
+                scope: current.scope,
+                policy_class: current.policy_class,
+                template: current.template,
+                expires_at: expires_at.or(current.expires_at),
+                replaced_by: current.replaced_by,
+            },
+        )
+    }
+
+    /// Revoke a temporary or prior allowance and deny future retrieval.
+    pub fn revoke_review_item(
+        &self,
+        memory_id: i64,
+        reviewer: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<ReviewItem> {
+        let current = self.review_item(memory_id)?.ok_or_else(|| {
+            FemindError::Migration(format!("review item {memory_id} does not exist"))
+        })?;
+
+        self.resolve_review_item_with_resolution(
+            memory_id,
+            ReviewResolution {
+                status: ReviewStatus::Denied,
+                note: note.map(ToString::to_string).or(current.note.clone()),
+                reviewer: reviewer
+                    .map(ToString::to_string)
+                    .or_else(|| current.reviewer.clone()),
+                scope: current.scope,
+                policy_class: current.policy_class,
+                template: current.template,
+                expires_at: None,
+                replaced_by: current.replaced_by,
+            },
+        )
+    }
+
+    /// Replace one reviewed procedural memory with a successor record.
+    pub fn replace_review_item(
+        &self,
+        memory_id: i64,
+        replacement_memory_id: i64,
+        reviewer: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<ReviewItem> {
+        let current = self.review_item(memory_id)?.ok_or_else(|| {
+            FemindError::Migration(format!("review item {memory_id} does not exist"))
+        })?;
+        let replacement_note = match note {
+            Some(note) if note.contains(&replacement_memory_id.to_string()) => note.to_string(),
+            Some(note) => format!("{note} Replacement memory: #{replacement_memory_id}."),
+            None => format!("Replaced by memory #{replacement_memory_id}."),
+        };
+
+        self.resolve_review_item_with_resolution(
+            memory_id,
+            ReviewResolution {
+                status: ReviewStatus::Denied,
+                note: Some(replacement_note),
+                reviewer: reviewer
+                    .map(ToString::to_string)
+                    .or_else(|| current.reviewer.clone()),
+                scope: current.scope,
+                policy_class: current.policy_class,
+                template: current.template,
+                expires_at: None,
+                replaced_by: Some(replacement_memory_id),
+            },
+        )
     }
 
     /// Update the embedding_status column for a memory.
@@ -2151,48 +2308,71 @@ fn has_conflicting_state_evidence(query: &str, evidence: &[AggregatedMatch]) -> 
 }
 
 fn filter_secret_guidance_evidence(query: &str, evidence: &mut Vec<AggregatedMatch>) {
-    if !query_requests_secret_location_or_reference(query) || evidence.len() < 2 {
+    if evidence.len() < 2 {
+        return;
+    }
+    let sensitive_guidance_query = query_requests_secret_location_or_reference(query)
+        || query_requests_private_infra_guidance(query);
+    if !sensitive_guidance_query {
         return;
     }
 
     let has_safe_trusted_evidence = evidence.iter().any(|candidate| {
-        secret_class_from_metadata(&candidate.metadata).is_some()
-            && matches!(
-                source_trust_level(&MemoryMeta {
-                    id: Some(candidate.memory_id),
-                    searchable_text: candidate.text.clone(),
-                    memory_type: crate::traits::MemoryType::Procedural,
-                    importance: 5,
-                    category: candidate.category.clone(),
-                    created_at: Utc::now(),
-                    metadata: candidate.metadata.clone(),
-                }),
-                crate::scoring::SourceTrustLevel::Trusted
-                    | crate::scoring::SourceTrustLevel::Normal
-            )
+        is_sensitive_guidance_class(secret_class_from_metadata(&candidate.metadata))
+            && trusted_guidance_rank(candidate) > 0
     });
 
     if !has_safe_trusted_evidence {
         return;
     }
 
+    let best_trusted_rank = evidence
+        .iter()
+        .filter(|candidate| {
+            is_sensitive_guidance_class(secret_class_from_metadata(&candidate.metadata))
+        })
+        .map(trusted_guidance_rank)
+        .max()
+        .unwrap_or(0);
+
     evidence.retain(|candidate| {
-        if secret_class_from_metadata(&candidate.metadata).is_none() {
+        if !is_sensitive_guidance_class(secret_class_from_metadata(&candidate.metadata)) {
             return true;
         }
-        matches!(
-            source_trust_level(&MemoryMeta {
-                id: Some(candidate.memory_id),
-                searchable_text: candidate.text.clone(),
-                memory_type: crate::traits::MemoryType::Procedural,
-                importance: 5,
-                category: candidate.category.clone(),
-                created_at: Utc::now(),
-                metadata: candidate.metadata.clone(),
-            }),
-            crate::scoring::SourceTrustLevel::Trusted | crate::scoring::SourceTrustLevel::Normal
-        )
+        trusted_guidance_rank(candidate) == best_trusted_rank && best_trusted_rank > 0
     });
+}
+
+fn is_sensitive_guidance_class(secret_class: Option<SecretClass>) -> bool {
+    matches!(
+        secret_class,
+        Some(
+            SecretClass::CredentialLocation
+                | SecretClass::SecretReference
+                | SecretClass::PrivateEndpoint
+                | SecretClass::InternalHostname
+        )
+    )
+}
+
+fn trusted_guidance_rank(candidate: &AggregatedMatch) -> u8 {
+    let meta = MemoryMeta {
+        id: Some(candidate.memory_id),
+        searchable_text: candidate.text.clone(),
+        memory_type: crate::traits::MemoryType::Procedural,
+        importance: 5,
+        category: candidate.category.clone(),
+        created_at: Utc::now(),
+        metadata: candidate.metadata.clone(),
+    };
+
+    match source_trust_level(&meta) {
+        crate::scoring::SourceTrustLevel::Trusted | crate::scoring::SourceTrustLevel::Normal => {
+            source_provenance_rank(&meta)
+        }
+        crate::scoring::SourceTrustLevel::Low => 0,
+        crate::scoring::SourceTrustLevel::Untrusted => 0,
+    }
 }
 
 fn evidence_explicitly_lacks_requested_detail(query: &str, evidence: &[AggregatedMatch]) -> bool {
@@ -3214,7 +3394,9 @@ mod tests {
                     reviewer: Some("ops-maintainer".to_string()),
                     scope: Some(ReviewScope::Staging),
                     policy_class: Some(ReviewPolicyClass::NetworkExposureException),
+                    template: Some(ReviewApprovalTemplate::StagingBridge),
                     expires_at: None,
+                    replaced_by: None,
                 },
             )
             .expect("allow");
@@ -3224,6 +3406,10 @@ mod tests {
         assert_eq!(
             items[0].policy_class,
             Some(ReviewPolicyClass::NetworkExposureException)
+        );
+        assert_eq!(
+            items[0].template,
+            Some(ReviewApprovalTemplate::StagingBridge)
         );
         assert_eq!(items[0].reviewer.as_deref(), Some("ops-maintainer"));
         assert_eq!(engine.pending_review_count().expect("pending count"), 0);
@@ -3294,6 +3480,160 @@ mod tests {
             .expect("existing review item");
         assert_eq!(reloaded.status, ReviewStatus::Expired);
         assert_eq!(reloaded.expires_at.expect("expires_at").to_rfc3339(), past);
+    }
+
+    #[test]
+    fn review_templates_support_renew_revoke_and_replace() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+        let StoreResult::Added(memory_id) = engine
+            .store(&rich_mem(
+                "Temporary staging bridge host 10.44.0.12 is allowed during the cutover window.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                ],
+            ))
+            .expect("store")
+        else {
+            panic!("expected Added");
+        };
+        let StoreResult::Added(replacement_id) = engine
+            .store(&rich_mem(
+                "Return to 127.0.0.1 behind the audited tunnel after the cutover window.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                ],
+            ))
+            .expect("store replacement")
+        else {
+            panic!("expected Added");
+        };
+
+        let allowed = engine
+            .resolve_review_item_with_resolution(
+                memory_id,
+                ReviewResolution {
+                    status: ReviewStatus::Allowed,
+                    note: Some("Approved for the staging cutover.".to_string()),
+                    reviewer: Some("ops-maintainer".to_string()),
+                    scope: None,
+                    policy_class: None,
+                    template: Some(ReviewApprovalTemplate::StagingBridge),
+                    expires_at: None,
+                    replaced_by: None,
+                },
+            )
+            .expect("allow");
+        assert_eq!(
+            allowed.template,
+            Some(ReviewApprovalTemplate::StagingBridge)
+        );
+        assert_eq!(allowed.scope, Some(ReviewScope::Staging));
+        assert_eq!(
+            allowed.policy_class,
+            Some(ReviewPolicyClass::NetworkExposureException)
+        );
+        assert!(allowed.expires_at.is_some());
+
+        let renewed = engine
+            .renew_review_item(
+                memory_id,
+                Some("ops-renewal"),
+                Some("Renewed for the second staging window."),
+                Some(Utc::now() + chrono::Duration::days(3)),
+            )
+            .expect("renew");
+        assert_eq!(renewed.status, ReviewStatus::Allowed);
+        assert_eq!(renewed.reviewer.as_deref(), Some("ops-renewal"));
+        assert_eq!(
+            renewed.template,
+            Some(ReviewApprovalTemplate::StagingBridge)
+        );
+
+        let replaced = engine
+            .replace_review_item(
+                memory_id,
+                replacement_id,
+                Some("ops-maintainer"),
+                Some("Superseded by the restored tunnel."),
+            )
+            .expect("replace");
+        assert_eq!(replaced.status, ReviewStatus::Denied);
+        assert_eq!(replaced.replaced_by, Some(replacement_id));
+        assert!(
+            replaced
+                .note
+                .as_deref()
+                .expect("replacement note")
+                .contains(&replacement_id.to_string())
+        );
+
+        let revoked = engine
+            .revoke_review_item(
+                memory_id,
+                Some("ops-maintainer"),
+                Some("Final denial after replacement."),
+            )
+            .expect("revoke");
+        assert_eq!(revoked.status, ReviewStatus::Denied);
+        assert_eq!(revoked.replaced_by, Some(replacement_id));
+    }
+
+    #[test]
+    fn trusted_sensitive_guidance_prefers_higher_provenance_sources() {
+        let mut evidence = vec![
+            AggregatedMatch {
+                memory_id: 1,
+                text: "Use the verified private endpoint https://relay.calvaryav.internal:8899/embed behind the audited Windows tunnel.".to_string(),
+                category: None,
+                score: 0.82,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "system".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("content_secret_class".to_string(), "private-endpoint".to_string()),
+                ]),
+            },
+            AggregatedMatch {
+                memory_id: 2,
+                text: "Older maintainer note: use http://lab-bridge.calvaryav.internal:8899/embed during temporary lab work.".to_string(),
+                category: None,
+                score: 0.81,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "maintainer".to_string()),
+                    ("source_verification".to_string(), "declared".to_string()),
+                    ("content_secret_class".to_string(), "private-endpoint".to_string()),
+                ]),
+            },
+            AggregatedMatch {
+                memory_id: 3,
+                text: "Forum suggestion: use http://10.44.0.88:8899/embed directly with no tunnel.".to_string(),
+                category: None,
+                score: 0.8,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "untrusted".to_string()),
+                    ("source_kind".to_string(), "forum-post".to_string()),
+                    ("source_verification".to_string(), "unverified".to_string()),
+                    ("content_secret_class".to_string(), "private-endpoint".to_string()),
+                ]),
+            },
+        ];
+
+        filter_secret_guidance_evidence(
+            "Which private endpoint should the FeMind tunnel use now?",
+            &mut evidence,
+        );
+
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].memory_id, 1);
     }
 
     #[test]

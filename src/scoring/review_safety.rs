@@ -207,6 +207,63 @@ impl std::fmt::Display for ReviewPolicyClass {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ReviewApprovalTemplate {
+    StagingBridge,
+    MigrationBridge,
+    LabException,
+}
+
+impl ReviewApprovalTemplate {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::StagingBridge => "staging-bridge",
+            Self::MigrationBridge => "migration-bridge",
+            Self::LabException => "lab-exception",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "staging-bridge" | "staging_bridge" | "staging" => Some(Self::StagingBridge),
+            "migration-bridge" | "migration_bridge" | "migration" => Some(Self::MigrationBridge),
+            "lab-exception" | "lab_exception" | "lab" => Some(Self::LabException),
+            _ => None,
+        }
+    }
+
+    pub fn default_scope(self) -> ReviewScope {
+        match self {
+            Self::StagingBridge => ReviewScope::Staging,
+            Self::MigrationBridge => ReviewScope::Migration,
+            Self::LabException => ReviewScope::Lab,
+        }
+    }
+
+    pub fn default_policy_class(self) -> ReviewPolicyClass {
+        match self {
+            Self::StagingBridge => ReviewPolicyClass::NetworkExposureException,
+            Self::MigrationBridge => ReviewPolicyClass::MigrationException,
+            Self::LabException => ReviewPolicyClass::OperationalException,
+        }
+    }
+
+    pub fn default_expiry(self, now: DateTime<Utc>) -> DateTime<Utc> {
+        let days = match self {
+            Self::StagingBridge => 14,
+            Self::MigrationBridge => 7,
+            Self::LabException => 30,
+        };
+        now + chrono::Duration::days(days)
+    }
+}
+
+impl std::fmt::Display for ReviewApprovalTemplate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ReviewFlag {
     pub severity: ReviewSeverity,

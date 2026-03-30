@@ -27,8 +27,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `25/25`
-- retrieval-only practical eval in `ann` mode currently passes `25/25`
+- retrieval-only practical eval in `exact` mode currently passes `27/27`
+- retrieval-only practical eval in `ann` mode currently passes `27/27`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
@@ -51,7 +51,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `25/25` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `27/27` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
@@ -114,12 +114,18 @@ The practical live-validation path is now established and repeatable:
   - `review_scope`
   - `review_policy_class`
   - `review_reviewer`
+- review lifecycle metadata now also supports:
+  - `review_template`
+  - `review_replaced_by`
 - temporary review allowances can now carry `review_expires_at` timestamps and
   be normalized back to `expired` automatically when the allowance window ends
 - `femind-review` now provides an operator CLI for:
   - listing review items by status
   - resolving them with notes, reviewer, scope, policy class, and optional
     expiry timestamps
+  - renewing temporary allowances while preserving template/scope/class defaults
+  - revoking reviewed guidance explicitly
+  - replacing dangerous guidance with a successor memory reference
   - expiring due temporary allowances
 - retrieval now enforces review scope for allowed procedural exceptions, so a
   `staging` or `migration` exception does not surface as general production
@@ -132,6 +138,14 @@ The practical live-validation path is now established and repeatable:
 - surfaced safe-location answers and observed retrieval evidence now redact raw
   credential material instead of only relying on abstention for exact-value
   requests
+- secret-policy classes now also cover:
+  - `token-material`
+  - `key-material`
+  - `private-endpoint`
+  - `internal-hostname`
+- trusted sensitive guidance now resolves conflicts by provenance rank, so a
+  stronger verified internal source can suppress weaker trusted-but-declared
+  alternatives for private endpoint / internal hostname questions
 - procedural guidance queries now isolate low-trust procedural instructions when
   a safer procedural alternative is present, so unsafe command-like memories do
   not remain in the surfaced result set just because they are semantically close
@@ -208,7 +222,14 @@ Remote service operator surface:
   - lists review items from a FeMind database, optionally filtered by status
 - `femind-review resolve --database <path> --memory-id <id> --status <state>`
   - resolves a review item with optional note, reviewer, scope, policy class,
-    and expiry timestamp
+    template, replacement memory ID, and expiry timestamp
+- `femind-review renew --database <path> --memory-id <id>`
+  - renews a temporary allowance while preserving the current template/scope
+    and policy-class defaults
+- `femind-review revoke --database <path> --memory-id <id>`
+  - explicitly denies a previously reviewed item
+- `femind-review replace --database <path> --memory-id <id> --replacement-id <id>`
+  - denies the current item and records the successor memory ID
 - `femind-review expire-due --database <path>`
   - marks temporary allowances as expired when their expiry timestamp has passed
 

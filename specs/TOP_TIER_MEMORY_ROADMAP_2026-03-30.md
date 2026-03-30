@@ -157,8 +157,16 @@ Current status after the 2026-03-30 trust/safety pass:
   - surfaced-evidence redaction for safe secret-location queries
 - scoped procedural approvals are now part of the policy surface, so
   environment-specific exceptions stay confined to the matching query context
-- the next safety step is to deepen policy automation and approval classes, not
-  just add more raw review hooks
+- review lifecycle automation now also includes:
+  - approval templates for staged exceptions
+  - renew/revoke/replace workflows through the FeMind operator CLI
+  - replacement tracking for denied procedural memories
+- secret-policy classes now also cover private endpoints and internal hostnames
+- trusted sensitive guidance now resolves conflicts by provenance strength, so
+  higher-confidence internal sources can suppress weaker trusted alternatives
+  for sensitive infrastructure guidance
+- the next safety step is to deepen approval classes and conflict resolution
+  for competing trusted sources beyond the current scoped-template workflow
 
 ### 6. Keep Evaluation Engine-Centric
 

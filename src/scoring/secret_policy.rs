@@ -9,18 +9,30 @@ use std::collections::HashMap;
 pub enum SecretClass {
     /// Raw credential or token material that must never be surfaced verbatim.
     CredentialMaterial,
+    /// Raw bearer or session token material.
+    TokenMaterial,
+    /// Raw private-key or signing-key material.
+    KeyMaterial,
     /// A safe storage location for secret material (env file, vault path, item name).
     CredentialLocation,
     /// A safe reference to a secret-handling mechanism (for example `op read ...`).
     SecretReference,
+    /// A private service endpoint that should not be surfaced verbatim.
+    PrivateEndpoint,
+    /// An internal-only hostname that should not be surfaced verbatim.
+    InternalHostname,
 }
 
 impl SecretClass {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CredentialMaterial => "credential-material",
+            Self::TokenMaterial => "token-material",
+            Self::KeyMaterial => "key-material",
             Self::CredentialLocation => "credential-location",
             Self::SecretReference => "secret-reference",
+            Self::PrivateEndpoint => "private-endpoint",
+            Self::InternalHostname => "internal-hostname",
         }
     }
 
@@ -33,6 +45,10 @@ impl SecretClass {
             | "api-key"
             | "private-key"
             | "password-material" => Some(Self::CredentialMaterial),
+            "session-token" | "bearer-token" | "access-token" | "token-value" => {
+                Some(Self::TokenMaterial)
+            }
+            "signing-key" | "ssh-key-material" | "key-value" => Some(Self::KeyMaterial),
             "credential-location"
             | "credential-storage"
             | "secret-location"
@@ -40,6 +56,12 @@ impl SecretClass {
             | "vault-location" => Some(Self::CredentialLocation),
             "secret-reference" | "credential-reference" | "secret-guidance" => {
                 Some(Self::SecretReference)
+            }
+            "private-endpoint" | "internal-endpoint" | "service-endpoint" => {
+                Some(Self::PrivateEndpoint)
+            }
+            "internal-hostname" | "private-hostname" | "internal-host" => {
+                Some(Self::InternalHostname)
             }
             _ => None,
         }
@@ -87,7 +109,9 @@ pub fn query_requests_sensitive_secret_detail(query: &str) -> bool {
     let normalized = normalize_query(query);
     let tokens = normalized.split_whitespace().collect::<Vec<_>>();
 
-    if !contains_secret_signal(&normalized) {
+    let sensitive_signal =
+        contains_secret_signal(&normalized) || query_requests_private_infra_detail(query);
+    if !sensitive_signal {
         return false;
     }
 
@@ -107,20 +131,32 @@ pub fn query_requests_sensitive_secret_detail(query: &str) -> bool {
         || normalized.contains("what is the")
         || normalized.contains("give me the");
 
-    reveal_signal || !location_signal
+    reveal_signal || (!location_signal && contains_secret_signal(&normalized))
 }
 
 pub fn evidence_contains_secret_material(text: &str, metadata: &HashMap<String, String>) -> bool {
     matches!(
         secret_class_from_metadata(metadata),
-        Some(SecretClass::CredentialMaterial)
+        Some(
+            SecretClass::CredentialMaterial
+                | SecretClass::TokenMaterial
+                | SecretClass::KeyMaterial
+                | SecretClass::PrivateEndpoint
+                | SecretClass::InternalHostname
+        )
     ) || text
         .split_whitespace()
         .any(token_contains_secret_assignment)
 }
 
 pub fn redact_secret_material(text: &str, metadata: &HashMap<String, String>) -> String {
-    if !evidence_contains_secret_material(text, metadata) {
+    let secret_class = secret_class_from_metadata(metadata);
+    if !evidence_contains_secret_material(text, metadata)
+        && !matches!(
+            secret_class,
+            Some(SecretClass::PrivateEndpoint | SecretClass::InternalHostname)
+        )
+    {
         return text.to_string();
     }
 
@@ -158,7 +194,15 @@ pub fn redact_secret_material(text: &str, metadata: &HashMap<String, String>) ->
         }
     }
 
-    tokens.join(" ")
+    let mut redacted = tokens.join(" ");
+    if matches!(secret_class, Some(SecretClass::PrivateEndpoint)) {
+        redacted = redact_private_endpoint_material(&redacted);
+    }
+    if matches!(secret_class, Some(SecretClass::InternalHostname)) {
+        redacted = redact_internal_hostname_material(&redacted);
+    }
+
+    redacted
 }
 
 fn contains_secret_signal(normalized: &str) -> bool {
@@ -179,6 +223,26 @@ fn contains_secret_signal(normalized: &str) -> bool {
         || normalized.contains("client secret")
         || normalized.contains("bearer-token")
         || normalized.contains("bearer token")
+}
+
+pub fn query_requests_private_infra_detail(query: &str) -> bool {
+    let normalized = normalize_query(query);
+    let exact_signal = normalized.contains("exact")
+        || normalized.contains("actual")
+        || normalized.contains("literal")
+        || normalized.contains("full")
+        || normalized.contains("complete");
+    exact_signal && query_requests_private_infra_guidance(query)
+}
+
+pub fn query_requests_private_infra_guidance(query: &str) -> bool {
+    let normalized = normalize_query(query);
+    normalized.contains("private endpoint")
+        || normalized.contains("internal endpoint")
+        || normalized.contains("internal hostname")
+        || normalized.contains("private hostname")
+        || normalized.contains("internal host")
+        || normalized.contains("private host")
 }
 
 fn token_contains_secret_assignment(token: &str) -> bool {
@@ -208,6 +272,51 @@ fn normalize_tag(value: &str) -> String {
         .replace('_', "-")
         .trim_matches(|c: char| c == '"' || c == '\'' || c == ',' || c == ';')
         .to_string()
+}
+
+fn redact_private_endpoint_material(text: &str) -> String {
+    text.split_whitespace()
+        .map(|token| {
+            if token.contains("://") {
+                "[REDACTED_ENDPOINT]".to_string()
+            } else if looks_like_ipv4(token) {
+                "[REDACTED_ENDPOINT]".to_string()
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn redact_internal_hostname_material(text: &str) -> String {
+    text.split_whitespace()
+        .map(|token| {
+            let trimmed = token.trim_matches(|c: char| c == ',' || c == ';' || c == '.');
+            if looks_like_internal_hostname(trimmed) {
+                token.replace(trimmed, "[REDACTED_HOSTNAME]")
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn looks_like_ipv4(token: &str) -> bool {
+    let token = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != ':');
+    let host = token.split(':').next().unwrap_or(token);
+    let parts = host.split('.').collect::<Vec<_>>();
+    parts.len() == 4 && parts.iter().all(|part| part.parse::<u8>().is_ok())
+}
+
+fn looks_like_internal_hostname(token: &str) -> bool {
+    let token = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-');
+    token.contains('.')
+        && (token.contains(".internal")
+            || token.contains(".local")
+            || token.contains(".lan")
+            || token.ends_with(".corp"))
 }
 
 #[cfg(test)]
@@ -250,5 +359,44 @@ mod tests {
         assert!(query_requests_secret_location_or_reference(
             "How should I load the token safely?"
         ));
+    }
+
+    #[test]
+    fn exact_private_infra_queries_are_sensitive() {
+        assert!(query_requests_sensitive_secret_detail(
+            "What is the exact private endpoint for the embed relay?"
+        ));
+        assert!(query_requests_private_infra_detail(
+            "What is the exact internal hostname for the service?"
+        ));
+    }
+
+    #[test]
+    fn private_endpoint_and_internal_hostname_are_redacted() {
+        let mut endpoint = HashMap::new();
+        endpoint.insert(
+            "content_secret_class".to_string(),
+            "private-endpoint".to_string(),
+        );
+        let mut hostname = HashMap::new();
+        hostname.insert(
+            "content_secret_class".to_string(),
+            "internal-hostname".to_string(),
+        );
+
+        assert!(
+            redact_secret_material(
+                "Use https://relay.calvaryav.internal:8899/embed behind the tunnel.",
+                &endpoint,
+            )
+            .contains("[REDACTED_ENDPOINT]")
+        );
+        assert!(
+            redact_secret_material(
+                "The host is relay.calvaryav.internal for the audited path.",
+                &hostname,
+            )
+            .contains("[REDACTED_HOSTNAME]")
+        );
     }
 }
