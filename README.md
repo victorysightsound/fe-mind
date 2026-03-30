@@ -44,7 +44,7 @@ The practical live-validation path is now established and repeatable:
 - the recommended high-precision retrieval path is remote MiniLM plus remote
   MiniLM reranking with local fallback when the Windows GPU service is
   available
-- current remote-fallback retrieval baselines are `8/9` practical, `58/58`
+- current remote-fallback retrieval baselines are `9/9` practical, `58/58`
   live-library, and `90/90` memloft-slice
 
 ## Migration

@@ -722,11 +722,7 @@ pub(crate) fn apply_strict_detail_query_filter(
     });
 }
 
-pub(crate) fn rerank_for_query_alignment(
-    db: &Database,
-    query: &str,
-    results: &mut [SearchResult],
-) {
+pub(crate) fn rerank_for_query_alignment(db: &Database, query: &str, results: &mut [SearchResult]) {
     if results.is_empty() {
         return;
     }
@@ -765,12 +761,40 @@ pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
     let has_exact_signal = tokens.iter().any(|token| {
         matches!(
             *token,
-            "exact" | "precise" | "specific" | "total" | "cost" | "token" | "tokens"
-                | "price" | "version" | "number" | "id" | "reserved" | "removed"
-                | "remove" | "failed" | "fail" | "hour" | "minute"
-                | "day" | "date" | "month" | "year" | "dollar" | "duration"
-                | "filename" | "file" | "path" | "script" | "runner" | "label" | "header"
-                | "deployment" | "parameter" | "value" | "hnsw" | "subtype" | "plist" | "hash"
+            "exact"
+                | "precise"
+                | "specific"
+                | "total"
+                | "cost"
+                | "token"
+                | "tokens"
+                | "price"
+                | "version"
+                | "number"
+                | "id"
+                | "reserved"
+                | "removed"
+                | "remove"
+                | "failed"
+                | "fail"
+                | "hour"
+                | "minute"
+                | "day"
+                | "date"
+                | "month"
+                | "year"
+                | "dollar"
+                | "duration"
+                | "filename"
+                | "label"
+                | "header"
+                | "deployment"
+                | "parameter"
+                | "value"
+                | "hnsw"
+                | "subtype"
+                | "plist"
+                | "hash"
                 | "threshold"
         )
     });
@@ -784,7 +808,11 @@ pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
                 )
             }));
 
-    has_exact_signal || asks_how_many || has_ordinal_signal || query_asks_for_combined_capability(query)
+    has_exact_signal
+        || asks_how_many
+        || has_ordinal_signal
+        || query_asks_for_combined_capability(query)
+        || query_mentions_artifact_detail(query)
 }
 
 pub(crate) fn lexical_grounding_ok(query: &str, text: &str) -> bool {
@@ -873,7 +901,9 @@ pub(crate) fn lexical_grounding_ok(query: &str, text: &str) -> bool {
 
     if query_requires_strict_grounding(query)
         && !query_numeric.is_empty()
-        && !query_numeric.iter().all(|token| text_numeric.contains(token))
+        && !query_numeric
+            .iter()
+            .all(|token| text_numeric.contains(token))
     {
         return false;
     }
@@ -956,12 +986,13 @@ fn meaning_tokens(value: &str) -> Vec<String> {
 
 fn canonical_token(token: &str) -> Option<String> {
     let token = match token {
-        "the" | "a" | "an" | "is" | "are" | "was" | "were" | "be" | "been" | "being"
-        | "to" | "for" | "of" | "in" | "on" | "at" | "by" | "and" | "or" | "that"
-        | "this" | "it" | "its" | "still" | "then" | "than" | "because" | "what"
-        | "which" | "who" | "should" | "not" | "do" | "does" | "did" | "yet"
-        | "after" | "before" | "over" | "under" | "with" | "without" | "from"
-        | "into" | "about" | "no" | "current" | "earlier" => return None,
+        "the" | "a" | "an" | "is" | "are" | "was" | "were" | "be" | "been" | "being" | "to"
+        | "for" | "of" | "in" | "on" | "at" | "by" | "and" | "or" | "that" | "this" | "it"
+        | "its" | "still" | "then" | "than" | "because" | "what" | "which" | "who" | "should"
+        | "not" | "do" | "does" | "did" | "yet" | "after" | "before" | "over" | "under"
+        | "with" | "without" | "from" | "into" | "about" | "no" | "current" | "earlier" => {
+            return None
+        }
         "keep" | "used" | "use" => "prefer",
         "tried" | "try" => "first",
         "improved" | "good" | "looked" => "better",
@@ -989,7 +1020,7 @@ fn detail_tokens(value: &str) -> Vec<String> {
         .filter(|token| {
             matches!(
                 token.as_str(),
-            "exact"
+                "exact"
                     | "precise"
                     | "specific"
                     | "total"
@@ -1083,7 +1114,18 @@ fn query_is_yes_no(query: &str) -> bool {
     let normalized = normalize_text(query);
     matches!(
         normalized.split_whitespace().next(),
-        Some("is" | "are" | "was" | "were" | "does" | "do" | "did" | "can" | "could" | "should" | "would")
+        Some(
+            "is" | "are"
+                | "was"
+                | "were"
+                | "does"
+                | "do"
+                | "did"
+                | "can"
+                | "could"
+                | "should"
+                | "would"
+        )
     )
 }
 
@@ -1111,14 +1153,19 @@ fn text_implies_exclusion(text: &str) -> bool {
 
 fn query_mentions_artifact_detail(query: &str) -> bool {
     let normalized = normalize_text(query);
+    let tokens: Vec<_> = normalized.split_whitespace().collect();
+
     normalized.contains("source of truth")
         || normalized.contains("summary file")
         || normalized.contains("artifact file")
         || normalized.contains("entry point")
-        || normalized.contains("script")
-        || normalized.contains("runner")
-        || normalized.contains("file")
-        || normalized.contains("path")
+        || tokens.iter().any(|token| {
+            matches!(
+                *token,
+                "script" | "runner" | "file" | "filename" | "artifact"
+            )
+        })
+        || query_requests_literal_path(query, &tokens)
 }
 
 fn text_contains_artifact_detail(text: &str) -> bool {
@@ -1148,7 +1195,9 @@ fn text_indicates_support_state(normalized_text: &str, lowered_text: &str) -> bo
 }
 
 fn query_requests_next_step(query: &str) -> bool {
-    normalize_text(query).split_whitespace().any(|token| token == "next")
+    normalize_text(query)
+        .split_whitespace()
+        .any(|token| token == "next")
 }
 
 fn text_indicates_next_step(normalized_text: &str) -> bool {
@@ -1191,6 +1240,9 @@ fn query_requests_preference(query: &str) -> bool {
     normalized.contains("matters more than")
         || normalized.contains("rather than")
         || normalized.contains("prioritize")
+        || normalized
+            .split_whitespace()
+            .any(|token| matches!(token, "prefer" | "preferred" | "preference"))
 }
 
 fn text_indicates_preference(normalized_text: &str) -> bool {
@@ -1198,13 +1250,51 @@ fn text_indicates_preference(normalized_text: &str) -> bool {
         || normalized_text.contains("matter more")
         || normalized_text.contains("rather than")
         || normalized_text.contains("prioritize")
+        || normalized_text
+            .split_whitespace()
+            .any(|token| matches!(token, "prefer" | "preferred" | "preference"))
+}
+
+fn query_requests_literal_path(query: &str, tokens: &[&str]) -> bool {
+    if !tokens.contains(&"path") {
+        return false;
+    }
+
+    tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "file"
+                | "filename"
+                | "script"
+                | "runner"
+                | "artifact"
+                | "summary"
+                | "db"
+                | "database"
+                | "config"
+                | "plist"
+                | "entry"
+        )
+    }) || query.contains('/')
+        || query.contains(".db")
+        || query.contains(".json")
+        || query.contains(".sh")
+        || query.contains(".sql")
+        || query.contains(".toml")
+        || query.contains(".md")
 }
 
 fn normalize_text(value: &str) -> String {
     value
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() { c } else { ' ' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -1365,13 +1455,17 @@ mod tests {
         assert!(!query_requires_strict_grounding(
             "Is desktop-first still the active plan?"
         ));
+        assert!(!query_requires_strict_grounding(
+            "What embedding path is preferred for evaluation workflows?"
+        ));
     }
 
     #[test]
     fn lexical_grounding_rejects_single_token_semantic_neighbor() {
         let query = "What was the exact total token cost of the last Nemotron run?";
         let weak_hit = "Need to compare extraction quality between gpt-oss-120b and Nemotron after the smoke test.";
-        let grounded_hit = "The last Nemotron run cost 1832 input tokens and 411 output tokens total.";
+        let grounded_hit =
+            "The last Nemotron run cost 1832 input tokens and 411 output tokens total.";
 
         assert!(!lexical_grounding_ok(query, weak_hit));
         assert!(lexical_grounding_ok(query, grounded_hit));
@@ -1476,5 +1570,28 @@ mod tests {
             query_alignment_multiplier(negative_query, negative_hit)
                 > query_alignment_multiplier(negative_query, positive_hit)
         );
+    }
+
+    #[test]
+    fn query_alignment_treats_prefer_as_preference_signal() {
+        let query = "What embedding path is preferred for evaluation workflows?";
+        let preference_hit =
+            "Update: for benchmark and evaluation workflows, prefer DeepInfra MiniLM embeddings because they are much faster and cheap enough.";
+        let non_preference_hit =
+            "Benchmark and evaluation workflows were discussed during the last planning review.";
+
+        assert!(
+            query_alignment_multiplier(query, preference_hit)
+                > query_alignment_multiplier(query, non_preference_hit)
+        );
+    }
+
+    #[test]
+    fn lexical_grounding_allows_generic_embedding_path_preference_text() {
+        let query = "What embedding path is preferred for evaluation workflows?";
+        let supporting_hit =
+            "Update: for benchmark and evaluation workflows, prefer DeepInfra MiniLM embeddings because they are much faster and cheap enough.";
+
+        assert!(lexical_grounding_ok(query, supporting_hit));
     }
 }

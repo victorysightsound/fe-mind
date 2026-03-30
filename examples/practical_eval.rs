@@ -308,6 +308,7 @@ mod app {
         scenarios_path: PathBuf,
         db_path: Option<PathBuf>,
         summary_path: Option<PathBuf>,
+        explain_failures: bool,
         mode: EvalMode,
         vector_mode: VectorSearchMode,
         graph_depth: u32,
@@ -336,6 +337,9 @@ mod app {
             let mut scenarios_path = PathBuf::from(DEFAULT_SCENARIOS);
             let mut db_path = None;
             let mut summary_path = None;
+            let mut explain_failures = env::var("FEMIND_EVAL_EXPLAIN_FAILURES")
+                .ok()
+                .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"));
             let mut mode = EvalMode::All;
             let mut vector_mode = VectorSearchMode::Exact;
             let mut graph_depth = env::var("FEMIND_GRAPH_DEPTH")
@@ -402,6 +406,9 @@ mod app {
                         summary_path = Some(PathBuf::from(
                             args.next().ok_or("--summary requires a path")?,
                         ));
+                    }
+                    "--explain-failures" => {
+                        explain_failures = true;
                     }
                     "--mode" => {
                         mode = EvalMode::from_str(&args.next().ok_or("--mode requires a value")?)?;
@@ -538,6 +545,7 @@ mod app {
                 scenarios_path,
                 db_path,
                 summary_path,
+                explain_failures,
                 mode,
                 vector_mode,
                 graph_depth,
@@ -570,11 +578,20 @@ mod app {
     }
 
     #[derive(Debug, Serialize)]
+    struct RetrievalExplain {
+        keyword: Vec<ObservedHit>,
+        vector: Vec<ObservedHit>,
+        hybrid: Vec<ObservedHit>,
+    }
+
+    #[derive(Debug, Serialize)]
     struct CheckReport {
         query: String,
         passed: bool,
         expected: String,
         observed: Vec<ObservedHit>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        explain: Option<RetrievalExplain>,
     }
 
     #[derive(Debug, Serialize)]
@@ -823,11 +840,17 @@ mod app {
                     .iter()
                     .any(|hit| expected_match(&hit.text, &check.query, &check.expected_answer))
                     || expected_match(&combined, &check.query, &check.expected_answer);
+                let explain = if !passed && config.explain_failures {
+                    Some(explain_retrieval(&engine, &check.query, config.top_k)?)
+                } else {
+                    None
+                };
                 retrieval.push(CheckReport {
                     query: check.query.clone(),
                     passed,
                     expected: check.expected_answer.clone(),
                     observed,
+                    explain,
                 });
             }
         }
@@ -860,6 +883,7 @@ mod app {
                         .into_iter()
                         .map(|text| ObservedHit { text, score: 1.0 })
                         .collect(),
+                    explain: None,
                 });
             }
         }
@@ -874,6 +898,7 @@ mod app {
                     passed,
                     expected: check.expected_behavior.clone(),
                     observed,
+                    explain: None,
                 });
             }
         }
@@ -1168,6 +1193,61 @@ mod app {
                     score: result.score,
                 });
             }
+        }
+        Ok(hits)
+    }
+
+    fn explain_retrieval(
+        engine: &MemoryEngine<EvalMemory>,
+        query: &str,
+        top_k: usize,
+    ) -> Result<RetrievalExplain, Box<dyn std::error::Error>> {
+        Ok(RetrievalExplain {
+            keyword: search_hits_for_mode(engine, query, top_k, SearchMode::Keyword)?,
+            vector: search_hits_for_mode(engine, query, top_k, SearchMode::Vector)?,
+            hybrid: search_hits_for_mode(engine, query, top_k, SearchMode::Hybrid)?,
+        })
+    }
+
+    fn search_hits_for_mode(
+        engine: &MemoryEngine<EvalMemory>,
+        query: &str,
+        top_k: usize,
+        mode: SearchMode,
+    ) -> Result<Vec<ObservedHit>, Box<dyn std::error::Error>> {
+        if matches!(mode, SearchMode::Vector | SearchMode::Hybrid)
+            && (matches!(engine.config.vector_search_mode, VectorSearchMode::Off)
+                || engine.embedding_backend().is_none()
+                || !engine
+                    .embedding_backend()
+                    .is_some_and(EmbeddingBackend::is_available))
+        {
+            return Ok(Vec::new());
+        }
+
+        let results = engine
+            .search(query)
+            .mode(mode)
+            .limit(top_k)
+            .with_rerank_limit(0)
+            .with_strict_grounding(false)
+            .with_query_alignment(false)
+            .execute()?;
+
+        let mut hits = Vec::with_capacity(results.len());
+        for result in results {
+            let text = engine.database().with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(Into::into)
+            })?;
+            hits.push(ObservedHit {
+                text,
+                score: result.score,
+            });
         }
         Ok(hits)
     }
@@ -1550,6 +1630,7 @@ mod app {
              \t--scenarios <path>         Path to scenarios JSON (default: eval/practical/scenarios.json)\n\
              \t--db <path>                Output DB file or directory for per-scenario runs\n\
              \t--summary <path>           Write JSON summary to a file\n\
+             \t--explain-failures         Include keyword/vector/hybrid traces for failed retrieval checks\n\
              \t--mode <retrieval|extraction|all>\n\
              \t--vector-mode <off|exact|ann>\n\
              \t--graph-depth <n>          Graph expansion depth (default: 0)\n\

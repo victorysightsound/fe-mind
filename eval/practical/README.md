@@ -76,6 +76,10 @@ cargo run --example practical_eval --features local-embeddings,remote-embeddings
 FEMIND_EMBED_RUNTIME=remote-fallback \
 FEMIND_RERANK_RUNTIME=remote-fallback \
 scripts/run-practical-eval.sh
+
+# Include raw keyword/vector/hybrid traces for failed retrieval checks
+FEMIND_EVAL_EXPLAIN_FAILURES=1 \
+scripts/run-practical-eval.sh
 ```
 
 ## Scope
@@ -86,8 +90,7 @@ Current local baseline:
 
 - retrieval-only `exact` mode is the standard regression path
 - latest fully green summary: `target/practical-eval/retrieval-exact.json`
-- reranker-aware remote-fallback regression is wired and currently exposes one
-  real failure in `preference-change-over-time`
+- reranker-aware remote-fallback regression is wired and currently passes `9/9`
 - latest reranker-aware summary: `target/practical-eval/retrieval-exact-remote-rerank.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

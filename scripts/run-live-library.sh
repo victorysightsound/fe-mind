@@ -23,7 +23,13 @@ RERANK_REMOTE_BASE_URL="${FEMIND_RERANK_REMOTE_BASE_URL:-http://127.0.0.1:18899/
 RERANK_REMOTE_AUTH_ENV="${FEMIND_RERANK_REMOTE_AUTH_ENV:-FEMIND_REMOTE_EMBED_TOKEN}"
 RERANK_REMOTE_TIMEOUT_SECS="${FEMIND_RERANK_REMOTE_TIMEOUT_SECS:-15}"
 RERANK_LIMIT="${FEMIND_RERANK_LIMIT:-20}"
+EXPLAIN_FAILURES="${FEMIND_EVAL_EXPLAIN_FAILURES:-0}"
 SUMMARY="${FEMIND_EVAL_SUMMARY:-target/live-library/live-library-${VECTOR_MODE}.json}"
+
+EXTRA_ARGS=()
+if [[ "${EXPLAIN_FAILURES}" == "1" || "${EXPLAIN_FAILURES:l}" == "true" || "${EXPLAIN_FAILURES:l}" == "yes" || "${EXPLAIN_FAILURES:l}" == "on" ]]; then
+  EXTRA_ARGS+=(--explain-failures)
+fi
 
 exec cargo run --example practical_eval --features "${FEATURES}" -- \
   --scenarios "${SCENARIOS}" \
@@ -48,4 +54,5 @@ exec cargo run --example practical_eval --features "${FEATURES}" -- \
   --rerank-limit "${RERANK_LIMIT}" \
   --key-cmd "${KEY_CMD}" \
   --summary "${SUMMARY}" \
+  "${EXTRA_ARGS[@]}" \
   "$@"

@@ -105,6 +105,7 @@ Default behavior:
 - `FEMIND_EMBED_RUNTIME=local-cpu`
 - `FEMIND_RERANK_RUNTIME=off`
 - `FEMIND_RERANK_LIMIT=20`
+- `FEMIND_EVAL_EXPLAIN_FAILURES=0`
 - `FEMIND_EXTRACT_BACKEND=api`
 - `FEMIND_EXTRACT_MODEL=openai/gpt-oss-120b`
 - `FEMIND_RETRIEVAL_INGEST=records`
@@ -140,6 +141,13 @@ scripts/run-practical-eval.sh
 That path uses the remote GPU service first and falls back to the local Candle
 backends if the remote service is unavailable.
 
+When a retrieval check fails and you want raw keyword/vector/hybrid traces in
+the summary artifact, set:
+
+```bash
+FEMIND_EVAL_EXPLAIN_FAILURES=1
+```
+
 Graph-focused follow-up validation can be enabled explicitly:
 
 ```bash
@@ -173,8 +181,7 @@ Current validated baseline:
 - retrieval-only practical eval with `vector_mode=ann` currently passes `9/9`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `8/9`
-- current failing scenario is `preference-change-over-time`
+- latest reranker-aware `remote-fallback` exact run passes `9/9`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact-remote-rerank.json`
 - broader live-usage sample from actual project docs currently passes `11/11` for all four tested extraction models
 - live-usage summary artifact: `target/practical-eval/live-usage-exact.json`
