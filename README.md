@@ -27,11 +27,12 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `20/20`
-- retrieval-only practical eval in `ann` mode currently passes `20/20`
+- retrieval-only practical eval in `exact` mode currently passes `24/24`
+- retrieval-only practical eval in `ann` mode currently passes `24/24`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
-  provenance/review-guardrail coverage, not just text-only changed-fact
+  provenance/review-guardrail plus review-policy-transition coverage, not just
+  text-only changed-fact scenarios
   scenarios
 - larger real-world follow-up library now lives under `eval/live-library/`
 - larger real-world library now covers 18 scenarios and 58 retrieval checks
@@ -50,7 +51,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `20/20` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `24/24` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
@@ -104,6 +105,14 @@ The practical live-validation path is now established and repeatable:
   - `metadata.source_verification`
 - the engine now records pending-review metadata for high-impact procedural
   memories, and maintainers can inspect them through the review queue
+- review-state policy now supports:
+  - `pending`
+  - `allowed`
+  - `denied`
+  - `expired`
+- procedural guidance queries now keep review-state semantics through the
+  original routed query instead of broadening into stripped variants that can
+  reintroduce denied or expired guidance
 - deterministic composition now abstains on sensitive secret/credential value
   requests even when storage guidance for those values remains retrievable
 - procedural guidance queries now isolate low-trust procedural instructions when

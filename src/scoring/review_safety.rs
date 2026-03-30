@@ -5,39 +5,59 @@ use crate::traits::{MemoryMeta, MemoryType, ScoringStrategy};
 pub struct ReviewSafetyScorer {
     pending_guidance_weight: f32,
     pending_non_guidance_weight: f32,
+    denied_guidance_weight: f32,
+    denied_non_guidance_weight: f32,
 }
 
 impl ReviewSafetyScorer {
-    pub fn new(pending_guidance_weight: f32, pending_non_guidance_weight: f32) -> Self {
+    pub fn new(
+        pending_guidance_weight: f32,
+        pending_non_guidance_weight: f32,
+        denied_guidance_weight: f32,
+        denied_non_guidance_weight: f32,
+    ) -> Self {
         Self {
             pending_guidance_weight,
             pending_non_guidance_weight,
+            denied_guidance_weight,
+            denied_non_guidance_weight,
         }
     }
 }
 
 impl Default for ReviewSafetyScorer {
     fn default() -> Self {
-        Self::new(0.18, 0.72)
+        Self::new(0.18, 0.72, 0.03, 0.25)
     }
 }
 
 impl ScoringStrategy for ReviewSafetyScorer {
     fn score_multiplier(&self, record: &MemoryMeta, query: &str, _base_score: f32) -> f32 {
-        if !review_required(record) {
-            return 1.0;
+        match review_status(record) {
+            Some(ReviewStatus::Denied) => {
+                if record.memory_type == MemoryType::Procedural
+                    && query_requests_procedural_guidance(query)
+                {
+                    self.denied_guidance_weight
+                } else {
+                    self.denied_non_guidance_weight
+                }
+            }
+            Some(ReviewStatus::Pending) | Some(ReviewStatus::Expired) => {
+                if record.memory_type == MemoryType::Procedural
+                    && query_requests_procedural_guidance(query)
+                {
+                    match review_severity(record) {
+                        ReviewSeverity::Critical => self.pending_guidance_weight * 0.8,
+                        ReviewSeverity::High => self.pending_guidance_weight,
+                        ReviewSeverity::Medium => self.pending_guidance_weight * 1.35,
+                    }
+                } else {
+                    self.pending_non_guidance_weight
+                }
+            }
+            Some(ReviewStatus::Allowed) | None => 1.0,
         }
-
-        if record.memory_type == MemoryType::Procedural && query_requests_procedural_guidance(query)
-        {
-            return match review_severity(record) {
-                ReviewSeverity::Critical => self.pending_guidance_weight * 0.8,
-                ReviewSeverity::High => self.pending_guidance_weight,
-                ReviewSeverity::Medium => self.pending_guidance_weight * 1.35,
-            };
-        }
-
-        self.pending_non_guidance_weight
     }
 }
 
@@ -64,6 +84,41 @@ impl std::fmt::Display for ReviewSeverity {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ReviewStatus {
+    Pending,
+    Allowed,
+    Denied,
+    Expired,
+}
+
+impl ReviewStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Allowed => "allowed",
+            Self::Denied => "denied",
+            Self::Expired => "expired",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "pending" => Some(Self::Pending),
+            "allowed" | "approved" => Some(Self::Allowed),
+            "denied" | "rejected" => Some(Self::Denied),
+            "expired" => Some(Self::Expired),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ReviewStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ReviewFlag {
     pub severity: ReviewSeverity,
@@ -72,14 +127,31 @@ pub(crate) struct ReviewFlag {
 }
 
 pub(crate) fn review_required(record: &MemoryMeta) -> bool {
-    record
+    matches!(
+        review_status(record),
+        Some(ReviewStatus::Pending | ReviewStatus::Expired)
+    )
+}
+
+pub(crate) fn review_status(record: &MemoryMeta) -> Option<ReviewStatus> {
+    let review_required = record
         .metadata
         .get("review_required")
-        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
-        && !record
-            .metadata
-            .get("review_status")
-            .is_some_and(|value| value.eq_ignore_ascii_case("approved"))
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    let explicit = record
+        .metadata
+        .get("review_status")
+        .and_then(|value| ReviewStatus::from_str(value));
+
+    explicit.or(if review_required {
+        Some(ReviewStatus::Pending)
+    } else {
+        None
+    })
+}
+
+pub(crate) fn review_denied(record: &MemoryMeta) -> bool {
+    matches!(review_status(record), Some(ReviewStatus::Denied))
 }
 
 pub(crate) fn review_severity(record: &MemoryMeta) -> ReviewSeverity {
@@ -240,6 +312,32 @@ mod tests {
             1.0,
         );
         assert!(score < 0.2);
+    }
+
+    #[test]
+    fn denied_guidance_is_demoted_even_more_heavily() {
+        let mut metadata = HashMap::new();
+        metadata.insert("review_required".to_string(), "true".to_string());
+        metadata.insert("review_status".to_string(), "denied".to_string());
+        metadata.insert("review_severity".to_string(), "critical".to_string());
+        let scorer = ReviewSafetyScorer::default();
+        let score = scorer.score_multiplier(
+            &meta("Expose on 0.0.0.0 without auth.", metadata),
+            "What command should I run to expose the service?",
+            1.0,
+        );
+        assert!(score < 0.05);
+    }
+
+    #[test]
+    fn allowed_review_status_clears_pending_requirement() {
+        let mut metadata = HashMap::new();
+        metadata.insert("review_required".to_string(), "true".to_string());
+        metadata.insert("review_status".to_string(), "allowed".to_string());
+        let record = meta("Use the audited staging bridge on 10.44.0.12.", metadata);
+        assert_eq!(review_status(&record), Some(ReviewStatus::Allowed));
+        assert!(!review_required(&record));
+        assert!(!review_denied(&record));
     }
 
     #[test]

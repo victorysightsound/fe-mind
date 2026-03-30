@@ -984,6 +984,58 @@ not be surfaced or acted on without review" for high-impact procedural changes.
 
 ---
 
+## Decision 035: Review Resolution States Must Change Retrieval Behavior
+
+**Date:** 2026-03-30
+
+**Decision:** Extend the review-safety layer so high-impact procedural memories
+carry explicit resolution states and those states change how retrieval and
+composition behave.
+
+**Context:** Pending-review hooks were in place, but FeMind still lacked the
+next operational layer: once a risky procedural memory has actually been
+reviewed, the engine needs to know whether it was allowed, denied, or simply
+expired after a temporary exception. Without that, review metadata is mostly a
+reporting aid instead of an active policy surface.
+
+**Rationale:**
+- A production memory engine needs more than "flagged" versus "not flagged"
+- Temporary operational exceptions must be able to expire and return to the
+  pending review queue
+- Human-denied guidance should not re-enter surfaced results through query
+  variants or reranking
+- Human-allowed guidance should remain retrievable without being treated as
+  unresolved risk
+
+**Consequences:**
+- Review policy now recognizes:
+  - `pending`
+  - `allowed`
+  - `denied`
+  - `expired`
+- `MemoryEngine` now supports review resolution updates through
+  `set_review_status(...)`
+- `review_items(...)` exposes the full review inventory, while
+  `pending_review_items(...)` now returns only unresolved `pending` and
+  `expired` items
+- Review-aware scoring now heavily demotes denied guidance and still demotes
+  unresolved pending/expired guidance
+- Procedural retrieval now always filters denied guidance, and treats expired
+  guidance as unresolved risk
+- Multi-query retrieval now preserves the original routed query for procedural
+  guidance so stripped query variants cannot reintroduce denied or expired
+  instructions
+- Practical validation now includes a `review-policy-transitions` scenario that
+  proves:
+  - allowed guidance can surface
+  - denied guidance stays out of surfaced results
+  - expired guidance returns to the pending review queue
+- Remote-GPU validation remains green after the change:
+  practical `24/24` exact, `24/24` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

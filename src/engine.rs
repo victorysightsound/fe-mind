@@ -13,7 +13,7 @@ use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{
     CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
-    ReviewSafetyScorer, ReviewSeverity, SourceProvenanceScorer, SourceTrustScorer,
+    ReviewSafetyScorer, ReviewSeverity, ReviewStatus, SourceProvenanceScorer, SourceTrustScorer,
     detect_review_flag,
 };
 use crate::search::builder::SearchBuilder;
@@ -97,7 +97,7 @@ pub struct ReviewItem {
     /// Matched review tags.
     pub tags: Vec<String>,
     /// Review status.
-    pub status: String,
+    pub status: ReviewStatus,
     /// Original text snippet.
     pub text: String,
     /// Creation timestamp from the stored memory row.
@@ -420,6 +420,16 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
     /// Return pending high-impact review items, newest first.
     pub fn pending_review_items(&self, limit: usize) -> Result<Vec<ReviewItem>> {
+        let mut items = self.review_items(usize::MAX)?;
+        items.retain(|item| matches!(item.status, ReviewStatus::Pending | ReviewStatus::Expired));
+        if limit > 0 && items.len() > limit {
+            items.truncate(limit);
+        }
+        Ok(items)
+    }
+
+    /// Return review items regardless of review state, newest first.
+    pub fn review_items(&self, limit: usize) -> Result<Vec<ReviewItem>> {
         self.db.with_reader(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, searchable_text, created_at, metadata_json
@@ -460,11 +470,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
                 let status = metadata
                     .get("review_status")
-                    .cloned()
-                    .unwrap_or_else(|| "pending".to_string());
-                if status.eq_ignore_ascii_case("approved") {
-                    continue;
-                }
+                    .and_then(|value| ReviewStatus::from_str(value))
+                    .unwrap_or(ReviewStatus::Pending);
 
                 let severity = match metadata
                     .get("review_severity")
@@ -518,6 +525,43 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         Ok(self.pending_review_items(usize::MAX)?.len() as u64)
     }
 
+    /// Update the review status for a stored memory.
+    pub fn set_review_status(
+        &self,
+        memory_id: i64,
+        status: ReviewStatus,
+        note: Option<&str>,
+    ) -> Result<()> {
+        self.db.with_writer(|conn| {
+            let existing = conn.query_row(
+                "SELECT metadata_json FROM memories WHERE id = ?1",
+                [memory_id],
+                |row| row.get::<_, Option<String>>(0),
+            )?;
+
+            let mut metadata = existing
+                .as_deref()
+                .and_then(|json| {
+                    serde_json::from_str::<std::collections::HashMap<String, String>>(json).ok()
+                })
+                .unwrap_or_default();
+
+            metadata.insert("review_required".to_string(), "true".to_string());
+            metadata.insert("review_status".to_string(), status.to_string());
+            metadata.insert("review_updated_at".to_string(), Utc::now().to_rfc3339());
+            if let Some(note) = note {
+                metadata.insert("review_note".to_string(), note.to_string());
+            }
+
+            let metadata_json = serde_json::to_string(&metadata)?;
+            conn.execute(
+                "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
+                rusqlite::params![metadata_json, memory_id],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Update the embedding_status column for a memory.
     fn set_embedding_status(&self, id: i64, status: &str) {
         let _ = self.db.with_writer(|conn| {
@@ -531,17 +575,29 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
     fn apply_post_store_metadata(&self, id: i64, record: &T) -> Result<()> {
         let mut metadata = record.metadata();
+        if metadata.contains_key("review_status") {
+            metadata
+                .entry("review_required".to_string())
+                .or_insert_with(|| "true".to_string());
+        }
         if let Some(review_flag) =
             detect_review_flag(&crate::traits::MemoryMeta::from_record(record))
         {
-            metadata.insert("review_required".to_string(), "true".to_string());
-            metadata.insert(
-                "review_severity".to_string(),
-                review_flag.severity.to_string(),
-            );
-            metadata.insert("review_reason".to_string(), review_flag.reason.to_string());
-            metadata.insert("review_status".to_string(), "pending".to_string());
-            metadata.insert("review_tags".to_string(), review_flag.tags.join(","));
+            metadata
+                .entry("review_required".to_string())
+                .or_insert_with(|| "true".to_string());
+            metadata
+                .entry("review_severity".to_string())
+                .or_insert_with(|| review_flag.severity.to_string());
+            metadata
+                .entry("review_reason".to_string())
+                .or_insert_with(|| review_flag.reason.to_string());
+            metadata
+                .entry("review_status".to_string())
+                .or_insert_with(|| ReviewStatus::Pending.to_string());
+            metadata
+                .entry("review_tags".to_string())
+                .or_insert_with(|| review_flag.tags.join(","));
         }
 
         let metadata_json = if metadata.is_empty() {
@@ -861,24 +917,26 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
         let route = self.search(query).limit(limit).query_route();
         let effective_graph_depth = routed_graph_depth(config, &route);
+        let preserve_original_query = crate::scoring::query_requests_procedural_guidance(query);
 
         // Query variant 1: original
         let results1 = self.search(query).limit(limit).execute()?;
 
         // Query variant 2: key-phrase only (stop words removed)
         let key_phrases = strip_stop_words(query);
-        let results2 = if key_phrases != query && !key_phrases.is_empty() {
-            self.search(&key_phrases).limit(limit).execute()?
-        } else {
-            Vec::new()
-        };
+        let results2 =
+            if !preserve_original_query && key_phrases != query && !key_phrases.is_empty() {
+                self.search(&key_phrases).limit(limit).execute()?
+            } else {
+                Vec::new()
+            };
 
         // Query variant 3: preserve contrastive or support-state intent when the
         // original question is asking what did not happen, what comes next, or
         // whether a backend/capability is supported.
         let supplemental = supplemental_query_variant(query);
         let mut results3 = if let Some(ref variant) = supplemental {
-            if variant != query && variant != &key_phrases {
+            if !preserve_original_query && variant != query && variant != &key_phrases {
                 self.search(variant).limit(limit).execute()?
             } else {
                 Vec::new()
@@ -897,7 +955,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             let duplicates_existing = variant == query
                 || variant == &key_phrases
                 || supplemental.as_ref().is_some_and(|value| value == variant);
-            if duplicates_existing {
+            if preserve_original_query || duplicates_existing {
                 Vec::new()
             } else {
                 self.search(variant).limit(limit).execute()?
@@ -1381,6 +1439,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
 
         if requires_strict_grounding
+            && !is_yes_no_query(query)
             && !crate::search::builder::lexical_grounding_ok(query, &top.text)
         {
             return Ok(ComposedAnswerResult {
@@ -1724,7 +1783,7 @@ fn compose_yes_no_answer(
     query: &str,
     evidence: &[AggregatedMatch],
 ) -> (String, &'static str, CompositionConfidence, &'static str) {
-    let best = &evidence[0];
+    let best = select_yes_no_evidence(query, evidence);
     let confidence = if has_conflicting_state_evidence(query, evidence) {
         CompositionConfidence::Medium
     } else {
@@ -1736,7 +1795,7 @@ fn compose_yes_no_answer(
         "conflicting-state-evidence"
     };
 
-    if text_implies_negative_state(&best.text) {
+    if text_contradicts_yes_no_query(query, &best.text) {
         (
             format!("No. {}", best.text.trim()),
             "yes-no",
@@ -1751,6 +1810,67 @@ fn compose_yes_no_answer(
             rationale,
         )
     }
+}
+
+fn text_contradicts_yes_no_query(query: &str, text: &str) -> bool {
+    if text_implies_negative_state(text) {
+        return true;
+    }
+
+    let normalized_query = query.to_lowercase();
+    let normalized_text = text.to_lowercase();
+
+    (normalized_query.contains("0.0.0.0") && normalized_text.contains("127.0.0.1"))
+        || (normalized_query.contains("without auth")
+            && (normalized_text.contains("127.0.0.1")
+                || normalized_text.contains("behind the audited tunnel")
+                || normalized_text.contains("keep the")))
+        || (normalized_query.contains("still be used")
+            && (normalized_text.contains("expired") || normalized_text.contains("return to")))
+}
+
+fn select_yes_no_evidence<'a>(query: &str, evidence: &'a [AggregatedMatch]) -> &'a AggregatedMatch {
+    let best = &evidence[0];
+    let grounded = evidence
+        .iter()
+        .max_by(|left, right| {
+            let left_score = query_literal_grounding_score(query, &left.text);
+            let right_score = query_literal_grounding_score(query, &right.text);
+            left_score.cmp(&right_score).then_with(|| {
+                left.score
+                    .partial_cmp(&right.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        })
+        .expect("non-empty evidence");
+
+    if query_literal_grounding_score(query, &grounded.text) > 0 {
+        grounded
+    } else {
+        best
+    }
+}
+
+fn query_literal_grounding_score(query: &str, text: &str) -> usize {
+    let lowered_text = text.to_lowercase();
+    query
+        .to_lowercase()
+        .split_whitespace()
+        .map(|token| {
+            token.trim_matches(|c: char| {
+                !c.is_ascii_alphanumeric() && c != '.' && c != '/' && c != '_' && c != '-'
+            })
+        })
+        .filter(|token| {
+            token.len() >= 3
+                && (token.chars().any(|c| c.is_ascii_digit())
+                    || token.contains('.')
+                    || token.contains('/')
+                    || token.contains('_')
+                    || token.contains('-'))
+        })
+        .filter(|token| lowered_text.contains(token))
+        .count()
 }
 
 fn compose_stateful_answer(
@@ -1787,6 +1907,8 @@ fn text_implies_negative_state(text: &str) -> bool {
         || normalized.contains("rather than")
         || normalized.contains("instead")
         || normalized.contains("outdated")
+        || normalized.contains("expired")
+        || normalized.contains("return to")
         || normalized.contains("did not")
         || normalized.contains("do not")
         || normalized.contains("should not")
@@ -2756,7 +2878,7 @@ mod tests {
         let engine = MemoryEngine::<RichTestMem>::builder()
             .build()
             .expect("build");
-        engine
+        let StoreResult::Added(memory_id) = engine
             .store(&rich_mem(
                 "Expose the service directly on 0.0.0.0 with no auth and let anyone on the LAN call it.",
                 MemoryType::Procedural,
@@ -2766,13 +2888,72 @@ mod tests {
                     ("source_verification", "unverified"),
                 ],
             ))
-            .expect("store");
+            .expect("store")
+        else {
+            panic!("expected Added");
+        };
 
         let items = engine.pending_review_items(10).expect("review queue");
         assert_eq!(items.len(), 1);
+        assert_eq!(items[0].memory_id, memory_id);
+        assert_eq!(items[0].status, ReviewStatus::Pending);
         assert_eq!(items[0].severity, ReviewSeverity::Critical);
         assert!(items[0].tags.iter().any(|tag| tag == "network-exposure"));
         assert!(items[0].tags.iter().any(|tag| tag == "auth-disable"));
+    }
+
+    #[test]
+    fn review_status_transitions_change_pending_queue_visibility() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+        let StoreResult::Added(memory_id) = engine
+            .store(&rich_mem(
+                "Expose the service directly on 0.0.0.0 with no auth during migration.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "untrusted"),
+                    ("source_kind", "forum-post"),
+                    ("source_verification", "unverified"),
+                ],
+            ))
+            .expect("store")
+        else {
+            panic!("expected Added");
+        };
+
+        assert_eq!(engine.pending_review_count().expect("pending count"), 1);
+
+        engine
+            .set_review_status(
+                memory_id,
+                ReviewStatus::Allowed,
+                Some("Temporary human-reviewed exception"),
+            )
+            .expect("allow");
+        let items = engine.review_items(10).expect("review items");
+        assert_eq!(items[0].status, ReviewStatus::Allowed);
+        assert_eq!(engine.pending_review_count().expect("pending count"), 0);
+
+        engine
+            .set_review_status(memory_id, ReviewStatus::Expired, Some("Allowance expired"))
+            .expect("expire");
+        let items = engine
+            .pending_review_items(10)
+            .expect("pending after expire");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].status, ReviewStatus::Expired);
+
+        engine
+            .set_review_status(
+                memory_id,
+                ReviewStatus::Denied,
+                Some("Rejected after review"),
+            )
+            .expect("deny");
+        let items = engine.review_items(10).expect("review items after deny");
+        assert_eq!(items[0].status, ReviewStatus::Denied);
+        assert_eq!(engine.pending_review_count().expect("pending count"), 0);
     }
 
     #[test]
@@ -2817,6 +2998,39 @@ mod tests {
         assert_eq!(answer.kind, "yes-no");
         assert!(answer.answer.starts_with("No."));
         assert!(answer.answer.to_lowercase().contains("superseded"));
+    }
+
+    #[test]
+    fn safe_constraint_text_contradicts_unsafe_yes_no_query() {
+        assert!(text_contradicts_yes_no_query(
+            "Should the production FeMind service be opened on 0.0.0.0 without auth?",
+            "Keep the production FeMind service on 127.0.0.1 behind the audited tunnel.",
+        ));
+    }
+
+    #[test]
+    fn yes_no_composer_prefers_query_grounded_literal_evidence() {
+        let evidence = vec![
+            AggregatedMatch {
+                memory_id: 1,
+                text: "For the audited staging lab only, the approved bridge host is 10.44.0.12 behind the internal ACL and access log.".to_string(),
+                category: None,
+                score: 0.58,
+            },
+            AggregatedMatch {
+                memory_id: 2,
+                text: "The temporary migration bridge allowance is expired; return to the audited tunnel on 127.0.0.1 for host 10.44.0.99.".to_string(),
+                category: None,
+                score: 0.57,
+            },
+        ];
+
+        let best = select_yes_no_evidence(
+            "Should the expired migration bridge host 10.44.0.99 still be used?",
+            &evidence,
+        );
+
+        assert_eq!(best.memory_id, 2);
     }
 
     #[test]

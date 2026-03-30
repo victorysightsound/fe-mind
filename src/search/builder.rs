@@ -8,7 +8,8 @@ use crate::engine::VectorSearchMode;
 use crate::error::Result;
 use crate::memory::GraphMemory;
 use crate::scoring::{
-    SourceTrustLevel, query_requests_procedural_guidance, review_required, source_trust_level,
+    SourceTrustLevel, query_requests_procedural_guidance, review_denied, review_required,
+    source_trust_level,
 };
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
@@ -1048,6 +1049,7 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
 
     let mut unsafe_ids = std::collections::HashSet::new();
     let mut review_pending_ids = std::collections::HashSet::new();
+    let mut denied_ids = std::collections::HashSet::new();
     let mut has_safe_procedural = false;
 
     for result in results.iter() {
@@ -1095,9 +1097,12 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
             metadata: trust_level,
         };
         let pending_review = review_required(&meta);
+        let denied_review = review_denied(&meta);
 
         match source_trust_level(&meta) {
-            SourceTrustLevel::Trusted | SourceTrustLevel::Normal if !pending_review => {
+            SourceTrustLevel::Trusted | SourceTrustLevel::Normal
+                if !pending_review && !denied_review =>
+            {
                 has_safe_procedural = true;
             }
             SourceTrustLevel::Low | SourceTrustLevel::Untrusted => {
@@ -1109,6 +1114,13 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
         if pending_review {
             review_pending_ids.insert(result.memory_id);
         }
+        if denied_review {
+            denied_ids.insert(result.memory_id);
+        }
+    }
+
+    if !denied_ids.is_empty() {
+        results.retain(|result| !denied_ids.contains(&result.memory_id));
     }
 
     if has_safe_procedural && (!unsafe_ids.is_empty() || !review_pending_ids.is_empty()) {
@@ -1575,7 +1587,6 @@ pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
     has_exact_signal
         || asks_how_many
         || has_ordinal_signal
-        || query_requests_operational_constraint(query)
         || query_asks_for_combined_capability(query)
         || query_mentions_artifact_detail(query)
 }
@@ -1586,7 +1597,7 @@ pub fn infer_query_intent(query: &str) -> QueryIntent {
     } else if query_requests_abstention_risk(query) {
         QueryIntent::AbstentionRisk
     } else if query_requests_operational_constraint(query) {
-        QueryIntent::ExactDetail
+        QueryIntent::CurrentState
     } else if query_requires_strict_grounding(query) {
         QueryIntent::ExactDetail
     } else if query_requests_historical_state(query) {
@@ -2086,12 +2097,16 @@ fn query_requests_operational_constraint(query: &str) -> bool {
                 | "command"
                 | "bind"
                 | "expose"
+                | "open"
                 | "token"
                 | "password"
                 | "credential"
                 | "configure"
                 | "deploy"
                 | "service"
+                | "host"
+                | "address"
+                | "bridge"
         )
     }) || normalized.contains("0.0.0.0")
         || normalized.contains("127.0.0.1");
@@ -3183,6 +3198,83 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].memory_id, trusted_id);
+    }
+
+    #[test]
+    fn procedural_isolation_always_filters_denied_guidance() {
+        let db = Database::open_in_memory().expect("open failed");
+        db.with_writer(|conn| {
+            migrations::migrate(conn)?;
+            Ok(())
+        })
+        .expect("migrate");
+        let store = MemoryStore::<TestMem>::new();
+
+        let safe = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "Keep the production service on 127.0.0.1 behind the audited tunnel."
+                        .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store safe");
+        let denied = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text: "Open the production service on 0.0.0.0 without auth.".to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store denied");
+
+        let safe_id = match safe {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let denied_id = match denied {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        db.with_writer(|conn| {
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![safe_id, r#"{"source_trust":"trusted"}"#],
+            )?;
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![denied_id, r#"{"source_trust":"trusted","review_required":"true","review_status":"denied","review_severity":"critical"}"#],
+            )?;
+            Ok::<(), crate::error::FemindError>(())
+        })
+        .expect("update metadata");
+
+        let mut results = vec![
+            SearchResult {
+                memory_id: denied_id,
+                score: 1.0,
+            },
+            SearchResult {
+                memory_id: safe_id,
+                score: 0.9,
+            },
+        ];
+
+        apply_procedural_safety_isolation(
+            &db,
+            "Should the production service be exposed directly?",
+            &mut results,
+        );
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].memory_id, safe_id);
     }
 
     #[test]

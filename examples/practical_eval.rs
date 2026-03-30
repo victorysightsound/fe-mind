@@ -160,6 +160,8 @@ mod app {
         #[serde(default)]
         min_pending_items: Option<usize>,
         #[serde(default)]
+        max_pending_items: Option<usize>,
+        #[serde(default)]
         required_tags: Vec<String>,
         #[serde(default)]
         required_fragments: Vec<String>,
@@ -731,6 +733,8 @@ mod app {
         pending_item_count: usize,
         #[serde(skip_serializing_if = "Option::is_none")]
         min_pending_items: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max_pending_items: Option<usize>,
         pending_count_ok: bool,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         missing_required_tags: Vec<String>,
@@ -1179,7 +1183,7 @@ mod app {
                         severity: item.severity.to_string(),
                         reason: item.reason.clone(),
                         tags: item.tags.clone(),
-                        status: item.status.clone(),
+                        status: item.status.to_string(),
                         text: item.text.clone(),
                     })
                     .collect::<Vec<_>>();
@@ -1784,7 +1788,10 @@ mod app {
     ) -> (bool, ReviewCriteriaReport) {
         let pending_count_ok = check
             .min_pending_items
-            .is_none_or(|minimum| items.len() >= minimum);
+            .is_none_or(|minimum| items.len() >= minimum)
+            && check
+                .max_pending_items
+                .is_none_or(|maximum| items.len() <= maximum);
         let missing_required_tags = check
             .required_tags
             .iter()
@@ -1821,6 +1828,7 @@ mod app {
         let criteria = ReviewCriteriaReport {
             pending_item_count: items.len(),
             min_pending_items: check.min_pending_items,
+            max_pending_items: check.max_pending_items,
             pending_count_ok,
             missing_required_tags,
             missing_required_fragments,

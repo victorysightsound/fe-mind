@@ -43,6 +43,7 @@ Each scenario includes:
 - optional `abstention_checks[].graph_depth`
 - optional `review_checks`
 - optional `review_checks[].min_pending_items`
+- optional `review_checks[].max_pending_items`
 - optional `review_checks[].required_tags`
 - optional `review_checks[].required_fragments`
 - optional `review_checks[].forbidden_fragments`
@@ -130,9 +131,10 @@ Current local baseline:
 - latest fully green summary: `target/practical-eval/retrieval-exact.json`
 - the practical set now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and
-  trust/procedural-safety plus provenance/secret-guardrail scenarios
-- reranker-aware remote-fallback regression is currently green at `20/20`
-- reranker-aware remote-fallback ANN regression is also green at `20/20`
+  trust/procedural-safety, provenance/secret-guardrail, and
+  review-policy-transition scenarios
+- reranker-aware remote-fallback regression is currently green at `24/24`
+- reranker-aware remote-fallback ANN regression is also green at `24/24`
 - latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

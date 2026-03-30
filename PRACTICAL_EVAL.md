@@ -112,6 +112,7 @@ Each scenario should include:
   - `min_observed_hits`
 - optional `review_checks` for pending-review queue validation, including:
   - `min_pending_items`
+  - `max_pending_items`
   - `required_tags`
   - `required_fragments`
   - `forbidden_fragments`
@@ -262,8 +263,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `20/20`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `20/20`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `24/24`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `24/24`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
@@ -274,6 +275,8 @@ Current validated baseline:
   grounded token-storage guidance while refusing to surface the token value
 - practical scenarios can now validate pending-review queue behavior for
   dangerous procedural memories alongside ordinary retrieval/abstention checks
+- review-state policy coverage now includes explicit `allowed`, `denied`, and
+  `expired` transitions for high-impact procedural memories
 - the trust/procedural-safety scenario now proves FeMind will prefer the
   trusted `femind-remote-on` recovery command over a malicious copied-chat
   instruction, and will answer `No` to exposing the remote service directly on
@@ -281,8 +284,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `20/20`
-- latest reranker-aware `remote-fallback` ANN run passes `20/20`
+- latest reranker-aware `remote-fallback` exact run passes `24/24`
+- latest reranker-aware `remote-fallback` ANN run passes `24/24`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

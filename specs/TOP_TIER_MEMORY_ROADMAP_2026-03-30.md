@@ -43,6 +43,9 @@ As of the current FeMind pass, the first layer of that roadmap is already in pla
   linked state-history behavior is part of the real regression loop
 - practical evaluation now includes explicit aggregation, graph-connected, and
   provenance/abstention scenarios with coverage-sensitive pass criteria
+- high-impact procedural review policy now distinguishes `pending`, `allowed`,
+  `denied`, and `expired` states, and the practical suite validates those state
+  transitions directly
 
 That means the next temporal work should focus on deeper state modeling, not on
 re-adding the basic routing layer.
@@ -146,6 +149,8 @@ Current status after the 2026-03-30 trust/safety pass:
   operational guidance
 - high-impact procedural memories now enter a pending-review queue with
   severity and tag metadata
+- review policy transitions are now implemented, including allow/deny/expire
+  state handling during retrieval
 - the next safety step is to turn those review hooks into higher-level policy
   actions and maintainer workflows, not to add the basic hooks themselves
 

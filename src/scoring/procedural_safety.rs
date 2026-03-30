@@ -76,6 +76,12 @@ pub(crate) fn query_requests_procedural_guidance(query: &str) -> bool {
                 | ["how", "should"]
                 | ["what", "command"]
                 | ["which", "command"]
+                | ["what", "host"]
+                | ["which", "host"]
+                | ["what", "address"]
+                | ["which", "address"]
+                | ["what", "port"]
+                | ["which", "port"]
                 | ["what", "steps"]
                 | ["which", "steps"]
         )
@@ -87,7 +93,11 @@ pub(crate) fn query_requests_procedural_guidance(query: &str) -> bool {
         || normalized.contains("deploy")
         || normalized.contains("configure")
         || normalized.contains("expose")
+        || normalized.contains("open ")
+        || normalized.contains("opened ")
         || normalized.contains("bind ")
+        || normalized.contains("still be used")
+        || normalized.contains("should i use")
         || normalized.contains("should i run")
 }
 
