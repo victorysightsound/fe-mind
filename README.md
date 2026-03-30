@@ -27,11 +27,12 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `17/17`
-- retrieval-only practical eval in `ann` mode currently passes `17/17`
+- retrieval-only practical eval in `exact` mode currently passes `20/20`
+- retrieval-only practical eval in `ann` mode currently passes `20/20`
 - practical eval now includes explicit graph-linked state-history, aggregation,
-  graph-connected, and provenance/abstention coverage, not just text-only
-  changed-fact scenarios
+  graph-connected, provenance/abstention, trust/procedural safety, and
+  provenance/review-guardrail coverage, not just text-only changed-fact
+  scenarios
 - larger real-world follow-up library now lives under `eval/live-library/`
 - larger real-world library now covers 18 scenarios and 58 retrieval checks
 - larger real-world library currently passes `58/58` in the standard
@@ -49,7 +50,8 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `17/17` practical, `58/58` live-library, and `90/90` memloft-slice
+  `20/20` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
   benchmark-style evaluation is deferred to milestone checkpoints after
@@ -97,6 +99,13 @@ The practical live-validation path is now established and repeatable:
   - `normal`
   - `low` / `speculative`
   - `untrusted` / `external` / `poisoned` / `unsafe`
+- retrieval scoring now also honors richer provenance metadata:
+  - `metadata.source_kind`
+  - `metadata.source_verification`
+- the engine now records pending-review metadata for high-impact procedural
+  memories, and maintainers can inspect them through the review queue
+- deterministic composition now abstains on sensitive secret/credential value
+  requests even when storage guidance for those values remains retrievable
 - procedural guidance queries now isolate low-trust procedural instructions when
   a safer procedural alternative is present, so unsafe command-like memories do
   not remain in the surfaced result set just because they are semantically close

@@ -25,7 +25,9 @@ Each scenario includes:
 - `records`
 - optional `records[].key` for explicit graph-linked scenarios
 - `records[].memory_type` (`episodic`, `semantic`, or `procedural`)
-- optional `records[].metadata`, including trust markers such as `source_trust`
+- optional `records[].metadata`, including trust/provenance markers such as
+  `source_trust`, `source_kind`, `source_verification`, and
+  `content_sensitivity`
 - optional `records[].valid_from` / `records[].valid_until` (RFC3339)
 - optional `relations` for explicit source-record graph links
 - `relations[].from` / `relations[].to` refer to `records[].key`
@@ -39,6 +41,11 @@ Each scenario includes:
 - optional `extraction_checks`
 - optional `abstention_checks`
 - optional `abstention_checks[].graph_depth`
+- optional `review_checks`
+- optional `review_checks[].min_pending_items`
+- optional `review_checks[].required_tags`
+- optional `review_checks[].required_fragments`
+- optional `review_checks[].forbidden_fragments`
 
 ## Review Workflow
 
@@ -98,6 +105,7 @@ The summary artifact now includes:
 
 - per-check routed plans
 - per-check retrieval criteria diagnostics
+- per-check review-queue diagnostics when present
 - pass-rate breakdowns by:
   - check type
   - scenario category
@@ -122,8 +130,9 @@ Current local baseline:
 - latest fully green summary: `target/practical-eval/retrieval-exact.json`
 - the practical set now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and
-  trust/procedural-safety scenarios
-- reranker-aware remote-fallback regression is currently green at `17/17`
+  trust/procedural-safety plus provenance/secret-guardrail scenarios
+- reranker-aware remote-fallback regression is currently green at `20/20`
+- reranker-aware remote-fallback ANN regression is also green at `20/20`
 - latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

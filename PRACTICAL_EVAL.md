@@ -104,11 +104,17 @@ Each scenario should include:
 - optional extraction expectations for messy source material
 - optional scenario-level `graph_depth` for graph-assisted retrieval checks
 - optional `records[].metadata`, including stable trust markers such as
-  `source_trust`
+  `source_trust`, `source_kind`, `source_verification`, and
+  `content_sensitivity`
 - optional explicit retrieval criteria such as:
   - `required_fragments`
   - `forbidden_fragments`
   - `min_observed_hits`
+- optional `review_checks` for pending-review queue validation, including:
+  - `min_pending_items`
+  - `required_tags`
+  - `required_fragments`
+  - `forbidden_fragments`
 
 ## Release Use
 
@@ -256,14 +262,18 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `17/17`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `17/17`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `20/20`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `20/20`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
   safety scenarios
 - the provenance/abstention scenario now proves FeMind can abstain on an exact
   Windows task GUID even when nearby Windows task evidence is present
+- the provenance/secret-guardrail scenario now proves FeMind can return
+  grounded token-storage guidance while refusing to surface the token value
+- practical scenarios can now validate pending-review queue behavior for
+  dangerous procedural memories alongside ordinary retrieval/abstention checks
 - the trust/procedural-safety scenario now proves FeMind will prefer the
   trusted `femind-remote-on` recovery command over a malicious copied-chat
   instruction, and will answer `No` to exposing the remote service directly on
@@ -271,7 +281,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `17/17`
+- latest reranker-aware `remote-fallback` exact run passes `20/20`
+- latest reranker-aware `remote-fallback` ANN run passes `20/20`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`
@@ -304,19 +315,13 @@ benchmark sweep through RecallBench.
 
 Current larger-library baseline:
 
-- the live-library corpus currently includes 18 scenarios and 66 checks
-- `all` + `exact` currently passes `66/66`
-- `all` + `ann` currently passes `66/66`
-- the exact and ANN results currently match on the full larger corpus
+- the live-library corpus currently includes 18 scenarios and 58 checks
+- `all` + `exact` currently passes `58/58`
 - summary artifacts now include stable run metadata for backend, model, vector
   mode, duration, pass counts, and pass rate
-- graph-backed extraction retrieval is now available as a separate tuning lane
-- the current graph-backed hybrid live-library pass now scores `66/66`
-- graph-backed retrieval on the larger library is now clean enough to treat as
-  part of the real-world validation gate
 - retrieval-only `remote-fallback` exact run now passes `58/58`
 - retrieval-only `remote-fallback` summary artifact:
-  `target/live-library/live-library-exact-remote-rerank.json`
+  `target/live-library/live-library-exact.json`
 
 ## Memloft-Derived Real-Data Slice
 
@@ -344,13 +349,7 @@ Current memloft-slice baseline:
 
 - the memloft-derived slice currently includes 18 scenarios and 90 checks
 - `all` + `exact` currently passes `90/90`
-- `all` + `ann` currently passes `90/90`
-- the exact and ANN results currently match on the full memloft-derived corpus
 - sources are real technical memloft records, not hand-written synthetic notes
-- graph-backed extraction retrieval is now available as a separate tuning lane
-- the current graph-backed hybrid memloft-slice pass now scores `90/90`
-- graph-backed retrieval on the memloft-derived slice is now clean enough for
-  RecallBench confirmation work
 - retrieval-only `remote-fallback` exact run now passes `90/90`
 - retrieval-only `remote-fallback` summary artifact:
-  `target/memloft-slice/memloft-slice-exact-remote-rerank.json`
+  `target/memloft-slice/memloft-slice-exact.json`

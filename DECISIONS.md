@@ -931,6 +931,59 @@ were semantically close.
 
 ---
 
+## Decision 034: Provenance Classes and Review Hooks Must Gate Sensitive Operational Memory
+
+**Date:** 2026-03-30
+
+**Decision:** Extend the engine-first safety layer with richer provenance
+metadata, deterministic secret-detail abstention, and a pending-review queue
+for dangerous procedural memories.
+
+**Context:** Source-trust weighting and procedural isolation improved ranking,
+but they still collapsed too many operational memories into a single trust
+dimension. FeMind needed to distinguish maintainers, project docs, observed
+local state, copied chat snippets, forum advice, and secret-bearing notes more
+explicitly. It also needed a way to record "this memory exists, but it should
+not be surfaced or acted on without review" for high-impact procedural changes.
+
+**Rationale:**
+- Top-tier memory safety depends on provenance, not only semantic similarity or
+  a coarse trust flag
+- Dangerous procedural notes should be inspectable and reviewable, not merely
+  demoted in ranking
+- Credential/secret questions need a deterministic abstention path so the
+  engine can return grounded storage guidance without ever surfacing the secret
+  value itself
+- The practical harness should validate safety behavior directly, including
+  review-queue state, instead of inferring safety only from retrieval output
+
+**Consequences:**
+- Memory metadata can now carry:
+  - `source_kind`
+  - `source_verification`
+  - `content_sensitivity`
+- The default composite scorer now includes `SourceProvenanceScorer` and
+  `ReviewSafetyScorer` in addition to the earlier trust and procedural layers
+- High-impact procedural memories now enter a pending-review queue with:
+  - severity
+  - reason
+  - tags
+  - status
+- `MemoryEngine` now exposes review-queue inspection through:
+  - `pending_review_items(...)`
+  - `pending_review_count()`
+- Deterministic composition now abstains on secret/credential value requests
+  with a dedicated `sensitive-secret-detail` rationale
+- Practical scenarios now validate:
+  - review queue behavior for malicious or dangerous procedural memories
+  - grounded storage guidance for sensitive tokens
+  - abstention on exact secret value requests
+- Remote-GPU validation remains green after the change:
+  practical `20/20` exact, `20/20` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

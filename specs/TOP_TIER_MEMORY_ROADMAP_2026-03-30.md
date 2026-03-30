@@ -136,11 +136,18 @@ Before FeMind is treated as production-grade agent memory, it should gain:
 Current status after the 2026-03-30 trust/safety pass:
 
 - source-trust weighting is now implemented in the default scorer
+- richer provenance classes are now implemented through
+  `source_kind` and `source_verification`
 - procedural guidance isolation is now implemented for routed procedural
   queries when safe alternatives exist
+- secret-detail abstention is now implemented for credential/material-value
+  queries while grounded storage guidance remains answerable
 - poisoning-oriented practical coverage now includes trusted vs untrusted
   operational guidance
-- high-impact update review hooks still remain future work
+- high-impact procedural memories now enter a pending-review queue with
+  severity and tag metadata
+- the next safety step is to turn those review hooks into higher-level policy
+  actions and maintainer workflows, not to add the basic hooks themselves
 
 ### 6. Keep Evaluation Engine-Centric
 

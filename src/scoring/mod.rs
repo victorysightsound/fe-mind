@@ -5,6 +5,8 @@ mod importance;
 mod memory_type;
 mod procedural_safety;
 mod recency;
+mod review_safety;
+mod source_provenance;
 mod source_trust;
 
 pub use activation::ActivationScorer;
@@ -15,5 +17,8 @@ pub use memory_type::MemoryTypeScorer;
 pub use procedural_safety::ProceduralSafetyScorer;
 pub(crate) use procedural_safety::query_requests_procedural_guidance;
 pub use recency::RecencyScorer;
+pub use review_safety::{ReviewSafetyScorer, ReviewSeverity};
+pub(crate) use review_safety::{detect_review_flag, review_required};
+pub use source_provenance::SourceProvenanceScorer;
 pub use source_trust::SourceTrustScorer;
 pub(crate) use source_trust::{SourceTrustLevel, source_trust_level};

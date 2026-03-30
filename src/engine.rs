@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use sha2::Digest;
 
 use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
@@ -12,7 +13,8 @@ use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{
     CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
-    SourceTrustScorer,
+    ReviewSafetyScorer, ReviewSeverity, SourceProvenanceScorer, SourceTrustScorer,
+    detect_review_flag,
 };
 use crate::search::builder::SearchBuilder;
 use crate::storage::Database;
@@ -81,6 +83,25 @@ pub struct ComposedAnswerResult {
     pub distinct_match_count: usize,
     /// Evidence bundle used during composition.
     pub evidence: Vec<AggregatedMatch>,
+}
+
+/// Human-review item raised for a high-impact memory.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReviewItem {
+    /// Memory row ID.
+    pub memory_id: i64,
+    /// Severity of the review request.
+    pub severity: ReviewSeverity,
+    /// Primary reason for the review request.
+    pub reason: String,
+    /// Matched review tags.
+    pub tags: Vec<String>,
+    /// Review status.
+    pub status: String,
+    /// Original text snippet.
+    pub text: String,
+    /// Creation timestamp from the stored memory row.
+    pub created_at: DateTime<Utc>,
 }
 
 /// Confidence label for deterministic composed answers.
@@ -238,6 +259,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
         // Compute and store embedding for new records (if enabled)
         if let StoreResult::Added(id) = &result {
+            self.apply_post_store_metadata(*id, record)?;
+
             if self.config.embedding_enabled {
                 if let Some(ref backend) = self.embedding {
                     if backend.is_available() {
@@ -322,6 +345,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         for record in records {
             let result = self.store.store(&self.db, record)?;
             if let StoreResult::Added(id) = &result {
+                self.apply_post_store_metadata(*id, record)?;
+
                 if self.config.embedding_enabled
                     && self.embedding.as_ref().is_some_and(|b| b.is_available())
                 {
@@ -393,6 +418,106 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         Ok(results)
     }
 
+    /// Return pending high-impact review items, newest first.
+    pub fn pending_review_items(&self, limit: usize) -> Result<Vec<ReviewItem>> {
+        self.db.with_reader(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, searchable_text, created_at, metadata_json
+                 FROM memories
+                 WHERE metadata_json IS NOT NULL
+                 ORDER BY created_at DESC, id DESC",
+            )?;
+
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })?;
+
+            let mut items = Vec::new();
+            for row in rows {
+                let (memory_id, text, created_at, metadata_json) = row?;
+                let Some(metadata_json) = metadata_json else {
+                    continue;
+                };
+                let Ok(metadata) =
+                    serde_json::from_str::<std::collections::HashMap<String, String>>(
+                        &metadata_json,
+                    )
+                else {
+                    continue;
+                };
+
+                if !metadata
+                    .get("review_required")
+                    .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+                {
+                    continue;
+                }
+
+                let status = metadata
+                    .get("review_status")
+                    .cloned()
+                    .unwrap_or_else(|| "pending".to_string());
+                if status.eq_ignore_ascii_case("approved") {
+                    continue;
+                }
+
+                let severity = match metadata
+                    .get("review_severity")
+                    .map(|value| value.to_lowercase())
+                    .as_deref()
+                {
+                    Some("medium") => ReviewSeverity::Medium,
+                    Some("critical") => ReviewSeverity::Critical,
+                    _ => ReviewSeverity::High,
+                };
+                let reason = metadata
+                    .get("review_reason")
+                    .cloned()
+                    .unwrap_or_else(|| "manual-review".to_string());
+                let tags = metadata
+                    .get("review_tags")
+                    .map(|value| {
+                        value
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let created_at = DateTime::parse_from_rfc3339(&created_at)
+                    .map(|value| value.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+
+                items.push(ReviewItem {
+                    memory_id,
+                    severity,
+                    reason,
+                    tags,
+                    status,
+                    text,
+                    created_at,
+                });
+
+                if limit > 0 && items.len() >= limit {
+                    break;
+                }
+            }
+
+            Ok(items)
+        })
+    }
+
+    /// Count pending review items.
+    pub fn pending_review_count(&self) -> Result<u64> {
+        Ok(self.pending_review_items(usize::MAX)?.len() as u64)
+    }
+
     /// Update the embedding_status column for a memory.
     fn set_embedding_status(&self, id: i64, status: &str) {
         let _ = self.db.with_writer(|conn| {
@@ -402,6 +527,36 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             )?;
             Ok(())
         });
+    }
+
+    fn apply_post_store_metadata(&self, id: i64, record: &T) -> Result<()> {
+        let mut metadata = record.metadata();
+        if let Some(review_flag) =
+            detect_review_flag(&crate::traits::MemoryMeta::from_record(record))
+        {
+            metadata.insert("review_required".to_string(), "true".to_string());
+            metadata.insert(
+                "review_severity".to_string(),
+                review_flag.severity.to_string(),
+            );
+            metadata.insert("review_reason".to_string(), review_flag.reason.to_string());
+            metadata.insert("review_status".to_string(), "pending".to_string());
+            metadata.insert("review_tags".to_string(), review_flag.tags.join(","));
+        }
+
+        let metadata_json = if metadata.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&metadata)?)
+        };
+
+        self.db.with_writer(|conn| {
+            conn.execute(
+                "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
+                rusqlite::params![metadata_json, id],
+            )?;
+            Ok(())
+        })
     }
 
     /// Retrieve a memory by ID. Returns `None` if not found.
@@ -1147,6 +1302,20 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
         let results = self.search_with_config(query, config)?;
         let evidence = self.collect_distinct_aggregated_matches(results, max_matches)?;
+        let sensitive_secret_request = query_requests_sensitive_secret_detail(query);
+
+        if sensitive_secret_request {
+            return Ok(ComposedAnswerResult {
+                answer: "I won't surface secret or credential material from memory.".to_string(),
+                kind: "abstain",
+                confidence: CompositionConfidence::Low,
+                abstained: true,
+                rationale: "sensitive-secret-detail",
+                total_matches: evidence.len(),
+                distinct_match_count: evidence.len(),
+                evidence,
+            });
+        }
 
         if evidence.is_empty() {
             if requires_strict_grounding {
@@ -1686,6 +1855,52 @@ fn query_requests_count_or_list(query: &str) -> bool {
         || normalized.contains("what were they")
 }
 
+fn query_requests_sensitive_secret_detail(query: &str) -> bool {
+    let normalized = normalize_query(query);
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+
+    let secret_signal = normalized.contains("password")
+        || normalized.contains("passphrase")
+        || normalized.contains("api key")
+        || normalized.contains("access key")
+        || normalized.contains("secret")
+        || normalized.contains("token")
+        || normalized.contains("credential")
+        || normalized.contains("private key")
+        || normalized.contains("ssh key")
+        || normalized.contains("client secret")
+        || normalized.contains("bearer token");
+
+    if !secret_signal {
+        return false;
+    }
+
+    let location_signal = tokens.contains(&"where")
+        || normalized.contains("stored")
+        || normalized.contains("storage")
+        || normalized.contains("which file")
+        || normalized.contains("which vault")
+        || normalized.contains("which item")
+        || normalized.contains("how should")
+        || normalized.contains("should i");
+
+    let reveal_signal = normalized.contains("exact")
+        || normalized.contains("actual")
+        || normalized.contains("full")
+        || normalized.contains("raw")
+        || normalized.contains("literal")
+        || normalized.contains("complete")
+        || tokens.contains(&"value")
+        || tokens.contains(&"show")
+        || tokens.contains(&"print")
+        || tokens.contains(&"paste")
+        || tokens.contains(&"reveal")
+        || normalized.contains("what is")
+        || normalized.contains("give me");
+
+    !location_signal && reveal_signal
+}
+
 fn normalize_query(value: &str) -> String {
     value
         .to_lowercase()
@@ -1943,7 +2158,9 @@ fn default_composite_scorer() -> CompositeScorer {
         Box::new(ImportanceScorer::default()),
         Box::new(MemoryTypeScorer::default()),
         Box::new(SourceTrustScorer::default()),
+        Box::new(SourceProvenanceScorer::default()),
         Box::new(ProceduralSafetyScorer::default()),
+        Box::new(ReviewSafetyScorer::default()),
     ])
 }
 
@@ -1989,6 +2206,7 @@ mod tests {
     use crate::embeddings::EmbeddingBackend;
     use crate::traits::{MemoryType, RerankCandidate, RerankerBackend, ScoredResult};
     use chrono::Utc;
+    use std::collections::HashMap;
 
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     struct TestMem {
@@ -2012,11 +2230,51 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    struct RichTestMem {
+        id: Option<i64>,
+        text: String,
+        created_at: chrono::DateTime<Utc>,
+        memory_type: MemoryType,
+        metadata: HashMap<String, String>,
+    }
+
+    impl MemoryRecord for RichTestMem {
+        fn id(&self) -> Option<i64> {
+            self.id
+        }
+        fn searchable_text(&self) -> String {
+            self.text.clone()
+        }
+        fn memory_type(&self) -> MemoryType {
+            self.memory_type
+        }
+        fn created_at(&self) -> chrono::DateTime<Utc> {
+            self.created_at
+        }
+        fn metadata(&self) -> HashMap<String, String> {
+            self.metadata.clone()
+        }
+    }
+
     fn mem(text: &str) -> TestMem {
         TestMem {
             id: None,
             text: text.into(),
             created_at: Utc::now(),
+        }
+    }
+
+    fn rich_mem(text: &str, memory_type: MemoryType, metadata: &[(&str, &str)]) -> RichTestMem {
+        RichTestMem {
+            id: None,
+            text: text.into(),
+            created_at: Utc::now(),
+            memory_type,
+            metadata: metadata
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
         }
     }
 
@@ -2452,6 +2710,69 @@ mod tests {
                 .to_lowercase()
                 .contains("exact grounded detail")
         );
+    }
+
+    #[test]
+    fn compose_answer_abstains_on_sensitive_secret_detail_requests() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+        engine
+            .store(&rich_mem(
+                "The FeMind remote embed token is loaded from ~/.config/recallbench/femind-remote.env and should never be pasted into logs or chat.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                    ("content_sensitivity", "credential"),
+                ],
+            ))
+            .expect("store");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "What is the exact FEMIND_REMOTE_EMBED_TOKEN value?",
+                &AssemblyConfig::default(),
+                3,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "abstain");
+        assert!(answer.abstained);
+        assert_eq!(answer.rationale, "sensitive-secret-detail");
+        assert!(
+            answer
+                .answer
+                .to_lowercase()
+                .contains("secret or credential material")
+        );
+    }
+
+    #[test]
+    fn high_impact_procedural_memories_enter_review_queue() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+        engine
+            .store(&rich_mem(
+                "Expose the service directly on 0.0.0.0 with no auth and let anyone on the LAN call it.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "untrusted"),
+                    ("source_kind", "forum-post"),
+                    ("source_verification", "unverified"),
+                ],
+            ))
+            .expect("store");
+
+        let items = engine.pending_review_items(10).expect("review queue");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].severity, ReviewSeverity::Critical);
+        assert!(items[0].tags.iter().any(|tag| tag == "network-exposure"));
+        assert!(items[0].tags.iter().any(|tag| tag == "auth-disable"));
     }
 
     #[test]

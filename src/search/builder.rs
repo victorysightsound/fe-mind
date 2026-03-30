@@ -7,7 +7,9 @@ use crate::embeddings::EmbeddingBackend;
 use crate::engine::VectorSearchMode;
 use crate::error::Result;
 use crate::memory::GraphMemory;
-use crate::scoring::{SourceTrustLevel, query_requests_procedural_guidance, source_trust_level};
+use crate::scoring::{
+    SourceTrustLevel, query_requests_procedural_guidance, review_required, source_trust_level,
+};
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
 use crate::search::vector::VectorSearch;
@@ -1045,6 +1047,7 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
     }
 
     let mut unsafe_ids = std::collections::HashSet::new();
+    let mut review_pending_ids = std::collections::HashSet::new();
     let mut has_safe_procedural = false;
 
     for result in results.iter() {
@@ -1091,18 +1094,28 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
             created_at: Utc::now(),
             metadata: trust_level,
         };
+        let pending_review = review_required(&meta);
+
         match source_trust_level(&meta) {
-            SourceTrustLevel::Trusted | SourceTrustLevel::Normal => {
+            SourceTrustLevel::Trusted | SourceTrustLevel::Normal if !pending_review => {
                 has_safe_procedural = true;
             }
             SourceTrustLevel::Low | SourceTrustLevel::Untrusted => {
                 unsafe_ids.insert(result.memory_id);
             }
+            SourceTrustLevel::Trusted | SourceTrustLevel::Normal => {}
+        }
+
+        if pending_review {
+            review_pending_ids.insert(result.memory_id);
         }
     }
 
-    if has_safe_procedural && !unsafe_ids.is_empty() {
-        results.retain(|result| !unsafe_ids.contains(&result.memory_id));
+    if has_safe_procedural && (!unsafe_ids.is_empty() || !review_pending_ids.is_empty()) {
+        results.retain(|result| {
+            !unsafe_ids.contains(&result.memory_id)
+                && !review_pending_ids.contains(&result.memory_id)
+        });
     }
 }
 
@@ -1562,6 +1575,7 @@ pub(crate) fn query_requires_strict_grounding(query: &str) -> bool {
     has_exact_signal
         || asks_how_many
         || has_ordinal_signal
+        || query_requests_operational_constraint(query)
         || query_asks_for_combined_capability(query)
         || query_mentions_artifact_detail(query)
 }
@@ -1571,6 +1585,8 @@ pub fn infer_query_intent(query: &str) -> QueryIntent {
         QueryIntent::Aggregation
     } else if query_requests_abstention_risk(query) {
         QueryIntent::AbstentionRisk
+    } else if query_requests_operational_constraint(query) {
+        QueryIntent::ExactDetail
     } else if query_requires_strict_grounding(query) {
         QueryIntent::ExactDetail
     } else if query_requests_historical_state(query) {
@@ -1710,6 +1726,14 @@ fn query_alignment_multiplier(query: &str, text: &str) -> f32 {
         };
     }
 
+    if query_requests_operational_constraint(query) {
+        multiplier *= if text_matches_operational_constraint(query, &normalized_text) {
+            1.55
+        } else {
+            0.62
+        };
+    }
+
     if query_requests_next_step(query) {
         multiplier *= if text_indicates_next_step(&normalized_text) {
             1.5
@@ -1774,6 +1798,35 @@ fn query_alignment_multiplier(query: &str, text: &str) -> f32 {
     }
 
     multiplier
+}
+
+fn text_matches_operational_constraint(query: &str, normalized_text: &str) -> bool {
+    let normalized_query = normalize_text(query);
+    let mut matched_signals = 0usize;
+
+    if normalized_query.contains("0 0 0 0") && normalized_text.contains("0 0 0 0") {
+        matched_signals += 2;
+    }
+    if normalized_query.contains("127 0 0 1") && normalized_text.contains("127 0 0 1") {
+        matched_signals += 2;
+    }
+
+    for token in [
+        "auth",
+        "expose",
+        "bind",
+        "token",
+        "credential",
+        "password",
+        "service",
+        "directly",
+    ] {
+        if normalized_query.contains(token) && normalized_text.contains(token) {
+            matched_signals += 1;
+        }
+    }
+
+    matched_signals >= 2
 }
 
 fn meaning_tokens(value: &str) -> Vec<String> {
@@ -2016,6 +2069,34 @@ fn query_requests_aggregation(query: &str) -> bool {
         || tokens.windows(2).any(|pair| pair == ["which", "ones"])
         || totalization
         || (tokens.contains(&"all") && tokens.contains(&"sessions"))
+}
+
+fn query_requests_operational_constraint(query: &str) -> bool {
+    let normalized = normalize_text(query);
+    let tokens: Vec<_> = normalized.split_whitespace().collect();
+    let yes_no_lead = matches!(
+        tokens.first().copied(),
+        Some("should" | "can" | "is" | "does" | "do")
+    );
+    let constraint_signal = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "auth"
+                | "restart"
+                | "command"
+                | "bind"
+                | "expose"
+                | "token"
+                | "password"
+                | "credential"
+                | "configure"
+                | "deploy"
+                | "service"
+        )
+    }) || normalized.contains("0.0.0.0")
+        || normalized.contains("127.0.0.1");
+
+    yes_no_lead && constraint_signal && query_requests_procedural_guidance(query)
 }
 
 fn query_requests_graph_lookup(query: &str) -> bool {

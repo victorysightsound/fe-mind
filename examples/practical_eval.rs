@@ -23,7 +23,7 @@ mod app {
     use femind::embeddings::RemoteEmbeddingBackend;
     #[cfg(feature = "local-embeddings")]
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
-    use femind::engine::{EngineConfig, MemoryEngine, VectorSearchMode};
+    use femind::engine::{EngineConfig, MemoryEngine, ReviewItem, VectorSearchMode};
     #[cfg(feature = "api-llm")]
     use femind::llm::ApiLlmCallback;
     #[cfg(feature = "cli-llm")]
@@ -156,6 +156,18 @@ mod app {
     }
 
     #[derive(Debug, Deserialize)]
+    struct ReviewCheck {
+        #[serde(default)]
+        min_pending_items: Option<usize>,
+        #[serde(default)]
+        required_tags: Vec<String>,
+        #[serde(default)]
+        required_fragments: Vec<String>,
+        #[serde(default)]
+        forbidden_fragments: Vec<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
     struct Scenario {
         id: String,
         title: String,
@@ -172,6 +184,8 @@ mod app {
         extraction_checks: Vec<ExtractionCheck>,
         #[serde(default)]
         abstention_checks: Vec<AbstentionCheck>,
+        #[serde(default)]
+        review_checks: Vec<ReviewCheck>,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -702,6 +716,30 @@ mod app {
         rationale: String,
     }
 
+    #[derive(Debug, Serialize)]
+    struct ReviewItemReport {
+        memory_id: i64,
+        severity: String,
+        reason: String,
+        tags: Vec<String>,
+        status: String,
+        text: String,
+    }
+
+    #[derive(Debug, Serialize)]
+    struct ReviewCriteriaReport {
+        pending_item_count: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min_pending_items: Option<usize>,
+        pending_count_ok: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        missing_required_tags: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        missing_required_fragments: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        present_forbidden_fragments: Vec<String>,
+    }
+
     struct RetrievalObservation {
         observed: Vec<ObservedHit>,
         observed_hit_count: usize,
@@ -729,6 +767,14 @@ mod app {
     }
 
     #[derive(Debug, Serialize)]
+    struct ReviewReport {
+        passed: bool,
+        expected: String,
+        observed: Vec<ReviewItemReport>,
+        criteria: ReviewCriteriaReport,
+    }
+
+    #[derive(Debug, Serialize)]
     struct ScenarioReport {
         id: String,
         title: String,
@@ -737,6 +783,7 @@ mod app {
         retrieval: Vec<CheckReport>,
         extraction: Vec<CheckReport>,
         abstention: Vec<CheckReport>,
+        review: Vec<ReviewReport>,
     }
 
     #[derive(Debug, Serialize)]
@@ -858,10 +905,14 @@ mod app {
                 .iter()
                 .chain(report.extraction.iter())
                 .chain(report.abstention.iter())
-                .filter(|c| c.passed)
+                .map(|c| c.passed)
+                .chain(report.review.iter().map(|c| c.passed))
+                .filter(|passed| *passed)
                 .count();
-            let scenario_total =
-                report.retrieval.len() + report.extraction.len() + report.abstention.len();
+            let scenario_total = report.retrieval.len()
+                + report.extraction.len()
+                + report.abstention.len()
+                + report.review.len();
             passed_checks += scenario_passed;
             total_checks += scenario_total;
 
@@ -1117,6 +1168,31 @@ mod app {
             }
         }
 
+        let mut review = Vec::new();
+        if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
+            for check in &scenario.review_checks {
+                let items = engine.pending_review_items(25)?;
+                let observed = items
+                    .iter()
+                    .map(|item| ReviewItemReport {
+                        memory_id: item.memory_id,
+                        severity: item.severity.to_string(),
+                        reason: item.reason.clone(),
+                        tags: item.tags.clone(),
+                        status: item.status.clone(),
+                        text: item.text.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                let (passed, criteria) = evaluate_review_check(&items, check);
+                review.push(ReviewReport {
+                    passed,
+                    expected: "pending high-impact review items".to_string(),
+                    observed,
+                    criteria,
+                });
+            }
+        }
+
         Ok(ScenarioReport {
             id: scenario.id.clone(),
             title: scenario.title.clone(),
@@ -1125,6 +1201,7 @@ mod app {
             retrieval,
             extraction,
             abstention,
+            review,
         })
     }
 
@@ -1195,8 +1272,14 @@ mod app {
                 abstention_passed,
             );
 
-            let scenario_total = retrieval_total + extraction_total + abstention_total;
-            let scenario_passed = retrieval_passed + extraction_passed + abstention_passed;
+            let review_total = report.review.len();
+            let review_passed = report.review.iter().filter(|check| check.passed).count();
+            record_stat(&mut check_type_stats, "review", review_total, review_passed);
+
+            let scenario_total =
+                retrieval_total + extraction_total + abstention_total + review_total;
+            let scenario_passed =
+                retrieval_passed + extraction_passed + abstention_passed + review_passed;
             record_stat(
                 &mut category_stats,
                 &report.category,
@@ -1695,6 +1778,61 @@ mod app {
         (passed, criteria)
     }
 
+    fn evaluate_review_check(
+        items: &[ReviewItem],
+        check: &ReviewCheck,
+    ) -> (bool, ReviewCriteriaReport) {
+        let pending_count_ok = check
+            .min_pending_items
+            .is_none_or(|minimum| items.len() >= minimum);
+        let missing_required_tags = check
+            .required_tags
+            .iter()
+            .filter(|tag| {
+                !items.iter().any(|item| {
+                    item.tags
+                        .iter()
+                        .any(|candidate| normalize(candidate) == normalize(tag))
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let missing_required_fragments = check
+            .required_fragments
+            .iter()
+            .filter(|fragment| {
+                !items
+                    .iter()
+                    .any(|item| normalize(&item.text).contains(&normalize(fragment)))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let present_forbidden_fragments = check
+            .forbidden_fragments
+            .iter()
+            .filter(|fragment| {
+                items
+                    .iter()
+                    .any(|item| normalize(&item.text).contains(&normalize(fragment)))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let criteria = ReviewCriteriaReport {
+            pending_item_count: items.len(),
+            min_pending_items: check.min_pending_items,
+            pending_count_ok,
+            missing_required_tags,
+            missing_required_fragments,
+            present_forbidden_fragments,
+        };
+        let passed = criteria.pending_count_ok
+            && criteria.missing_required_tags.is_empty()
+            && criteria.missing_required_fragments.is_empty()
+            && criteria.present_forbidden_fragments.is_empty();
+        (passed, criteria)
+    }
+
     fn fragment_present(fragment: &str, observed: &[ObservedHit], combined: &str) -> bool {
         let normalized_fragment = normalize(fragment);
         normalize(combined).contains(&normalized_fragment)
@@ -1872,6 +2010,9 @@ mod app {
     }
 
     fn to_eval_memory(record: &ScenarioRecord) -> Result<EvalMemory, Box<dyn std::error::Error>> {
+        let mut metadata = record.metadata.clone();
+        enrich_source_metadata(&record.source, &mut metadata);
+
         Ok(EvalMemory {
             id: None,
             text: record.text.clone(),
@@ -1880,8 +2021,67 @@ mod app {
             created_at: DateTime::parse_from_rfc3339(&record.timestamp)?.with_timezone(&Utc),
             valid_from: parse_optional_timestamp(record.valid_from.as_deref())?,
             valid_until: parse_optional_timestamp(record.valid_until.as_deref())?,
-            metadata: record.metadata.clone(),
+            metadata,
         })
+    }
+
+    fn enrich_source_metadata(source: &str, metadata: &mut HashMap<String, String>) {
+        let normalized = source.trim().to_lowercase();
+        if !metadata.contains_key("source_kind") {
+            let inferred_kind = if normalized.contains("maintainer") {
+                Some("maintainer")
+            } else if normalized.contains("forum") {
+                Some("forum-post")
+            } else if normalized.contains("copied-chat") || normalized.contains("copied") {
+                Some("copied-chat")
+            } else if normalized.contains("readme")
+                || normalized.contains("doc")
+                || normalized.contains("spec")
+            {
+                Some("project-doc")
+            } else if normalized.contains("observation")
+                || normalized.contains("terminal")
+                || normalized.contains("shell")
+            {
+                Some("local-observation")
+            } else if normalized.contains("note") {
+                Some("user-note")
+            } else {
+                None
+            };
+
+            if let Some(kind) = inferred_kind {
+                metadata.insert("source_kind".to_string(), kind.to_string());
+            }
+        }
+
+        if !metadata.contains_key("source_verification") {
+            let inferred_verification = if normalized.contains("maintainer") {
+                Some("verified")
+            } else if normalized.contains("forum") {
+                Some("unverified")
+            } else if normalized.contains("copied-chat") || normalized.contains("copied") {
+                Some("copied")
+            } else if normalized.contains("observation")
+                || normalized.contains("terminal")
+                || normalized.contains("shell")
+            {
+                Some("observed")
+            } else if normalized.contains("readme")
+                || normalized.contains("doc")
+                || normalized.contains("spec")
+            {
+                Some("verified")
+            } else if normalized.contains("note") {
+                Some("declared")
+            } else {
+                None
+            };
+
+            if let Some(verification) = inferred_verification {
+                metadata.insert("source_verification".to_string(), verification.to_string());
+            }
+        }
     }
 
     fn parse_optional_timestamp(
@@ -1937,6 +2137,7 @@ mod app {
         config: &Config,
         scenario_id: &str,
     ) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let run_suffix = format!("{}-{}", mode_name(config.mode), config.vector_mode);
         if let Some(base) = &config.db_path {
             if base.extension().is_some() {
                 let stem = base
@@ -1945,15 +2146,15 @@ mod app {
                     .unwrap_or("practical-eval");
                 let parent = base.parent().unwrap_or_else(|| Path::new("."));
                 fs::create_dir_all(parent)?;
-                return Ok(parent.join(format!("{stem}-{scenario_id}.db")));
+                return Ok(parent.join(format!("{stem}-{run_suffix}-{scenario_id}.db")));
             }
             fs::create_dir_all(base)?;
-            return Ok(base.join(format!("{scenario_id}.db")));
+            return Ok(base.join(format!("{run_suffix}-{scenario_id}.db")));
         }
 
         let root = PathBuf::from("target/practical-eval");
         fs::create_dir_all(&root)?;
-        Ok(root.join(format!("{scenario_id}.db")))
+        Ok(root.join(format!("{run_suffix}-{scenario_id}.db")))
     }
 
     fn expected_match(observed: &str, query: &str, expected: &str) -> bool {
