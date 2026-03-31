@@ -1935,6 +1935,41 @@ procedural note into the candidate set.
   practical `54/54` exact, practical `54/54` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 054: Add App-Facing Authority Defaults by Source Kind
+
+**Decision:** Extend `SourceAuthorityRegistry` so applications can declare
+authority by query domain and `source_kind`, not only by `source_chain`.
+
+**Context:** FeMind already supported centralized source-chain authority
+policies, which solved the case where records were tagged with a stable
+authority chain but not full per-record authority levels. That still left a
+practical gap for real apps:
+- many records already carry `source_kind`
+- many apps can declare domain defaults for kinds like `system`,
+  `project-doc`, or `maintainer`
+- those apps should not need to synthesize artificial `source_chain` values
+  onto every record just to participate in domain-aware authority arbitration
+
+**Consequences:**
+- `SourceAuthorityRegistry` now supports `source_kind` policies in addition to
+  `source_chain` policies
+- the engine builder now exposes:
+  - `authority_kind_policy(...)`
+  - `authoritative_source_kind(...)`
+  - `primary_source_kind(...)`
+- authority resolution now uses the strongest applicable level from:
+  - record metadata
+  - app-provided chain policy
+  - app-provided kind policy
+- the practical suite now includes `registry-kind-runtime-authority`, which
+  proves a runtime answer can win from app policy alone even when the records
+  carry no `source_chain` metadata
+- targeted engine tests now cover registry-backed kind promotion and mixed
+  chain-vs-kind precedence
+- Remote-GPU validation is green after the change:
+  practical `55/55` exact, practical `55/55` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

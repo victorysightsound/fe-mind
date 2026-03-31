@@ -34,8 +34,8 @@ pub use secret_policy::{
     query_requests_sensitive_secret_detail, redact_secret_material, secret_class_from_metadata,
 };
 pub use source_authority::{
-    SourceAuthorityDomain, SourceAuthorityLevel, SourceAuthorityPolicy, SourceAuthorityRegistry,
-    SourceAuthorityScorer,
+    SourceAuthorityDomain, SourceAuthorityKindPolicy, SourceAuthorityLevel, SourceAuthorityPolicy,
+    SourceAuthorityRegistry, SourceAuthorityScorer,
 };
 pub(crate) use source_authority::{
     infer_authority_domain, source_authority_rank, source_chain_for_domain,

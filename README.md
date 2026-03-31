@@ -27,8 +27,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `51/51`
-- retrieval-only practical eval in `ann` mode currently passes `51/51`
+- retrieval-only practical eval in `exact` mode currently passes `55/55`
+- retrieval-only practical eval in `ann` mode currently passes `55/55`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
@@ -197,8 +197,15 @@ The practical live-validation path is now established and repeatable:
   - `authority_registry(...)`
   - `authority_registry_arc(...)`
   - `authority_policy(...)`
+  - `authority_kind_policy(...)`
   - `authoritative_source_chain(...)`
   - `primary_source_chain(...)`
+  - `authoritative_source_kind(...)`
+  - `primary_source_kind(...)`
+- authority can now be supplied centrally by either:
+  - `source_chain` policy
+  - `source_kind` policy
+  so apps do not have to encode full authority metadata onto every record
 - when both record metadata and the application authority registry apply,
   FeMind uses the stronger authority level for that query domain
 - query routing now infers an authority domain for high-stakes procedural and

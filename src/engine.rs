@@ -14,13 +14,14 @@ use crate::reranking::RerankerRuntime;
 use crate::scoring::{
     CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
     ReviewApprovalTemplate, ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity,
-    ReviewStatus, SecretClass, SourceAuthorityDomain, SourceAuthorityPolicy,
-    SourceAuthorityRegistry, SourceProvenanceScorer, SourceTrustScorer, detect_review_flag,
-    effective_review_status, evidence_contains_secret_material, infer_authority_domain,
-    query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
-    query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
-    review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
-    source_authority_rank, source_provenance_rank, source_trust_level,
+    ReviewStatus, SecretClass, SourceAuthorityDomain, SourceAuthorityKindPolicy,
+    SourceAuthorityPolicy, SourceAuthorityRegistry, SourceProvenanceScorer, SourceTrustScorer,
+    detect_review_flag, effective_review_status, evidence_contains_secret_material,
+    infer_authority_domain, query_requests_private_infra_guidance,
+    query_requests_secret_location_or_reference, query_requests_sensitive_secret_detail,
+    redact_secret_material, review_expires_at, review_policy_class_matches_query,
+    review_scope_matches_query, secret_class_from_metadata, source_authority_rank,
+    source_provenance_rank, source_trust_level,
 };
 use crate::search::StableSummaryPolicy;
 use crate::search::builder::SearchBuilder;
@@ -4271,6 +4272,12 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
         self
     }
 
+    /// Add or replace one source-kind authority policy entry for the engine.
+    pub fn authority_kind_policy(mut self, policy: SourceAuthorityKindPolicy) -> Self {
+        Arc::make_mut(&mut self.authority_registry).add_kind_policy(policy);
+        self
+    }
+
     /// Mark a source chain as authoritative for a given domain.
     pub fn authoritative_source_chain(
         mut self,
@@ -4288,6 +4295,26 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
         chain: impl Into<String>,
     ) -> Self {
         Arc::make_mut(&mut self.authority_registry).set_primary(domain, chain);
+        self
+    }
+
+    /// Mark a source kind as authoritative for a given domain.
+    pub fn authoritative_source_kind(
+        mut self,
+        domain: SourceAuthorityDomain,
+        kind: impl Into<String>,
+    ) -> Self {
+        Arc::make_mut(&mut self.authority_registry).set_authoritative_kind(domain, kind);
+        self
+    }
+
+    /// Mark a source kind as primary for a given domain.
+    pub fn primary_source_kind(
+        mut self,
+        domain: SourceAuthorityDomain,
+        kind: impl Into<String>,
+    ) -> Self {
+        Arc::make_mut(&mut self.authority_registry).set_primary_kind(domain, kind);
         self
     }
 
@@ -6983,6 +7010,8 @@ mod tests {
         let engine = MemoryEngine::<TestMem>::builder()
             .authoritative_source_chain(SourceAuthorityDomain::RuntimeOps, "runtime-ops")
             .primary_source_chain(SourceAuthorityDomain::Deployment, "deployment-docs")
+            .authoritative_source_kind(SourceAuthorityDomain::RuntimeOps, "system")
+            .primary_source_kind(SourceAuthorityDomain::Deployment, "project-doc")
             .build()
             .expect("build");
 
@@ -6996,6 +7025,18 @@ mod tests {
             engine
                 .authority_registry()
                 .level_for_chain(SourceAuthorityDomain::Deployment, "deployment-docs"),
+            crate::scoring::SourceAuthorityLevel::Primary
+        );
+        assert_eq!(
+            engine
+                .authority_registry()
+                .level_for_kind(SourceAuthorityDomain::RuntimeOps, "system"),
+            crate::scoring::SourceAuthorityLevel::Authoritative
+        );
+        assert_eq!(
+            engine
+                .authority_registry()
+                .level_for_kind(SourceAuthorityDomain::Deployment, "project-doc"),
             crate::scoring::SourceAuthorityLevel::Primary
         );
     }

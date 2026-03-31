@@ -40,6 +40,7 @@ mod app {
     use femind::reranking::RemoteRerankerBackend;
     use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
     use femind::scoring::redact_secret_material;
+    use femind::scoring::{SourceAuthorityDomain, SourceAuthorityKindPolicy, SourceAuthorityLevel};
     use femind::search::{QueryIntent, QueryRoute, SearchMode, StableSummaryPolicy};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
@@ -129,6 +130,13 @@ mod app {
         from: String,
         to: String,
         relation: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ScenarioAuthorityKindPolicyConfig {
+        domain: String,
+        kind: String,
+        level: String,
     }
 
     #[derive(Debug, Deserialize)]
@@ -229,6 +237,8 @@ mod app {
         category: String,
         goal: String,
         records: Vec<ScenarioRecord>,
+        #[serde(default)]
+        authority_kind_policies: Vec<ScenarioAuthorityKindPolicyConfig>,
         #[serde(default)]
         relations: Vec<ScenarioRelation>,
         #[serde(default)]
@@ -1183,6 +1193,13 @@ mod app {
         }
         if let Some(backend) = reranker_backend {
             builder = builder.reranker_backend_arc(backend);
+        }
+        for policy in &scenario.authority_kind_policies {
+            builder = builder.authority_kind_policy(SourceAuthorityKindPolicy::new(
+                parse_authority_domain(&policy.domain)?,
+                &policy.kind,
+                parse_authority_level(&policy.level)?,
+            ));
         }
         let mut engine = builder.build()?;
         engine.config = EngineConfig {
@@ -2656,6 +2673,45 @@ mod app {
 
     fn parse_relation_type(value: &str) -> RelationType {
         RelationType::from_str(&value.to_lowercase())
+    }
+
+    fn parse_authority_domain(
+        value: &str,
+    ) -> Result<SourceAuthorityDomain, Box<dyn std::error::Error>> {
+        match value.trim().to_lowercase().as_str() {
+            "runtime" | "runtime-ops" | "runtime_ops" | "service-runtime" | "gpu-runtime" => {
+                Ok(SourceAuthorityDomain::RuntimeOps)
+            }
+            "deployment" | "startup" | "startup-path" | "service-hosting" | "host-placement" => {
+                Ok(SourceAuthorityDomain::Deployment)
+            }
+            "network" | "networking" | "network-ops" | "private-infra" | "infra-network" => {
+                Ok(SourceAuthorityDomain::Networking)
+            }
+            "security" | "auth" | "secrets" | "secret-management" => {
+                Ok(SourceAuthorityDomain::Security)
+            }
+            "build" | "toolchain" | "build-toolchain" | "ci-build" => {
+                Ok(SourceAuthorityDomain::BuildToolchain)
+            }
+            "maintenance" | "recovery" | "breakglass" | "cutover" => {
+                Ok(SourceAuthorityDomain::Maintenance)
+            }
+            other => Err(format!("unknown authority domain '{other}'").into()),
+        }
+    }
+
+    fn parse_authority_level(
+        value: &str,
+    ) -> Result<SourceAuthorityLevel, Box<dyn std::error::Error>> {
+        match value.trim().to_lowercase().as_str() {
+            "authoritative" | "authority" | "owner" => Ok(SourceAuthorityLevel::Authoritative),
+            "primary" | "preferred" => Ok(SourceAuthorityLevel::Primary),
+            "delegated" | "delegate" => Ok(SourceAuthorityLevel::Delegated),
+            "reference" | "advisory" | "fallback" => Ok(SourceAuthorityLevel::Reference),
+            "unknown" => Ok(SourceAuthorityLevel::Unknown),
+            other => Err(format!("unknown authority level '{other}'").into()),
+        }
     }
 
     fn load_scenarios(path: &Path) -> Result<Vec<Scenario>, Box<dyn std::error::Error>> {

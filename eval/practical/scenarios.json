@@ -516,6 +516,97 @@
     ]
   },
   {
+    "id": "registry-kind-runtime-authority",
+    "title": "Authority kind registry should prefer runtime guidance without source chains",
+    "category": "authority-registry",
+    "goal": "Let apps declare authority by domain and source kind so runtime guidance can win even when records have no source-chain metadata.",
+    "authority_kind_policies": [
+      {
+        "domain": "runtime",
+        "kind": "maintainer",
+        "level": "authoritative"
+      },
+      {
+        "domain": "deployment",
+        "kind": "project-doc",
+        "level": "authoritative"
+      }
+    ],
+    "records": [
+      {
+        "key": "kind-client",
+        "timestamp": "2026-03-31T09:06:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The current client path depends on whichever runtime note is actually supported on calvaryav now."
+      },
+      {
+        "key": "kind-link",
+        "timestamp": "2026-03-31T09:07:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The runtime question links both the active runtime note and the older bootstrap deployment note."
+      },
+      {
+        "key": "kind-runtime",
+        "timestamp": "2026-03-31T09:08:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared"
+        },
+        "text": "Supported runtime path: run femind-embed-service as a native Windows scheduled task on the GPU host."
+      },
+      {
+        "key": "kind-deployment",
+        "timestamp": "2026-03-31T09:09:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified"
+        },
+        "text": "Supported deployment bootstrap path: keep femind-embed-service running inside WSL systemd on the GPU host before the Windows session starts."
+      }
+    ],
+    "relations": [
+      {
+        "from": "kind-client",
+        "to": "kind-link",
+        "relation": "related_to"
+      },
+      {
+        "from": "kind-link",
+        "to": "kind-runtime",
+        "relation": "depends_on"
+      },
+      {
+        "from": "kind-link",
+        "to": "kind-deployment",
+        "relation": "depends_on"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How does Librona reach the supported runtime path on calvaryav now?",
+        "expected_answer": "Run femind-embed-service as a native Windows scheduled task on the GPU host.",
+        "expected_graph_depth": 2,
+        "top_k": 1,
+        "required_fragments": [
+          "native Windows scheduled task",
+          "GPU host"
+        ],
+        "forbidden_fragments": [
+          "WSL systemd"
+        ],
+        "min_observed_hits": 1
+      }
+    ]
+  },
+  {
     "id": "graph-verified-private-network-guidance",
     "title": "Graph-linked private network guidance should prefer the fully verified subnet",
     "category": "multi-hop-graph",

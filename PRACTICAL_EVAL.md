@@ -154,9 +154,11 @@ Each scenario should include:
   - `source_authority_domain`
   - `source_authority_level`
   - `source_chain`
+  - `source_kind`
 - application-facing authority policy can also be supplied once at engine
   build time through `SourceAuthorityRegistry`, so records that only declare
-  `source_chain` can still participate in authority arbitration
+  `source_chain` or `source_kind` can still participate in authority
+  arbitration
 - high-impact review policy examples now include:
   - auth bypass exceptions
   - destructive reset windows
@@ -438,8 +440,12 @@ Current validated baseline:
   - graph-linked client questions can route with `graph_depth = 2`
   - the authoritative runtime chain can still win after graph expansion pulls
     both runtime and deployment guidance into the evidence set
+  - app-facing authority policy can also promote the runtime answer from
+    `source_kind` defaults alone, without per-record `source_chain` metadata
 - targeted engine tests now also prove the application-facing authority
-  registry works even when records only carry `source_chain`
+  registry works when records carry:
+  - `source_chain`
+  - `source_kind`
 
 This exact-mode practical run is the standard local regression check before
 trying wider live usage samples or ANN comparisons.

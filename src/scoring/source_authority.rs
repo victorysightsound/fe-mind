@@ -9,6 +9,7 @@ use crate::traits::{MemoryMeta, ScoringStrategy};
 /// - `source_authority_domains`: comma/semicolon/pipe separated domain tags
 /// - `source_authority_level`: `authoritative` | `primary` | `delegated` | `reference`
 /// - `source_chain`: stable source-chain identifier for arbitration
+/// - `source_kind`: stable source-kind identifier for app-facing domain defaults
 ///
 /// Applications can also provide a [`SourceAuthorityRegistry`] at engine build
 /// time so authority can be defined centrally rather than only on individual
@@ -144,9 +145,31 @@ impl SourceAuthorityPolicy {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceAuthorityKindPolicy {
+    pub domain: SourceAuthorityDomain,
+    pub kind: String,
+    pub level: SourceAuthorityLevel,
+}
+
+impl SourceAuthorityKindPolicy {
+    pub fn new(
+        domain: SourceAuthorityDomain,
+        kind: impl Into<String>,
+        level: SourceAuthorityLevel,
+    ) -> Self {
+        Self {
+            domain,
+            kind: normalize_tag(&kind.into()),
+            level,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceAuthorityRegistry {
     policies: Vec<SourceAuthorityPolicy>,
+    kind_policies: Vec<SourceAuthorityKindPolicy>,
 }
 
 impl SourceAuthorityRegistry {
@@ -158,8 +181,17 @@ impl SourceAuthorityRegistry {
         &self.policies
     }
 
+    pub fn kind_policies(&self) -> &[SourceAuthorityKindPolicy] {
+        &self.kind_policies
+    }
+
     pub fn with_policy(mut self, policy: SourceAuthorityPolicy) -> Self {
         self.add_policy(policy);
+        self
+    }
+
+    pub fn with_kind_policy(mut self, policy: SourceAuthorityKindPolicy) -> Self {
+        self.add_kind_policy(policy);
         self
     }
 
@@ -176,6 +208,23 @@ impl SourceAuthorityRegistry {
 
         self.policies.push(SourceAuthorityPolicy {
             chain: normalized_chain,
+            ..policy
+        });
+    }
+
+    pub fn add_kind_policy(&mut self, policy: SourceAuthorityKindPolicy) {
+        let normalized_kind = normalize_tag(&policy.kind);
+        if let Some(existing) = self
+            .kind_policies
+            .iter_mut()
+            .find(|existing| existing.domain == policy.domain && existing.kind == normalized_kind)
+        {
+            existing.level = policy.level;
+            return;
+        }
+
+        self.kind_policies.push(SourceAuthorityKindPolicy {
+            kind: normalized_kind,
             ..policy
         });
     }
@@ -206,6 +255,32 @@ impl SourceAuthorityRegistry {
         self.set_chain(domain, chain, SourceAuthorityLevel::Primary)
     }
 
+    pub fn set_kind(
+        &mut self,
+        domain: SourceAuthorityDomain,
+        kind: impl Into<String>,
+        level: SourceAuthorityLevel,
+    ) -> &mut Self {
+        self.add_kind_policy(SourceAuthorityKindPolicy::new(domain, kind, level));
+        self
+    }
+
+    pub fn set_authoritative_kind(
+        &mut self,
+        domain: SourceAuthorityDomain,
+        kind: impl Into<String>,
+    ) -> &mut Self {
+        self.set_kind(domain, kind, SourceAuthorityLevel::Authoritative)
+    }
+
+    pub fn set_primary_kind(
+        &mut self,
+        domain: SourceAuthorityDomain,
+        kind: impl Into<String>,
+    ) -> &mut Self {
+        self.set_kind(domain, kind, SourceAuthorityLevel::Primary)
+    }
+
     pub fn level_for_chain(
         &self,
         domain: SourceAuthorityDomain,
@@ -215,6 +290,20 @@ impl SourceAuthorityRegistry {
         self.policies
             .iter()
             .filter(|policy| policy.domain == domain && policy.chain == normalized)
+            .map(|policy| policy.level)
+            .max()
+            .unwrap_or(SourceAuthorityLevel::Unknown)
+    }
+
+    pub fn level_for_kind(
+        &self,
+        domain: SourceAuthorityDomain,
+        kind: &str,
+    ) -> SourceAuthorityLevel {
+        let normalized = normalize_tag(kind);
+        self.kind_policies
+            .iter()
+            .filter(|policy| policy.domain == domain && policy.kind == normalized)
             .map(|policy| policy.level)
             .max()
             .unwrap_or(SourceAuthorityLevel::Unknown)
@@ -381,8 +470,12 @@ pub(crate) fn source_authority_level_for_domain(
         .as_deref()
         .map(|chain| source_authority_level_from_registry(domain, chain, registry))
         .unwrap_or(SourceAuthorityLevel::Unknown);
+    let registry_kind_level = record_source_kind(record)
+        .as_deref()
+        .map(|kind| source_authority_kind_level_from_registry(domain, kind, registry))
+        .unwrap_or(SourceAuthorityLevel::Unknown);
 
-    metadata_level.max(registry_level)
+    metadata_level.max(registry_level).max(registry_kind_level)
 }
 
 fn source_authority_domains(record: &MemoryMeta) -> Vec<SourceAuthorityDomain> {
@@ -410,6 +503,15 @@ fn record_source_chain(record: &MemoryMeta) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn record_source_kind(record: &MemoryMeta) -> Option<String> {
+    record
+        .metadata
+        .get("source_kind")
+        .or_else(|| record.metadata.get("authority_kind"))
+        .map(|value| normalize_tag(value))
+        .filter(|value| !value.is_empty())
+}
+
 fn source_authority_level_from_registry(
     domain: SourceAuthorityDomain,
     chain: &str,
@@ -417,6 +519,16 @@ fn source_authority_level_from_registry(
 ) -> SourceAuthorityLevel {
     registry
         .map(|registry| registry.level_for_chain(domain, chain))
+        .unwrap_or(SourceAuthorityLevel::Unknown)
+}
+
+fn source_authority_kind_level_from_registry(
+    domain: SourceAuthorityDomain,
+    kind: &str,
+    registry: Option<&SourceAuthorityRegistry>,
+) -> SourceAuthorityLevel {
+    registry
+        .map(|registry| registry.level_for_kind(domain, kind))
         .unwrap_or(SourceAuthorityLevel::Unknown)
 }
 
@@ -506,6 +618,7 @@ mod tests {
         authority_domain: Option<&str>,
         authority_level: Option<&str>,
         source_chain: Option<&str>,
+        source_kind: Option<&str>,
     ) -> MemoryMeta {
         let mut metadata = HashMap::new();
         if let Some(authority_domain) = authority_domain {
@@ -522,6 +635,9 @@ mod tests {
         }
         if let Some(source_chain) = source_chain {
             metadata.insert("source_chain".to_string(), source_chain.to_string());
+        }
+        if let Some(source_kind) = source_kind {
+            metadata.insert("source_kind".to_string(), source_kind.to_string());
         }
 
         MemoryMeta {
@@ -545,7 +661,12 @@ mod tests {
 
     #[test]
     fn source_authority_rank_requires_domain_match() {
-        let record = meta(Some("runtime"), Some("authoritative"), Some("runtime-ops"));
+        let record = meta(
+            Some("runtime"),
+            Some("authoritative"),
+            Some("runtime-ops"),
+            None,
+        );
 
         assert_eq!(
             source_authority_rank(&record, Some(SourceAuthorityDomain::RuntimeOps), None),
@@ -563,6 +684,7 @@ mod tests {
             Some("runtime"),
             Some("primary"),
             Some("platform-runtime-chain"),
+            None,
         );
 
         assert_eq!(
@@ -577,7 +699,7 @@ mod tests {
 
     #[test]
     fn registry_can_promote_chain_without_record_domain_metadata() {
-        let record = meta(None, None, Some("runtime-ops"));
+        let record = meta(None, None, Some("runtime-ops"), None);
         let registry = SourceAuthorityRegistry::new().with_policy(SourceAuthorityPolicy::new(
             SourceAuthorityDomain::RuntimeOps,
             "runtime-ops",
@@ -596,12 +718,57 @@ mod tests {
 
     #[test]
     fn registry_and_metadata_use_the_stronger_authority_level() {
-        let record = meta(Some("runtime"), Some("primary"), Some("runtime-ops"));
+        let record = meta(Some("runtime"), Some("primary"), Some("runtime-ops"), None);
         let registry = SourceAuthorityRegistry::new().with_policy(SourceAuthorityPolicy::new(
             SourceAuthorityDomain::RuntimeOps,
             "runtime-ops",
             SourceAuthorityLevel::Authoritative,
         ));
+
+        assert_eq!(
+            source_authority_level_for_domain(
+                &record,
+                Some(SourceAuthorityDomain::RuntimeOps),
+                Some(&registry),
+            ),
+            SourceAuthorityLevel::Authoritative
+        );
+    }
+
+    #[test]
+    fn registry_can_promote_kind_without_chain_metadata() {
+        let record = meta(None, None, None, Some("system"));
+        let registry =
+            SourceAuthorityRegistry::new().with_kind_policy(SourceAuthorityKindPolicy::new(
+                SourceAuthorityDomain::RuntimeOps,
+                "system",
+                SourceAuthorityLevel::Authoritative,
+            ));
+
+        assert_eq!(
+            source_authority_rank(
+                &record,
+                Some(SourceAuthorityDomain::RuntimeOps),
+                Some(&registry),
+            ),
+            100
+        );
+    }
+
+    #[test]
+    fn registry_prefers_stronger_of_kind_and_chain_policies() {
+        let record = meta(None, None, Some("runtime-ops"), Some("maintainer"));
+        let registry = SourceAuthorityRegistry::new()
+            .with_policy(SourceAuthorityPolicy::new(
+                SourceAuthorityDomain::RuntimeOps,
+                "runtime-ops",
+                SourceAuthorityLevel::Primary,
+            ))
+            .with_kind_policy(SourceAuthorityKindPolicy::new(
+                SourceAuthorityDomain::RuntimeOps,
+                "maintainer",
+                SourceAuthorityLevel::Authoritative,
+            ));
 
         assert_eq!(
             source_authority_level_for_domain(
