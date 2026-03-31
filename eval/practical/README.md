@@ -47,6 +47,19 @@ Each scenario includes:
 - optional `review_checks[].required_tags`
 - optional `review_checks[].required_fragments`
 - optional `review_checks[].forbidden_fragments`
+- optional `reflection`
+- optional `reflection.min_support_count`
+- optional `reflection.min_trusted_support_count`
+- optional `reflection.max_objects`
+- optional `reflection_checks`
+- optional `reflection_checks[].key`
+- optional `reflection_checks[].expected_summary`
+- optional `reflection_checks[].expected_kind`
+- optional `reflection_checks[].min_support_count`
+- optional `reflection_checks[].min_trusted_support_count`
+- optional `reflection_checks[].min_confidence`
+- optional `reflection_checks[].required_fragments`
+- optional `reflection_checks[].forbidden_fragments`
 
 Useful review metadata keys for scenario records:
 
@@ -78,6 +91,12 @@ Common provenance / sensitivity values now covered in the suite:
 - `content_secret_class`: `credential-location`, `credential-material`,
   `secret-reference`, `private-endpoint`, `internal-hostname`,
   `internal-share-path`, `private-network-range`
+
+Common reflection metadata keys now covered in the suite:
+
+- `knowledge_key`
+- `knowledge_summary`
+- `knowledge_kind`
 
 ## Review Workflow
 
@@ -177,8 +196,12 @@ Current local baseline:
 - the practical set now also includes higher-impact approval-class routing for
   auth bypass, destructive resets, and traffic cutovers, plus pending-review
   detection for those note types
-- reranker-aware remote-fallback regression is currently green at `41/41`
-- reranker-aware remote-fallback ANN regression is also green at `41/41`
+- reranker-aware remote-fallback regression is currently green at `43/43`
+- reranker-aware remote-fallback ANN regression is also green at `43/43`
+- the practical set now also validates deterministic reflection over repeated
+  trusted evidence for:
+  - stable supported procedures
+  - stable current decisions
 - latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

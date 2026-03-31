@@ -23,7 +23,9 @@ mod app {
     use femind::embeddings::RemoteEmbeddingBackend;
     #[cfg(feature = "local-embeddings")]
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
-    use femind::engine::{EngineConfig, MemoryEngine, ReviewItem, VectorSearchMode};
+    use femind::engine::{
+        EngineConfig, KnowledgeObject, MemoryEngine, ReflectionConfig, ReviewItem, VectorSearchMode,
+    };
     #[cfg(feature = "api-llm")]
     use femind::llm::ApiLlmCallback;
     #[cfg(feature = "cli-llm")]
@@ -170,6 +172,34 @@ mod app {
         forbidden_fragments: Vec<String>,
     }
 
+    #[derive(Debug, Deserialize, Default)]
+    struct ScenarioReflectionConfig {
+        #[serde(default)]
+        min_support_count: Option<usize>,
+        #[serde(default)]
+        min_trusted_support_count: Option<usize>,
+        #[serde(default)]
+        max_objects: Option<usize>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ReflectionCheck {
+        key: String,
+        expected_summary: String,
+        #[serde(default)]
+        expected_kind: Option<String>,
+        #[serde(default)]
+        min_support_count: Option<usize>,
+        #[serde(default)]
+        min_trusted_support_count: Option<usize>,
+        #[serde(default)]
+        min_confidence: Option<String>,
+        #[serde(default)]
+        required_fragments: Vec<String>,
+        #[serde(default)]
+        forbidden_fragments: Vec<String>,
+    }
+
     #[derive(Debug, Deserialize)]
     struct Scenario {
         id: String,
@@ -189,6 +219,10 @@ mod app {
         abstention_checks: Vec<AbstentionCheck>,
         #[serde(default)]
         review_checks: Vec<ReviewCheck>,
+        #[serde(default)]
+        reflection: ScenarioReflectionConfig,
+        #[serde(default)]
+        reflection_checks: Vec<ReflectionCheck>,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -761,6 +795,31 @@ mod app {
         present_forbidden_fragments: Vec<String>,
     }
 
+    #[derive(Debug, Serialize, Clone)]
+    struct KnowledgeObjectReport {
+        key: String,
+        summary: String,
+        kind: String,
+        confidence: String,
+        support_count: usize,
+        trusted_support_count: usize,
+        source_ids: Vec<i64>,
+    }
+
+    #[derive(Debug, Serialize)]
+    struct ReflectionCriteriaReport {
+        found: bool,
+        summary_match: bool,
+        kind_ok: bool,
+        support_ok: bool,
+        trusted_support_ok: bool,
+        confidence_ok: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        missing_required_fragments: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        present_forbidden_fragments: Vec<String>,
+    }
+
     struct RetrievalObservation {
         observed: Vec<ObservedHit>,
         observed_hit_count: usize,
@@ -796,6 +855,17 @@ mod app {
     }
 
     #[derive(Debug, Serialize)]
+    struct ReflectionReport {
+        passed: bool,
+        key: String,
+        expected: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        matched: Option<KnowledgeObjectReport>,
+        observed: Vec<KnowledgeObjectReport>,
+        criteria: ReflectionCriteriaReport,
+    }
+
+    #[derive(Debug, Serialize)]
     struct ScenarioReport {
         id: String,
         title: String,
@@ -805,6 +875,7 @@ mod app {
         extraction: Vec<CheckReport>,
         abstention: Vec<CheckReport>,
         review: Vec<ReviewReport>,
+        reflection: Vec<ReflectionReport>,
     }
 
     #[derive(Debug, Serialize)]
@@ -928,12 +999,14 @@ mod app {
                 .chain(report.abstention.iter())
                 .map(|c| c.passed)
                 .chain(report.review.iter().map(|c| c.passed))
+                .chain(report.reflection.iter().map(|c| c.passed))
                 .filter(|passed| *passed)
                 .count();
             let scenario_total = report.retrieval.len()
                 + report.extraction.len()
                 + report.abstention.len()
-                + report.review.len();
+                + report.review.len()
+                + report.reflection.len();
             passed_checks += scenario_passed;
             total_checks += scenario_total;
 
@@ -1222,6 +1295,37 @@ mod app {
             }
         }
 
+        let mut reflection = Vec::new();
+        if matches!(config.mode, EvalMode::Retrieval | EvalMode::All)
+            && !scenario.reflection_checks.is_empty()
+        {
+            let reflection_config = ReflectionConfig {
+                min_support_count: scenario.reflection.min_support_count.unwrap_or(2),
+                min_trusted_support_count: scenario
+                    .reflection
+                    .min_trusted_support_count
+                    .unwrap_or(1),
+                max_objects: scenario.reflection.max_objects.unwrap_or(12),
+            };
+            let objects = engine.reflect_knowledge_objects(&reflection_config)?;
+            let observed = objects
+                .iter()
+                .map(knowledge_object_report)
+                .collect::<Vec<_>>();
+
+            for check in &scenario.reflection_checks {
+                let (passed, criteria, matched) = evaluate_reflection_check(&objects, check);
+                reflection.push(ReflectionReport {
+                    passed,
+                    key: check.key.clone(),
+                    expected: check.expected_summary.clone(),
+                    matched: matched.map(knowledge_object_report),
+                    observed: observed.clone(),
+                    criteria,
+                });
+            }
+        }
+
         Ok(ScenarioReport {
             id: scenario.id.clone(),
             title: scenario.title.clone(),
@@ -1231,6 +1335,7 @@ mod app {
             extraction,
             abstention,
             review,
+            reflection,
         })
     }
 
@@ -1305,10 +1410,29 @@ mod app {
             let review_passed = report.review.iter().filter(|check| check.passed).count();
             record_stat(&mut check_type_stats, "review", review_total, review_passed);
 
-            let scenario_total =
-                retrieval_total + extraction_total + abstention_total + review_total;
-            let scenario_passed =
-                retrieval_passed + extraction_passed + abstention_passed + review_passed;
+            let reflection_total = report.reflection.len();
+            let reflection_passed = report
+                .reflection
+                .iter()
+                .filter(|check| check.passed)
+                .count();
+            record_stat(
+                &mut check_type_stats,
+                "reflection",
+                reflection_total,
+                reflection_passed,
+            );
+
+            let scenario_total = retrieval_total
+                + extraction_total
+                + abstention_total
+                + review_total
+                + reflection_total;
+            let scenario_passed = retrieval_passed
+                + extraction_passed
+                + abstention_passed
+                + review_passed
+                + reflection_passed;
             record_stat(
                 &mut category_stats,
                 &report.category,
@@ -1874,6 +1998,100 @@ mod app {
             && criteria.missing_required_fragments.is_empty()
             && criteria.present_forbidden_fragments.is_empty();
         (passed, criteria)
+    }
+
+    fn knowledge_object_report(object: &KnowledgeObject) -> KnowledgeObjectReport {
+        KnowledgeObjectReport {
+            key: object.key.clone(),
+            summary: object.summary.clone(),
+            kind: object.kind.to_string(),
+            confidence: object.confidence.as_str().to_string(),
+            support_count: object.support_count,
+            trusted_support_count: object.trusted_support_count,
+            source_ids: object.source_ids.clone(),
+        }
+    }
+
+    fn evaluate_reflection_check<'a>(
+        objects: &'a [KnowledgeObject],
+        check: &ReflectionCheck,
+    ) -> (bool, ReflectionCriteriaReport, Option<&'a KnowledgeObject>) {
+        let matched = objects
+            .iter()
+            .find(|object| normalize(&object.key) == normalize(&check.key));
+
+        let summary_match = matched.is_some_and(|object| {
+            expected_match(&object.summary, &check.key, &check.expected_summary)
+        });
+        let kind_ok = matched.is_none_or(|object| {
+            check.expected_kind.as_ref().is_none_or(|expected_kind| {
+                normalize(&object.kind.to_string()) == normalize(expected_kind)
+            })
+        });
+        let support_ok = matched.is_none_or(|object| {
+            check
+                .min_support_count
+                .is_none_or(|minimum| object.support_count >= minimum)
+        });
+        let trusted_support_ok = matched.is_none_or(|object| {
+            check
+                .min_trusted_support_count
+                .is_none_or(|minimum| object.trusted_support_count >= minimum)
+        });
+        let confidence_ok = matched.is_none_or(|object| {
+            check.min_confidence.as_ref().is_none_or(|minimum| {
+                confidence_rank(object.confidence.as_str()) >= confidence_rank(minimum)
+            })
+        });
+        let missing_required_fragments = matched
+            .map(|object| {
+                check
+                    .required_fragments
+                    .iter()
+                    .filter(|fragment| !normalize(&object.summary).contains(&normalize(fragment)))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| check.required_fragments.clone());
+        let present_forbidden_fragments = matched
+            .map(|object| {
+                check
+                    .forbidden_fragments
+                    .iter()
+                    .filter(|fragment| normalize(&object.summary).contains(&normalize(fragment)))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let criteria = ReflectionCriteriaReport {
+            found: matched.is_some(),
+            summary_match,
+            kind_ok,
+            support_ok,
+            trusted_support_ok,
+            confidence_ok,
+            missing_required_fragments,
+            present_forbidden_fragments,
+        };
+        let passed = criteria.found
+            && criteria.summary_match
+            && criteria.kind_ok
+            && criteria.support_ok
+            && criteria.trusted_support_ok
+            && criteria.confidence_ok
+            && criteria.missing_required_fragments.is_empty()
+            && criteria.present_forbidden_fragments.is_empty();
+
+        (passed, criteria, matched)
+    }
+
+    fn confidence_rank(value: &str) -> u8 {
+        match normalize(value).as_str() {
+            "high" => 2,
+            "medium" => 1,
+            _ => 0,
+        }
     }
 
     fn fragment_present(fragment: &str, observed: &[ObservedHit], combined: &str) -> bool {

@@ -185,10 +185,13 @@ Current status after the 2026-03-30 trust/safety pass:
   suppress generic defaults or weaker workaround notes when the query is
   explicit
 - the current remote-GPU engine-first baseline is:
-  - practical `41/41` exact
-  - practical `41/41` ann
+  - practical `43/43` exact
+  - practical `43/43` ann
   - live-library `58/58` exact
   - memloft-slice `90/90` exact
+- the practical suite now also validates deterministic reflection over repeated
+  trusted evidence, which is the current low-risk path toward higher-order
+  stable knowledge synthesis without reviving benchmark-driven iteration
 
 ### 6. Keep Evaluation Engine-Centric
 

@@ -1364,6 +1364,63 @@ The remaining gap was narrower but important:
 
 ---
 
+## Decision 042: Start Reflection with Deterministic Knowledge Objects
+
+**Date:** 2026-03-30
+
+**Decision:** Implement the first reflection pass as deterministic,
+metadata-assisted knowledge-object synthesis in the engine, and validate it in
+the engine-first practical loop instead of persisting opaque internal
+reflection rows or tying reflection to benchmark-style iteration.
+
+**Context:** FeMind already had strong routed retrieval, temporal/current-state
+policy, aggregation, graph expansion, grounded composition, and safety rules.
+The next quality gap was higher-order stable knowledge: repeated trusted
+evidence should be able to collapse into durable, inspectable objects such as a
+stable supported procedure or stable current decision. The existing
+`MemoryRecord` model is consumer-defined, so storing internal reflection rows
+directly would risk breaking `record_json` deserialization for consumers.
+
+**Rationale:**
+- deterministic reflection gives FeMind a real higher-order memory layer now
+  without reintroducing expensive benchmark loops
+- metadata-assisted synthesis keeps the first pass precise and inspectable:
+  `knowledge_key`, `knowledge_summary`, and `knowledge_kind` tell the engine
+  how repeated evidence should cluster
+- returning knowledge objects instead of persisting internal rows avoids
+  corrupting the generic consumer storage contract before a safe persistence
+  design exists
+- reflection belongs in the same engine-first eval loop as retrieval and safety,
+  not in an external benchmark harness
+
+**Consequences:**
+- the engine now exposes deterministic reflection through
+  `reflect_knowledge_objects(&ReflectionConfig)`
+- reflected objects carry:
+  - key
+  - summary
+  - kind
+  - confidence
+  - support counts
+  - trusted support counts
+  - source IDs
+- reflection filters out:
+  - untrusted evidence
+  - pending / denied / expired review items
+  - secret-bearing or sensitive-infrastructure memories
+- the practical eval harness now supports:
+  - scenario-level `reflection` config
+  - `reflection_checks`
+  - reflection-specific reporting and pass/fail criteria
+- practical coverage now includes deterministic reflection for:
+  - stable supported startup procedures
+  - stable engine-first evaluation strategy decisions
+- Remote-GPU validation is green after the change:
+  practical `43/43` exact, practical `43/43` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing
@@ -1390,6 +1447,11 @@ The three existing types (Episodic/Semantic/Procedural) cover all common agent m
 
 ### Q4: Reflection Operation
 
-**Status:** Decided — YES (Decision 018)
+**Status:** Partially implemented — deterministic pass shipped (Decision 042)
 
-Hindsight research demonstrates agent behavior degenerates within 48 hours without periodic reflection. The `reflect()` method is already in the public API design. Implementation depends on `LlmCallback` trait (Decision 015), so it's naturally late in the build order (Phase 14+). The `reflect()` method synthesizes higher-order insights from memory clusters, stored as Semantic Tier 2 memories with provenance links.
+FeMind now has a deterministic, metadata-assisted reflection pass through
+`reflect_knowledge_objects(&ReflectionConfig)`. The current implementation
+returns stable knowledge objects with provenance and support counts, but it does
+not yet persist derived reflection rows into consumer storage. Optional
+LLM-assisted or persisted reflection remains future work and should only land
+once FeMind has a consumer-safe persistence contract for derived knowledge.

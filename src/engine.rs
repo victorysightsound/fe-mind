@@ -140,8 +140,76 @@ pub struct ReviewResolution {
     pub replaced_by: Option<i64>,
 }
 
+/// High-level derived knowledge categories produced by deterministic reflection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum KnowledgeObjectKind {
+    StableFact,
+    StablePreference,
+    StableDecision,
+    StableProcedure,
+}
+
+impl KnowledgeObjectKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::StableFact => "stable-fact",
+            Self::StablePreference => "stable-preference",
+            Self::StableDecision => "stable-decision",
+            Self::StableProcedure => "stable-procedure",
+        }
+    }
+}
+
+impl std::fmt::Display for KnowledgeObjectKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Runtime configuration for deterministic reflection.
+#[derive(Debug, Clone)]
+pub struct ReflectionConfig {
+    /// Minimum number of supporting memories required before emitting a knowledge object.
+    pub min_support_count: usize,
+    /// Minimum number of trusted or normal-trust supports required.
+    pub min_trusted_support_count: usize,
+    /// Maximum number of knowledge objects to return.
+    pub max_objects: usize,
+}
+
+impl Default for ReflectionConfig {
+    fn default() -> Self {
+        Self {
+            min_support_count: 2,
+            min_trusted_support_count: 1,
+            max_objects: 12,
+        }
+    }
+}
+
+/// Deterministically derived knowledge object synthesized from repeated evidence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct KnowledgeObject {
+    /// Stable grouping key for the derived knowledge.
+    pub key: String,
+    /// Derived summary text.
+    pub summary: String,
+    /// High-level knowledge category.
+    pub kind: KnowledgeObjectKind,
+    /// Confidence in the reflected object.
+    pub confidence: CompositionConfidence,
+    /// Number of supporting records for the chosen summary cluster.
+    pub support_count: usize,
+    /// Number of trusted or normal-trust supports in the chosen cluster.
+    pub trusted_support_count: usize,
+    /// Database row IDs of supporting memories.
+    pub source_ids: Vec<i64>,
+    /// When the knowledge object was generated.
+    pub generated_at: DateTime<Utc>,
+}
+
 /// Confidence label for deterministic composed answers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CompositionConfidence {
     Low,
     Medium,
@@ -1658,6 +1726,56 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         })
     }
 
+    /// Deterministically synthesize stable knowledge objects from repeated evidence.
+    ///
+    /// Reflection is intentionally metadata-assisted in this first pass. It prefers
+    /// records carrying `knowledge_key`, `knowledge_summary`, or `knowledge_kind`,
+    /// and falls back to lightweight subject-label heuristics when that metadata is
+    /// absent. Reflected objects are returned to the caller but not persisted yet,
+    /// which avoids forcing an opaque internal record shape into consumer-defined
+    /// `MemoryRecord` storage.
+    pub fn reflect_knowledge_objects(
+        &self,
+        config: &ReflectionConfig,
+    ) -> Result<Vec<KnowledgeObject>> {
+        let now = Utc::now();
+        let candidates = self.load_reflection_candidates(now)?;
+        let mut buckets = std::collections::HashMap::<String, Vec<ReflectionCluster>>::new();
+
+        for candidate in candidates {
+            let clusters = buckets.entry(candidate.key.clone()).or_default();
+            if let Some(existing) = clusters
+                .iter_mut()
+                .find(|cluster| cluster.summary_key == candidate.summary_key)
+            {
+                existing.absorb(candidate);
+            } else {
+                clusters.push(ReflectionCluster::from_candidate(candidate));
+            }
+        }
+
+        let mut objects = buckets
+            .into_iter()
+            .filter_map(|(key, clusters)| {
+                clusters
+                    .into_iter()
+                    .filter(|cluster| cluster.qualifies(config))
+                    .max_by(ReflectionCluster::compare_rank)
+                    .map(|cluster| cluster.into_knowledge_object(key, config, now))
+            })
+            .collect::<Vec<_>>();
+
+        objects.sort_by(|left, right| {
+            reflection_confidence_rank(right.confidence)
+                .cmp(&reflection_confidence_rank(left.confidence))
+                .then(right.trusted_support_count.cmp(&left.trusted_support_count))
+                .then(right.support_count.cmp(&left.support_count))
+                .then(left.key.cmp(&right.key))
+        });
+        objects.truncate(config.max_objects);
+        Ok(objects)
+    }
+
     /// Compose a grounded answer from routed retrieval evidence without using an LLM.
     pub fn compose_answer_with_config(
         &self,
@@ -1965,6 +2083,113 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         })
     }
 
+    fn load_reflection_candidates(&self, now: DateTime<Utc>) -> Result<Vec<ReflectionCandidate>> {
+        self.db.with_reader(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, searchable_text, memory_type, importance, category, created_at, metadata_json
+                 FROM memories
+                 WHERE searchable_text IS NOT NULL
+                 ORDER BY created_at DESC, id DESC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, u8>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            })?;
+
+            let mut candidates = Vec::new();
+            for row in rows {
+                let (
+                    memory_id,
+                    text,
+                    memory_type_raw,
+                    importance,
+                    category,
+                    created_at_raw,
+                    metadata_json,
+                ) = row?;
+                if text.trim().is_empty() {
+                    continue;
+                }
+
+                let metadata = metadata_json
+                    .as_deref()
+                    .and_then(|json| {
+                        serde_json::from_str::<std::collections::HashMap<String, String>>(json).ok()
+                    })
+                    .unwrap_or_default();
+
+                if metadata
+                    .get("derived_kind")
+                    .is_some_and(|value| value.eq_ignore_ascii_case("reflection"))
+                {
+                    continue;
+                }
+                if evidence_contains_secret_material(&text, &metadata)
+                    || secret_class_from_metadata(&metadata).is_some()
+                {
+                    continue;
+                }
+
+                let memory_type = crate::traits::MemoryType::from_str(&memory_type_raw)
+                    .unwrap_or(crate::traits::MemoryType::Semantic);
+                let created_at = DateTime::parse_from_rfc3339(&created_at_raw)
+                    .map(|value| value.with_timezone(&Utc))
+                    .unwrap_or(now);
+                let meta = MemoryMeta {
+                    id: Some(memory_id),
+                    searchable_text: text.clone(),
+                    memory_type,
+                    importance,
+                    category,
+                    created_at,
+                    metadata: metadata.clone(),
+                };
+
+                if matches!(
+                    effective_review_status(&metadata, now),
+                    Some(ReviewStatus::Pending | ReviewStatus::Denied | ReviewStatus::Expired)
+                ) {
+                    continue;
+                }
+                if matches!(source_trust_level(&meta), crate::scoring::SourceTrustLevel::Untrusted)
+                {
+                    continue;
+                }
+
+                let Some(key) = reflection_key(&text, &metadata) else {
+                    continue;
+                };
+                let Some(summary) = reflection_summary(&text, &metadata) else {
+                    continue;
+                };
+
+                candidates.push(ReflectionCandidate {
+                    memory_id,
+                    key,
+                    summary_key: normalize_reflection_value(&summary),
+                    summary,
+                    kind: reflection_kind(memory_type, &text, &metadata),
+                    created_at,
+                    trusted_support: matches!(
+                        source_trust_level(&meta),
+                        crate::scoring::SourceTrustLevel::Trusted
+                            | crate::scoring::SourceTrustLevel::Normal
+                    ),
+                    provenance_rank: source_provenance_rank(&meta),
+                });
+            }
+
+            Ok(candidates)
+        })
+    }
+
     #[cfg(feature = "ann")]
     fn invalidate_ann_index(&self) {
         self.ann_index.invalidate();
@@ -2098,6 +2323,244 @@ fn aggregation_match_key(text: &str, memory_id: i64) -> String {
     } else {
         normalized
     }
+}
+
+#[derive(Debug, Clone)]
+struct ReflectionCandidate {
+    memory_id: i64,
+    key: String,
+    summary_key: String,
+    summary: String,
+    kind: KnowledgeObjectKind,
+    created_at: DateTime<Utc>,
+    trusted_support: bool,
+    provenance_rank: u8,
+}
+
+#[derive(Debug, Clone)]
+struct ReflectionCluster {
+    summary_key: String,
+    summary: String,
+    kind: KnowledgeObjectKind,
+    source_ids: Vec<i64>,
+    trusted_support_count: usize,
+    provenance_sum: u32,
+    newest_created_at: DateTime<Utc>,
+}
+
+impl ReflectionCluster {
+    fn from_candidate(candidate: ReflectionCandidate) -> Self {
+        let newest_created_at = candidate.created_at;
+        Self {
+            summary_key: candidate.summary_key,
+            summary: candidate.summary,
+            kind: candidate.kind,
+            source_ids: vec![candidate.memory_id],
+            trusted_support_count: usize::from(candidate.trusted_support),
+            provenance_sum: u32::from(candidate.provenance_rank),
+            newest_created_at,
+        }
+    }
+
+    fn absorb(&mut self, candidate: ReflectionCandidate) {
+        if !self.source_ids.contains(&candidate.memory_id) {
+            self.source_ids.push(candidate.memory_id);
+        }
+        if candidate.trusted_support {
+            self.trusted_support_count += 1;
+        }
+        self.provenance_sum += u32::from(candidate.provenance_rank);
+        if candidate.created_at >= self.newest_created_at {
+            self.newest_created_at = candidate.created_at;
+            self.summary = candidate.summary;
+            self.kind = candidate.kind;
+        }
+    }
+
+    fn support_count(&self) -> usize {
+        self.source_ids.len()
+    }
+
+    fn qualifies(&self, config: &ReflectionConfig) -> bool {
+        self.support_count() >= config.min_support_count
+            && self.trusted_support_count >= config.min_trusted_support_count
+    }
+
+    fn confidence(&self, config: &ReflectionConfig) -> CompositionConfidence {
+        if self.support_count() >= config.min_support_count
+            && self.trusted_support_count >= config.min_trusted_support_count.max(1) + 1
+        {
+            CompositionConfidence::High
+        } else if self.qualifies(config) {
+            CompositionConfidence::Medium
+        } else {
+            CompositionConfidence::Low
+        }
+    }
+
+    fn into_knowledge_object(
+        self,
+        key: String,
+        config: &ReflectionConfig,
+        generated_at: DateTime<Utc>,
+    ) -> KnowledgeObject {
+        let confidence = self.confidence(config);
+        let support_count = self.support_count();
+        let trusted_support_count = self.trusted_support_count;
+        KnowledgeObject {
+            key,
+            summary: self.summary,
+            kind: self.kind,
+            confidence,
+            support_count,
+            trusted_support_count,
+            source_ids: self.source_ids,
+            generated_at,
+        }
+    }
+
+    fn compare_rank(left: &Self, right: &Self) -> std::cmp::Ordering {
+        left.trusted_support_count
+            .cmp(&right.trusted_support_count)
+            .then(left.support_count().cmp(&right.support_count()))
+            .then(left.provenance_sum.cmp(&right.provenance_sum))
+            .then(left.newest_created_at.cmp(&right.newest_created_at))
+    }
+}
+
+fn reflection_confidence_rank(confidence: CompositionConfidence) -> u8 {
+    match confidence {
+        CompositionConfidence::Low => 0,
+        CompositionConfidence::Medium => 1,
+        CompositionConfidence::High => 2,
+    }
+}
+
+fn reflection_key(
+    text: &str,
+    metadata: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    metadata
+        .get("knowledge_key")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            leading_subject_label(text)
+                .map(|label| normalize_reflection_value(&label).replace(' ', "-"))
+                .filter(|value| !value.is_empty())
+        })
+}
+
+fn reflection_summary(
+    text: &str,
+    metadata: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    metadata
+        .get("knowledge_summary")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| derive_reflection_summary(text))
+}
+
+fn derive_reflection_summary(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let first_line = trimmed.lines().next().unwrap_or(trimmed).trim();
+    let without_label = strip_reflection_label(first_line);
+    let first_sentence = without_label
+        .split_terminator(['.', '!', '?'])
+        .next()
+        .unwrap_or(without_label)
+        .trim();
+    let summary = if first_sentence.len() >= 18 {
+        first_sentence
+    } else {
+        without_label
+    };
+
+    (!summary.is_empty()).then(|| summary.to_string())
+}
+
+fn strip_reflection_label(value: &str) -> &str {
+    let Some((prefix, rest)) = value.split_once(':') else {
+        return value.trim();
+    };
+    let prefix_words = prefix.split_whitespace().count();
+    if prefix_words <= 4 {
+        rest.trim()
+    } else {
+        value.trim()
+    }
+}
+
+fn reflection_kind(
+    memory_type: crate::traits::MemoryType,
+    text: &str,
+    metadata: &std::collections::HashMap<String, String>,
+) -> KnowledgeObjectKind {
+    if let Some(kind) = metadata
+        .get("knowledge_kind")
+        .and_then(|value| parse_knowledge_kind(value))
+    {
+        return kind;
+    }
+
+    let normalized = normalize_reflection_value(text);
+    match memory_type {
+        crate::traits::MemoryType::Procedural => KnowledgeObjectKind::StableProcedure,
+        crate::traits::MemoryType::Semantic => {
+            if normalized.contains(" prefer ")
+                || normalized.starts_with("prefer ")
+                || normalized.contains(" preference ")
+            {
+                KnowledgeObjectKind::StablePreference
+            } else if normalized.contains(" decision ")
+                || normalized.starts_with("decision ")
+                || normalized.contains(" decided ")
+                || normalized.contains(" plan ")
+            {
+                KnowledgeObjectKind::StableDecision
+            } else {
+                KnowledgeObjectKind::StableFact
+            }
+        }
+        crate::traits::MemoryType::Episodic => KnowledgeObjectKind::StableFact,
+    }
+}
+
+fn parse_knowledge_kind(value: &str) -> Option<KnowledgeObjectKind> {
+    match normalize_reflection_value(value).as_str() {
+        "stable-fact" | "fact" => Some(KnowledgeObjectKind::StableFact),
+        "stable-preference" | "preference" => Some(KnowledgeObjectKind::StablePreference),
+        "stable-decision" | "decision" => Some(KnowledgeObjectKind::StableDecision),
+        "stable-procedure" | "procedure" | "procedural" => {
+            Some(KnowledgeObjectKind::StableProcedure)
+        }
+        _ => None,
+    }
+}
+
+fn normalize_reflection_value(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c.is_ascii_whitespace() || c == '-' || c == '_' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn compose_aggregation_answer(
@@ -3645,6 +4108,114 @@ mod tests {
             .expect("revoke");
         assert_eq!(revoked.status, ReviewStatus::Denied);
         assert_eq!(revoked.replaced_by, Some(replacement_id));
+    }
+
+    #[test]
+    fn reflection_prefers_repeated_trusted_supported_cluster() {
+        use chrono::Duration;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Earlier startup path: use WSL systemd to launch femind-embed-service during migration.".to_string(),
+                created_at: Utc::now() - Duration::days(3),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "normal".to_string()),
+                    ("source_kind".to_string(), "maintainer".to_string()),
+                    ("source_verification".to_string(), "declared".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    ("knowledge_summary".to_string(), "Use WSL systemd to launch femind-embed-service.".to_string()),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store");
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Supported Windows startup path: use the Windows Scheduled Task at logon to launch femind-embed-service.".to_string(),
+                created_at: Utc::now() - Duration::hours(2),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "system".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    ("knowledge_summary".to_string(), "Use the Windows Scheduled Task at logon to launch femind-embed-service.".to_string()),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store");
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Current supported startup path uses the Windows Scheduled Task at logon to launch femind-embed-service.".to_string(),
+                created_at: Utc::now(),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    ("knowledge_summary".to_string(), "Use the Windows Scheduled Task at logon to launch femind-embed-service.".to_string()),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store");
+
+        let objects = engine
+            .reflect_knowledge_objects(&ReflectionConfig::default())
+            .expect("reflect");
+
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].key, "femind-startup-path");
+        assert_eq!(
+            objects[0].summary,
+            "Use the Windows Scheduled Task at logon to launch femind-embed-service."
+        );
+        assert_eq!(objects[0].kind, KnowledgeObjectKind::StableProcedure);
+        assert_eq!(objects[0].support_count, 2);
+        assert_eq!(objects[0].trusted_support_count, 2);
+        assert_eq!(objects[0].confidence, CompositionConfidence::High);
+    }
+
+    #[test]
+    fn reflection_skips_pending_high_impact_guidance() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        engine
+            .store(&rich_mem(
+                "Temporary cutover note: switch clients to the emergency relay endpoint immediately.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "relay-cutover"),
+                    ("knowledge_summary", "Switch clients to the emergency relay endpoint."),
+                    ("knowledge_kind", "stable-procedure"),
+                    ("review_required", "true"),
+                    ("review_status", "pending"),
+                    ("review_reason", "unreviewed cutover"),
+                ],
+            ))
+            .expect("store");
+
+        let objects = engine
+            .reflect_knowledge_objects(&ReflectionConfig {
+                min_support_count: 1,
+                min_trusted_support_count: 1,
+                max_objects: 4,
+            })
+            .expect("reflect");
+
+        assert!(objects.is_empty());
     }
 
     #[test]

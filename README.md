@@ -27,12 +27,15 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `41/41`
-- retrieval-only practical eval in `ann` mode currently passes `41/41`
+- retrieval-only practical eval in `exact` mode currently passes `43/43`
+- retrieval-only practical eval in `ann` mode currently passes `43/43`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
   text-only changed-fact scenarios
+- practical eval now also includes deterministic reflection coverage for:
+  - stable supported procedures
+  - stable current decisions synthesized from repeated trusted evidence
 - practical eval now also covers higher-impact approval classes for:
   - auth bypass
   - destructive maintenance resets
@@ -59,7 +62,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `41/41` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `43/43` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
@@ -78,6 +81,10 @@ The practical live-validation path is now established and repeatable:
 - practical eval now also records a deterministic composed answer for each
   retrieval-style check, so yes/no, state, and aggregation behavior can be
   tuned at the engine level instead of only by inspecting raw hits
+- the engine now also exposes deterministic, metadata-assisted reflection via
+  `reflect_knowledge_objects()`, which synthesizes stable knowledge objects
+  from repeated trusted evidence without forcing internal derived rows into
+  consumer-defined record storage
 - composed answers now also record confidence, abstention, and rationale so
   maintainers can see when FeMind answered confidently, when it abstained, and
   why

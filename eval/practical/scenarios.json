@@ -1238,5 +1238,149 @@
         ]
       }
     ]
+  },
+  {
+    "id": "reflection-supported-startup-path",
+    "title": "Reflection should synthesize the stable supported startup path",
+    "category": "reflection-stable-knowledge",
+    "goal": "Repeated trusted evidence should collapse into one stable procedural knowledge object.",
+    "records": [
+      {
+        "timestamp": "2026-03-27T08:00:00Z",
+        "source": "older-migration-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "normal",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "knowledge_key": "femind-startup-path",
+          "knowledge_summary": "Use WSL systemd to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Earlier startup path: use WSL systemd to launch femind-embed-service during the migration period."
+      },
+      {
+        "timestamp": "2026-03-30T08:45:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "knowledge_key": "femind-startup-path",
+          "knowledge_summary": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Supported Windows startup path: use the Windows Scheduled Task at logon to launch femind-embed-service."
+      },
+      {
+        "timestamp": "2026-03-30T08:50:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "knowledge_key": "femind-startup-path",
+          "knowledge_summary": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "The current supported startup path uses the Windows Scheduled Task at logon to launch femind-embed-service."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 2,
+      "min_trusted_support_count": 1,
+      "max_objects": 4
+    },
+    "reflection_checks": [
+      {
+        "key": "femind-startup-path",
+        "expected_summary": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+        "expected_kind": "stable-procedure",
+        "min_support_count": 2,
+        "min_trusted_support_count": 1,
+        "min_confidence": "high",
+        "required_fragments": [
+          "Windows Scheduled Task",
+          "logon"
+        ],
+        "forbidden_fragments": [
+          "WSL systemd"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "reflection-engine-first-strategy",
+    "title": "Reflection should synthesize the stable engine-first evaluation strategy",
+    "category": "reflection-stable-knowledge",
+    "goal": "Repeated current decisions should win over older single-support strategy notes.",
+    "records": [
+      {
+        "timestamp": "2026-03-20T08:00:00Z",
+        "source": "older-planning-note",
+        "memory_type": "semantic",
+        "metadata": {
+          "source_trust": "normal",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "knowledge_key": "femind-eval-strategy",
+          "knowledge_summary": "Drive FeMind development through benchmark runs first.",
+          "knowledge_kind": "stable-decision"
+        },
+        "text": "Older idea: drive FeMind development through benchmark runs first so the public score moves quickly."
+      },
+      {
+        "timestamp": "2026-03-30T10:00:00Z",
+        "source": "decision-note",
+        "memory_type": "semantic",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "verified",
+          "knowledge_key": "femind-eval-strategy",
+          "knowledge_summary": "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
+          "knowledge_kind": "stable-decision"
+        },
+        "text": "Decision: prioritize engine-first real-world evaluation before benchmark checkpoints."
+      },
+      {
+        "timestamp": "2026-03-30T10:05:00Z",
+        "source": "project-doc",
+        "memory_type": "semantic",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "knowledge_key": "femind-eval-strategy",
+          "knowledge_summary": "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
+          "knowledge_kind": "stable-decision"
+        },
+        "text": "Current strategy: prioritize engine-first real-world evaluation before benchmark checkpoints."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 2,
+      "min_trusted_support_count": 1,
+      "max_objects": 4
+    },
+    "reflection_checks": [
+      {
+        "key": "femind-eval-strategy",
+        "expected_summary": "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
+        "expected_kind": "stable-decision",
+        "min_support_count": 2,
+        "min_trusted_support_count": 1,
+        "min_confidence": "high",
+        "required_fragments": [
+          "engine-first",
+          "benchmark checkpoints"
+        ],
+        "forbidden_fragments": [
+          "benchmark runs first"
+        ]
+      }
+    ]
   }
 ]

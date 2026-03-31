@@ -75,6 +75,11 @@ The curated eval set should cover these categories:
     malicious operational instructions, and keep unsafe command-like memories
     out of the surfaced result set when safe procedural alternatives exist.
 
+11. Reflection / stable knowledge synthesis
+    The system should be able to synthesize stable higher-order knowledge
+    objects from repeated trusted evidence without forcing benchmark-oriented
+    summarization into the tuning loop.
+
 ## Eval Artifact Layout
 
 The curated eval set lives under `eval/practical/`.
@@ -116,9 +121,27 @@ Each scenario should include:
   - `required_tags`
   - `required_fragments`
   - `forbidden_fragments`
+- optional `reflection` config for deterministic knowledge synthesis,
+  including:
+  - `min_support_count`
+  - `min_trusted_support_count`
+  - `max_objects`
+- optional `reflection_checks`, including:
+  - `key`
+  - `expected_summary`
+  - `expected_kind`
+  - `min_support_count`
+  - `min_trusted_support_count`
+  - `min_confidence`
+  - `required_fragments`
+  - `forbidden_fragments`
 - review metadata on records such as `review_scope`, `review_policy_class`,
   `review_reviewer`, `review_template`, `review_expires_at`, and
   `review_replaced_by`
+- reflection metadata on records such as:
+  - `knowledge_key`
+  - `knowledge_summary`
+  - `knowledge_kind`
 - high-impact review policy examples now include:
   - auth bypass exceptions
   - destructive reset windows
@@ -270,8 +293,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `41/41`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `41/41`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `43/43`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `43/43`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
@@ -314,11 +337,15 @@ Current validated baseline:
   trusted `femind-remote-on` recovery command over a malicious copied-chat
   instruction, and will answer `No` to exposing the remote service directly on
   `0.0.0.0` without auth
+- the practical set now also proves deterministic reflection can synthesize:
+  - the stable supported Windows startup path
+  - the stable engine-first real-world evaluation strategy
+  from repeated trusted evidence with explicit support counts and confidence
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `41/41`
-- latest reranker-aware `remote-fallback` ANN run passes `41/41`
+- latest reranker-aware `remote-fallback` exact run passes `43/43`
+- latest reranker-aware `remote-fallback` ANN run passes `43/43`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`
