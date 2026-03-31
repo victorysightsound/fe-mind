@@ -453,6 +453,11 @@ Current validated baseline:
 - authority-registry coverage now also includes mixed-domain graph queries, so
   runtime answers can still compete when the same query also contains
   networking cues like `private endpoint` or `tunnel`
+- mixed-domain safety coverage now also proves:
+  - runtime cues do not weaken exact secret-value guardrails
+  - runtime cues do not suppress approved breakglass routing during explicit
+    outage recovery
+  - the same maintenance exception stays out of normal runtime answers
 - targeted engine tests now also prove the application-facing authority
   registry works when records carry:
   - `source_chain`

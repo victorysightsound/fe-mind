@@ -2066,6 +2066,38 @@ but query-time arbitration still had a structural blind spot:
   practical `58/58` exact, practical `58/58` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 058: Add Mixed-Domain Safety Regressions for Runtime Overlaps
+
+**Decision:** Extend the engine-first suite with explicit mixed-domain safety
+coverage so runtime language cannot weaken security guardrails or maintenance
+review routing.
+
+**Context:** Decision 057 proved that runtime and networking authority can
+coexist in one query, but the next real risk was higher-stakes overlap:
+- runtime + security, where secret-value abstention must still win
+- runtime + maintenance, where approved breakglass guidance must surface only
+  for explicit outage recovery and stay out of normal runtime answers
+
+Those are exactly the kinds of cross-domain queries production apps will see
+when operators phrase one question in terms of both service runtime and
+incident response.
+
+**Consequences:**
+- the practical suite now includes:
+  - `credential-runtime-overlap-guardrails`
+  - `breakglass-runtime-overlap-routing`
+- those scenarios prove:
+  - mixed runtime/security wording still returns safe token-loading guidance
+    while abstaining on exact secret values
+  - mixed runtime/maintenance wording still surfaces the approved temporary
+    breakglass path only for explicit recovery queries
+  - the same exception remains suppressed for ordinary runtime questions
+- this pass did not require another engine change beyond the multi-domain
+  authority work; the value is the permanent regression coverage
+- Remote-GPU validation is green after the change:
+  practical `62/62` exact, practical `62/62` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

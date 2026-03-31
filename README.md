@@ -219,6 +219,9 @@ The practical live-validation path is now established and repeatable:
   FeMind uses the stronger authority level for that query domain
 - when a query spans multiple authority domains, FeMind now scores against all
   relevant domains instead of collapsing to the first matched domain keyword
+- mixed-domain policy coverage now also includes:
+  - runtime + security overlap for secret guardrails
+  - runtime + maintenance overlap for breakglass routing
 - query routing now infers an authority domain for high-stakes procedural and
   stable-knowledge conflicts, so authoritative chains can win over stronger
   generic provenance when the domain is explicit
