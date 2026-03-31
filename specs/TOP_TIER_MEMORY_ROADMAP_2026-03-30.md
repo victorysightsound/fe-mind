@@ -192,6 +192,9 @@ Current status after the 2026-03-30 trust/safety pass:
 - the practical suite now also validates deterministic reflection over repeated
   trusted evidence, which is the current low-risk path toward higher-order
   stable knowledge synthesis without reviving benchmark-driven iteration
+- FeMind now also has a consumer-safe persistence contract for those reflected
+  objects, so applications can opt into storing stable derived knowledge
+  without breaking generic `MemoryRecord` deserialization
 
 ### 6. Keep Evaluation Engine-Centric
 

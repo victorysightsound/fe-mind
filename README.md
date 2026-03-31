@@ -85,6 +85,11 @@ The practical live-validation path is now established and repeatable:
   `reflect_knowledge_objects()`, which synthesizes stable knowledge objects
   from repeated trusted evidence without forcing internal derived rows into
   consumer-defined record storage
+- reflected knowledge objects can now also be persisted safely through a
+  consumer-supplied record builder via
+  `persist_reflected_knowledge_objects_with(...)`, which lets FeMind annotate
+  provenance, `source_ids`, and tier `2` without inventing its own opaque
+  internal record format
 - composed answers now also record confidence, abstention, and rationale so
   maintainers can see when FeMind answered confidently, when it abstained, and
   why

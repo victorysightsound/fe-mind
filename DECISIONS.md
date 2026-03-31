@@ -1421,6 +1421,52 @@ directly would risk breaking `record_json` deserialization for consumers.
 
 ---
 
+## Decision 043: Persist Reflected Knowledge Only Through Consumer-Built Records
+
+**Date:** 2026-03-31
+
+**Decision:** Add an opt-in persistence contract for reflected knowledge
+objects through `persist_reflected_knowledge_objects_with(...)`, where the
+consumer supplies how a `KnowledgeObject` becomes its own `MemoryRecord`.
+FeMind owns the reflection metadata, `source_ids`, and tier bookkeeping around
+that persisted record.
+
+**Context:** Decision 042 shipped deterministic reflection, but it deliberately
+stopped short of persistence because FeMind is generic over consumer-defined
+record types. Writing an internal hidden reflection row directly into
+`record_json` would have made `get()` / deserialization unsafe for consumers.
+The next step needed to preserve the generic storage contract while still
+letting applications keep higher-order stable knowledge in their own stores.
+
+**Rationale:**
+- consumers, not FeMind, should decide the concrete shape of stored reflection
+  records
+- FeMind still needs to preserve reflection provenance and retrieval semantics:
+  `derived_kind=reflection`, `knowledge_*` metadata, tier `2`, and `source_ids`
+- the operation should be idempotent for repeated reflection passes over the
+  same derived summary
+
+**Consequences:**
+- the engine now exposes:
+  - `persist_reflected_knowledge_objects_with(&ReflectionConfig, builder)`
+  - `PersistedKnowledgeObject`
+- the builder returns the consumer’s own `MemoryRecord`, so persisted
+  reflection rows remain safe for normal `get()` and deserialization
+- FeMind patches persisted rows with:
+  - `derived_kind=reflection`
+  - `knowledge_key`
+  - `knowledge_summary`
+  - `knowledge_kind`
+  - reflection confidence/support metadata
+  - tier `2`
+  - `source_ids` provenance
+- repeated persistence over the same reflected summary reuses the duplicate row
+  and refreshes reflection metadata instead of creating junk duplicates
+- reflection is no longer runtime-only; applications can now opt into storing
+  stable derived knowledge while keeping the generic record boundary intact
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing
@@ -1450,8 +1496,8 @@ The three existing types (Episodic/Semantic/Procedural) cover all common agent m
 **Status:** Partially implemented — deterministic pass shipped (Decision 042)
 
 FeMind now has a deterministic, metadata-assisted reflection pass through
-`reflect_knowledge_objects(&ReflectionConfig)`. The current implementation
-returns stable knowledge objects with provenance and support counts, but it does
-not yet persist derived reflection rows into consumer storage. Optional
-LLM-assisted or persisted reflection remains future work and should only land
-once FeMind has a consumer-safe persistence contract for derived knowledge.
+`reflect_knowledge_objects(&ReflectionConfig)` and an opt-in persistence
+contract through `persist_reflected_knowledge_objects_with(...)`. The current
+implementation persists only consumer-built reflection records; FeMind still
+does not invent its own hidden derived record format. Optional LLM-assisted
+reflection remains future work.

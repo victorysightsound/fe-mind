@@ -341,6 +341,10 @@ Current validated baseline:
   - the stable supported Windows startup path
   - the stable engine-first real-world evaluation strategy
   from repeated trusted evidence with explicit support counts and confidence
+- reflected knowledge objects can now also be persisted through a
+  consumer-supplied record builder, so higher-order stable knowledge can move
+  into application memory stores without FeMind forcing an internal record
+  schema
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner

@@ -208,6 +208,17 @@ pub struct KnowledgeObject {
     pub generated_at: DateTime<Utc>,
 }
 
+/// Result of persisting a reflected knowledge object through a consumer record builder.
+#[derive(Debug, Clone)]
+pub struct PersistedKnowledgeObject {
+    /// The reflected object that was offered for persistence.
+    pub object: KnowledgeObject,
+    /// Whether the consumer-built record was added or matched an existing duplicate.
+    pub store_result: StoreResult,
+    /// Memory row ID for the persisted or reused record.
+    pub memory_id: i64,
+}
+
 /// Confidence label for deterministic composed answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CompositionConfidence {
@@ -1776,6 +1787,43 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         Ok(objects)
     }
 
+    /// Persist reflected knowledge objects through a consumer-supplied record builder.
+    ///
+    /// This keeps reflection consumer-safe: FeMind produces stable knowledge
+    /// objects, while the consumer decides how those objects map onto its own
+    /// `MemoryRecord` type. FeMind then annotates the stored rows with
+    /// reflection metadata, provenance `source_ids`, and tier `2`.
+    pub fn persist_reflected_knowledge_objects_with<F>(
+        &self,
+        config: &ReflectionConfig,
+        mut record_builder: F,
+    ) -> Result<Vec<PersistedKnowledgeObject>>
+    where
+        F: FnMut(&KnowledgeObject) -> Option<T>,
+    {
+        let objects = self.reflect_knowledge_objects(config)?;
+        let mut persisted = Vec::new();
+
+        for object in objects {
+            let Some(record) = record_builder(&object) else {
+                continue;
+            };
+
+            let store_result = self.store(&record)?;
+            let memory_id = match store_result {
+                StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+            };
+            self.apply_reflection_persistence(memory_id, &object)?;
+            persisted.push(PersistedKnowledgeObject {
+                object,
+                store_result,
+                memory_id,
+            });
+        }
+
+        Ok(persisted)
+    }
+
     /// Compose a grounded answer from routed retrieval evidence without using an LLM.
     pub fn compose_answer_with_config(
         &self,
@@ -2187,6 +2235,51 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             }
 
             Ok(candidates)
+        })
+    }
+
+    fn apply_reflection_persistence(&self, memory_id: i64, object: &KnowledgeObject) -> Result<()> {
+        self.db.with_writer(|conn| {
+            let existing = conn.query_row(
+                "SELECT metadata_json FROM memories WHERE id = ?1",
+                [memory_id],
+                |row| row.get::<_, Option<String>>(0),
+            )?;
+
+            let mut metadata = existing
+                .as_deref()
+                .and_then(|json| {
+                    serde_json::from_str::<std::collections::HashMap<String, String>>(json).ok()
+                })
+                .unwrap_or_default();
+            metadata.insert("derived_kind".to_string(), "reflection".to_string());
+            metadata.insert("knowledge_key".to_string(), object.key.clone());
+            metadata.insert("knowledge_summary".to_string(), object.summary.clone());
+            metadata.insert("knowledge_kind".to_string(), object.kind.to_string());
+            metadata.insert(
+                "reflection_confidence".to_string(),
+                object.confidence.as_str().to_string(),
+            );
+            metadata.insert(
+                "reflection_support_count".to_string(),
+                object.support_count.to_string(),
+            );
+            metadata.insert(
+                "reflection_trusted_support_count".to_string(),
+                object.trusted_support_count.to_string(),
+            );
+            metadata.insert(
+                "reflection_generated_at".to_string(),
+                object.generated_at.to_rfc3339(),
+            );
+
+            let metadata_json = serde_json::to_string(&metadata)?;
+            let source_ids_json = serde_json::to_string(&object.source_ids)?;
+            conn.execute(
+                "UPDATE memories SET metadata_json = ?1, tier = 2, source_ids = ?2 WHERE id = ?3",
+                rusqlite::params![metadata_json, source_ids_json, memory_id],
+            )?;
+            Ok(())
         })
     }
 
@@ -4216,6 +4309,180 @@ mod tests {
             .expect("reflect");
 
         assert!(objects.is_empty());
+    }
+
+    #[test]
+    fn reflected_knowledge_objects_can_be_persisted_through_consumer_builder() {
+        use chrono::Duration;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Supported Windows startup path: use the Windows Scheduled Task at logon to launch femind-embed-service.".to_string(),
+                created_at: Utc::now() - Duration::hours(2),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "system".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    ("knowledge_summary".to_string(), "Use the Windows Scheduled Task at logon to launch femind-embed-service.".to_string()),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store");
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Current supported startup path uses the Windows Scheduled Task at logon to launch femind-embed-service.".to_string(),
+                created_at: Utc::now(),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    ("knowledge_summary".to_string(), "Use the Windows Scheduled Task at logon to launch femind-embed-service.".to_string()),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store");
+
+        let persisted = engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::from([(
+                        "source_kind".to_string(),
+                        "reflection".to_string(),
+                    )]),
+                })
+            })
+            .expect("persist reflection");
+
+        assert_eq!(persisted.len(), 1);
+        assert!(matches!(persisted[0].store_result, StoreResult::Added(_)));
+
+        let stored = engine
+            .get(persisted[0].memory_id)
+            .expect("get")
+            .expect("stored reflection record");
+        assert_eq!(
+            stored.text,
+            "Use the Windows Scheduled Task at logon to launch femind-embed-service."
+        );
+
+        let persisted_row = engine
+            .database()
+            .with_reader(|conn| {
+                Ok(conn.query_row(
+                    "SELECT tier, source_ids, metadata_json FROM memories WHERE id = ?1",
+                    [persisted[0].memory_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, i32>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )?)
+            })
+            .expect("load persisted reflection row");
+        assert_eq!(persisted_row.0, 2);
+        assert_eq!(persisted_row.1.as_deref(), Some("[2,1]"));
+        let metadata = persisted_row
+            .2
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+            .expect("metadata");
+        assert_eq!(
+            metadata.get("derived_kind").map(String::as_str),
+            Some("reflection")
+        );
+        assert_eq!(
+            metadata.get("knowledge_key").map(String::as_str),
+            Some("femind-startup-path")
+        );
+        assert_eq!(
+            metadata.get("knowledge_kind").map(String::as_str),
+            Some("stable-procedure")
+        );
+        assert_eq!(
+            metadata.get("reflection_support_count").map(String::as_str),
+            Some("2")
+        );
+    }
+
+    #[test]
+    fn reflected_persistence_is_idempotent_for_duplicate_consumer_records() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        engine
+            .store(&rich_mem(
+                "Decision: prioritize engine-first real-world evaluation before benchmark checkpoints.",
+                MemoryType::Semantic,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-eval-strategy"),
+                    (
+                        "knowledge_summary",
+                        "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
+                    ),
+                    ("knowledge_kind", "stable-decision"),
+                ],
+            ))
+            .expect("store");
+        engine
+            .store(&rich_mem(
+                "Current strategy: prioritize engine-first real-world evaluation before benchmark checkpoints.",
+                MemoryType::Semantic,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-eval-strategy"),
+                    (
+                        "knowledge_summary",
+                        "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
+                    ),
+                    ("knowledge_kind", "stable-decision"),
+                ],
+            ))
+            .expect("store");
+
+        let build_record = |object: &KnowledgeObject| {
+            Some(RichTestMem {
+                id: None,
+                text: object.summary.clone(),
+                created_at: object.generated_at,
+                memory_type: MemoryType::Semantic,
+                metadata: HashMap::new(),
+            })
+        };
+
+        let first = engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), build_record)
+            .expect("first persist");
+        let second = engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), build_record)
+            .expect("second persist");
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert!(matches!(first[0].store_result, StoreResult::Added(_)));
+        assert!(matches!(second[0].store_result, StoreResult::Duplicate(_)));
+        assert_eq!(first[0].memory_id, second[0].memory_id);
     }
 
     #[test]
