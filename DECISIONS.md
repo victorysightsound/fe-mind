@@ -1665,6 +1665,54 @@ provenance-sensitive questions.
 
 ---
 
+## Decision 048: Make Stable-Summary Promotion Policy Explicit for Applications
+
+**Date:** 2026-03-31
+
+**Decision:** Stable-summary behavior should remain engine-native, but the
+promotion policy must be application-facing. FeMind now lets callers choose
+between `auto`, `prefer-reflection`, and `prefer-source` for stable-summary
+retrieval and composition.
+
+**Context:** Decisions 045-047 made reflected knowledge application-facing,
+routed stable-summary queries automatically, and taught the composer to answer
+from reflected, source, or blended evidence. The remaining gap was control.
+Different apps can legitimately want different stable-summary behavior:
+- some want the durable reflected summary whenever it exists
+- some want reflection only as an optimization, but still want final answers to
+  stay on raw source evidence by default
+- some want the engine default, not a forced global choice baked into FeMind
+
+Without an explicit policy, the engine behavior was correct but not fully
+productizable across different consumers.
+
+**Consequences:**
+- `StableSummaryPolicy` is now first-class:
+  - `auto`
+  - `prefer-reflection`
+  - `prefer-source`
+- search helpers now expose that choice through:
+  - `search_stable_knowledge_with_policy(...)`
+- deterministic composition now exposes the same choice through:
+  - `compose_answer_with_config_and_summary_policy(...)`
+- routed query plans now record the chosen stable-summary policy in addition to
+  routed reflection preference
+- source-preferred stable-summary queries stay on source evidence when good
+  source rows exist, and only fall back to reflection if no source evidence is
+  available
+- practical retrieval checks can now assert:
+  - `expected_stable_summary_policy`
+  - `expected_composed_basis`
+- reflection practical coverage now proves three distinct stable-summary paths:
+  - reflected summary under the default policy
+  - blended reflected-plus-source evidence for provenance-sensitive questions
+  - source-preferred answers when the caller requests `prefer-source`
+- Remote-GPU validation is green after the change:
+  practical `47/47` exact, practical `47/47` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

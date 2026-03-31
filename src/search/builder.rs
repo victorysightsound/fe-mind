@@ -137,6 +137,7 @@ impl std::fmt::Display for QueryIntent {
 pub enum ReflectionSearchPreference {
     Neutral,
     PreferCurrent,
+    PreferSource,
     OnlyCurrent,
 }
 
@@ -145,12 +146,37 @@ impl ReflectionSearchPreference {
         match self {
             Self::Neutral => "neutral",
             Self::PreferCurrent => "prefer-current",
+            Self::PreferSource => "prefer-source",
             Self::OnlyCurrent => "only-current",
         }
     }
 }
 
 impl std::fmt::Display for ReflectionSearchPreference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Application-facing policy for stable-summary routing and composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum StableSummaryPolicy {
+    Auto,
+    PreferReflection,
+    PreferSource,
+}
+
+impl StableSummaryPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::PreferReflection => "prefer-reflection",
+            Self::PreferSource => "prefer-source",
+        }
+    }
+}
+
+impl std::fmt::Display for StableSummaryPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
@@ -163,6 +189,7 @@ pub struct QueryRoute {
     pub mode: SearchMode,
     pub depth: SearchDepth,
     pub graph_depth: u32,
+    pub stable_summary_policy: StableSummaryPolicy,
     pub reflection_preference: ReflectionSearchPreference,
     pub temporal_policy: TemporalPolicy,
     pub state_conflict_policy: StateConflictPolicy,
@@ -202,6 +229,10 @@ impl QueryRoute {
     pub fn reflection_preference_name(&self) -> &'static str {
         self.reflection_preference.as_str()
     }
+
+    pub fn stable_summary_policy_name(&self) -> &'static str {
+        self.stable_summary_policy.as_str()
+    }
 }
 
 /// A scored search result containing the memory ID and relevance score.
@@ -239,6 +270,7 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     embedding: Option<Arc<dyn EmbeddingBackend>>,
     reranker: Option<Arc<dyn RerankerBackend>>,
     rerank_limit: usize,
+    stable_summary_policy: StableSummaryPolicy,
     reflection_preference: ReflectionSearchPreference,
     vector_search_mode: VectorSearchMode,
     strict_grounding_enabled: bool,
@@ -273,6 +305,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             embedding: None,
             reranker: None,
             rerank_limit: 20,
+            stable_summary_policy: StableSummaryPolicy::Auto,
             reflection_preference: ReflectionSearchPreference::Neutral,
             vector_search_mode: VectorSearchMode::default(),
             strict_grounding_enabled: true,
@@ -321,9 +354,16 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         self
     }
 
+    /// Control whether stable-summary queries prefer reflected knowledge or raw source evidence.
+    pub fn with_stable_summary_policy(mut self, policy: StableSummaryPolicy) -> Self {
+        self.stable_summary_policy = policy;
+        self
+    }
+
     /// Prefer current persisted reflection rows for stable-summary style queries.
     pub fn prefer_reflections(self) -> Self {
-        self.with_reflection_preference(ReflectionSearchPreference::PreferCurrent)
+        self.with_stable_summary_policy(StableSummaryPolicy::PreferReflection)
+            .with_reflection_preference(ReflectionSearchPreference::PreferCurrent)
     }
 
     /// Restrict retrieval to current persisted reflection rows only.
@@ -413,6 +453,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                 mode: self.mode.clone(),
                 depth: self.depth,
                 graph_depth: 0,
+                stable_summary_policy: self.stable_summary_policy,
                 reflection_preference: self.reflection_preference,
                 temporal_policy: TemporalPolicy::Neutral,
                 state_conflict_policy: StateConflictPolicy::Neutral,
@@ -462,7 +503,12 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             self.reflection_preference
         } else {
             match intent {
-                QueryIntent::StableSummary => ReflectionSearchPreference::PreferCurrent,
+                QueryIntent::StableSummary => match self.stable_summary_policy {
+                    StableSummaryPolicy::Auto | StableSummaryPolicy::PreferReflection => {
+                        ReflectionSearchPreference::PreferCurrent
+                    }
+                    StableSummaryPolicy::PreferSource => ReflectionSearchPreference::PreferSource,
+                },
                 _ => ReflectionSearchPreference::Neutral,
             }
         };
@@ -510,9 +556,9 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         } else {
             match intent {
                 QueryIntent::ExactDetail => self.rerank_limit.clamp(8, 16),
-                QueryIntent::CurrentState | QueryIntent::StableSummary | QueryIntent::HistoricalState => {
-                    self.rerank_limit.max(30)
-                }
+                QueryIntent::CurrentState
+                | QueryIntent::StableSummary
+                | QueryIntent::HistoricalState => self.rerank_limit.max(30),
                 QueryIntent::Aggregation | QueryIntent::AbstentionRisk => 0,
                 QueryIntent::General => self.rerank_limit,
             }
@@ -546,6 +592,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             mode,
             depth,
             graph_depth,
+            stable_summary_policy: self.stable_summary_policy,
             reflection_preference,
             temporal_policy,
             state_conflict_policy,
@@ -673,11 +720,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             results.retain(|r| r.score >= threshold);
         }
 
-        sort_results_with_reflection_preference(
-            self.db,
-            &mut results,
-            route.reflection_preference,
-        );
+        sort_results_with_reflection_preference(self.db, &mut results, route.reflection_preference);
         results.truncate(self.limit);
         Ok(results)
     }
@@ -709,11 +752,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             rerank_for_query_alignment(self.db, &self.query, &mut results);
         }
         results.retain(|r| r.score >= min_score);
-        sort_results_with_reflection_preference(
-            self.db,
-            &mut results,
-            route.reflection_preference,
-        );
+        sort_results_with_reflection_preference(self.db, &mut results, route.reflection_preference);
         Ok(results)
     }
 
@@ -750,11 +789,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
         }
-        sort_results_with_reflection_preference(
-            self.db,
-            &mut results,
-            route.reflection_preference,
-        );
+        sort_results_with_reflection_preference(self.db, &mut results, route.reflection_preference);
         results.truncate(self.limit);
         Ok(results)
     }
@@ -817,11 +852,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
         }
-        sort_results_with_reflection_preference(
-            self.db,
-            &mut results,
-            route.reflection_preference,
-        );
+        sort_results_with_reflection_preference(self.db, &mut results, route.reflection_preference);
         results.truncate(self.limit);
         Ok(results)
     }
@@ -1328,6 +1359,18 @@ fn apply_reflection_preference(
                     .is_some_and(|state| state.is_current_reflection)
             });
         }
+        ReflectionSearchPreference::PreferSource => {
+            for result in results.iter_mut() {
+                let state = states.get(&result.memory_id).copied().unwrap_or_default();
+                if state.is_current_reflection {
+                    result.score *= 0.7;
+                } else if state.is_superseded_reflection {
+                    result.score *= 0.45;
+                } else {
+                    result.score *= 1.15;
+                }
+            }
+        }
         ReflectionSearchPreference::PreferCurrent => {
             for result in results.iter_mut() {
                 let state = states.get(&result.memory_id).copied().unwrap_or_default();
@@ -1372,19 +1415,28 @@ fn sort_results_with_reflection_preference(
     }
 
     results.sort_by(|left, right| {
+        let left_state = states.get(&left.memory_id).copied().unwrap_or_default();
+        let right_state = states.get(&right.memory_id).copied().unwrap_or_default();
         let left_bucket = states
             .get(&left.memory_id)
             .copied()
             .unwrap_or_default()
-            .preference_bucket();
+            .preference_bucket(preference);
         let right_bucket = states
             .get(&right.memory_id)
             .copied()
             .unwrap_or_default()
-            .preference_bucket();
+            .preference_bucket(preference);
         right_bucket
             .cmp(&left_bucket)
             .then_with(|| right.score.total_cmp(&left.score))
+            .then_with(|| {
+                // Keep current reflections stable ahead of superseded ones when the
+                // main bucket is equal, regardless of policy.
+                right_state
+                    .is_current_reflection
+                    .cmp(&left_state.is_current_reflection)
+            })
             .then_with(|| left.memory_id.cmp(&right.memory_id))
     });
 }
@@ -1396,18 +1448,35 @@ struct ReflectionRowState {
 }
 
 impl ReflectionRowState {
-    fn preference_bucket(self) -> u8 {
-        if self.is_current_reflection {
-            2
-        } else if self.is_superseded_reflection {
-            0
-        } else {
-            1
+    fn preference_bucket(self, preference: ReflectionSearchPreference) -> u8 {
+        match preference {
+            ReflectionSearchPreference::PreferSource => {
+                if self.is_superseded_reflection {
+                    0
+                } else if self.is_current_reflection {
+                    1
+                } else {
+                    2
+                }
+            }
+            ReflectionSearchPreference::Neutral
+            | ReflectionSearchPreference::PreferCurrent
+            | ReflectionSearchPreference::OnlyCurrent => {
+                if self.is_current_reflection {
+                    2
+                } else if self.is_superseded_reflection {
+                    0
+                } else {
+                    1
+                }
+            }
         }
     }
 }
 
-fn reflection_row_state(metadata: &std::collections::HashMap<String, String>) -> ReflectionRowState {
+fn reflection_row_state(
+    metadata: &std::collections::HashMap<String, String>,
+) -> ReflectionRowState {
     if !metadata
         .get("derived_kind")
         .is_some_and(|value| value.eq_ignore_ascii_case("reflection"))
@@ -3412,8 +3481,32 @@ mod tests {
             ReflectionSearchPreference::PreferCurrent
         );
         assert_eq!(route.temporal_policy, TemporalPolicy::PreferNewer);
-        assert_eq!(route.state_conflict_policy, StateConflictPolicy::PreferCurrent);
+        assert_eq!(
+            route.state_conflict_policy,
+            StateConflictPolicy::PreferCurrent
+        );
         assert_eq!(route.rerank_limit, 30);
+    }
+
+    #[test]
+    fn query_route_can_prefer_source_for_stable_summary_queries() {
+        let db = setup();
+        let route = SearchBuilder::<TestMem>::new(
+            &db,
+            "What is the current supported startup path for femind-embed-service?",
+        )
+        .with_stable_summary_policy(StableSummaryPolicy::PreferSource)
+        .query_route();
+        assert_eq!(route.intent, QueryIntent::StableSummary);
+        assert_eq!(
+            route.reflection_preference,
+            ReflectionSearchPreference::PreferSource
+        );
+        assert_eq!(
+            route.stable_summary_policy,
+            StableSummaryPolicy::PreferSource
+        );
+        assert_eq!(route.temporal_policy, TemporalPolicy::PreferNewer);
     }
 
     #[test]

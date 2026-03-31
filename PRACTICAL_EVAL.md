@@ -365,6 +365,7 @@ Current validated baseline:
 - applications can now use explicit stable-knowledge helpers instead of
   treating reflection as an internal-only mechanism:
   - `search_stable_knowledge(...)`
+  - `search_stable_knowledge_with_policy(...)`
   - `search_stable_knowledge_only(...)`
   - `persisted_reflected_knowledge()`
   - `reflected_knowledge_for_key(...)`
@@ -380,6 +381,15 @@ Current validated baseline:
   - reflected knowledge
   - raw source evidence
   - a blend of reflected summary plus supporting source evidence
+- callers can now set an explicit stable-summary promotion policy:
+  - `auto`
+  - `prefer-reflection`
+  - `prefer-source`
+- the composer and the retrieval route both honor that policy through:
+  - `search_stable_knowledge_with_policy(...)`
+  - `compose_answer_with_config_and_summary_policy(...)`
+- practical retrieval checks can now assert that with:
+  - `expected_stable_summary_policy`
 - practical retrieval checks can now assert that with
   `expected_composed_basis`
 - practical retrieval checks can now fail explicitly when the routed intent or
@@ -388,8 +398,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `46/46`
-- latest reranker-aware `remote-fallback` ANN run passes `46/46`
+- latest reranker-aware `remote-fallback` exact run passes `47/47`
+- latest reranker-aware `remote-fallback` ANN run passes `47/47`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

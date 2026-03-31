@@ -1299,6 +1299,7 @@
         "query": "What is the current supported startup path for femind-embed-service?",
         "expected_answer": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
         "expected_intent": "stable-summary",
+        "expected_stable_summary_policy": "auto",
         "expected_reflection_preference": "prefer-current",
         "expected_composed_basis": "reflected",
         "required_fragments": [
@@ -1315,6 +1316,7 @@
         "query": "Based on current evidence, what is the supported startup path for femind-embed-service?",
         "expected_answer": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
         "expected_intent": "stable-summary",
+        "expected_stable_summary_policy": "auto",
         "expected_reflection_preference": "prefer-current",
         "expected_composed_basis": "blended",
         "required_fragments": [
@@ -1323,6 +1325,24 @@
         ],
         "required_sources": [
           "reflection"
+        ],
+        "min_observed_hits": 1,
+        "top_k": 5
+      },
+      {
+        "query": "What is the current supported startup path for femind-embed-service?",
+        "expected_answer": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+        "expected_intent": "stable-summary",
+        "expected_stable_summary_policy": "prefer-source",
+        "stable_summary_policy": "prefer-source",
+        "expected_reflection_preference": "prefer-source",
+        "expected_composed_basis": "source",
+        "required_fragments": [
+          "Windows Scheduled Task",
+          "logon"
+        ],
+        "forbidden_fragments": [
+          "Supported by:"
         ],
         "min_observed_hits": 1,
         "top_k": 5
@@ -1406,6 +1426,7 @@
         "query": "What is FeMind's current evaluation strategy?",
         "expected_answer": "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
         "expected_intent": "stable-summary",
+        "expected_stable_summary_policy": "auto",
         "expected_reflection_preference": "prefer-current",
         "expected_composed_basis": "reflected",
         "required_fragments": [

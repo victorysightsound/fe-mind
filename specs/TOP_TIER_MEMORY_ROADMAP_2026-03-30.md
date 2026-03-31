@@ -214,6 +214,10 @@ Current status after the 2026-03-30 trust/safety pass:
 - stable-summary composition now has an explicit evidence-basis policy:
   it can answer from reflected knowledge, raw source evidence, or a deliberate
   blend of both when the query is provenance-sensitive
+- that promotion choice is now application-facing too:
+  stable-summary retrieval and composition can run in `auto`,
+  `prefer-reflection`, or `prefer-source` mode instead of baking one engine
+  default into every app
 
 ### 6. Keep Evaluation Engine-Centric
 

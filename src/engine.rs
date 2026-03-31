@@ -21,6 +21,7 @@ use crate::scoring::{
     review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
     source_provenance_rank, source_trust_level,
 };
+use crate::search::StableSummaryPolicy;
 use crate::search::builder::SearchBuilder;
 use crate::storage::Database;
 use crate::storage::migrations;
@@ -1211,12 +1212,23 @@ impl<T: MemoryRecord> MemoryEngine<T> {
 
     /// Begin a search that prefers current persisted reflection rows.
     pub fn search_stable_knowledge(&self, query: &str) -> SearchBuilder<'_, T> {
-        self.search(query).prefer_reflections()
+        self.search_stable_knowledge_with_policy(query, StableSummaryPolicy::PreferReflection)
+    }
+
+    /// Begin a stable-knowledge search with an explicit promotion policy.
+    pub fn search_stable_knowledge_with_policy(
+        &self,
+        query: &str,
+        policy: StableSummaryPolicy,
+    ) -> SearchBuilder<'_, T> {
+        self.search(query).with_stable_summary_policy(policy)
     }
 
     /// Begin a search restricted to current persisted reflection rows.
     pub fn search_stable_knowledge_only(&self, query: &str) -> SearchBuilder<'_, T> {
-        self.search(query).reflections_only()
+        self.search(query)
+            .with_stable_summary_policy(StableSummaryPolicy::PreferReflection)
+            .reflections_only()
     }
 
     /// Load persisted reflection summaries, newest-first.
@@ -1289,10 +1301,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             if item.reasons.is_empty() {
                 continue;
             }
-            if let Some(result) = self.persist_reflected_knowledge_object_with(
-                item.object,
-                &mut record_builder,
-            )? {
+            if let Some(result) =
+                self.persist_reflected_knowledge_object_with(item.object, &mut record_builder)?
+            {
                 persisted.push(result);
             }
         }
@@ -1551,23 +1562,35 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         &self,
         query: &str,
         config: &crate::context::AssemblyConfig,
+        stable_summary_policy: StableSummaryPolicy,
     ) -> Result<Vec<crate::search::builder::SearchResult>> {
         let limit = config.search_limit;
         use crate::search::fts5::strip_stop_words;
         use std::collections::HashMap;
 
-        let route = self.search(query).limit(limit).query_route();
+        let route = self
+            .search(query)
+            .with_stable_summary_policy(stable_summary_policy)
+            .limit(limit)
+            .query_route();
         let effective_graph_depth = routed_graph_depth(config, &route);
         let preserve_original_query = crate::scoring::query_requests_procedural_guidance(query);
 
         // Query variant 1: original
-        let results1 = self.search(query).limit(limit).execute()?;
+        let results1 = self
+            .search(query)
+            .with_stable_summary_policy(stable_summary_policy)
+            .limit(limit)
+            .execute()?;
 
         // Query variant 2: key-phrase only (stop words removed)
         let key_phrases = strip_stop_words(query);
         let results2 =
             if !preserve_original_query && key_phrases != query && !key_phrases.is_empty() {
-                self.search(&key_phrases).limit(limit).execute()?
+                self.search(&key_phrases)
+                    .with_stable_summary_policy(stable_summary_policy)
+                    .limit(limit)
+                    .execute()?
             } else {
                 Vec::new()
             };
@@ -1578,7 +1601,10 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let supplemental = supplemental_query_variant(query);
         let mut results3 = if let Some(ref variant) = supplemental {
             if !preserve_original_query && variant != query && variant != &key_phrases {
-                self.search(variant).limit(limit).execute()?
+                self.search(variant)
+                    .with_stable_summary_policy(stable_summary_policy)
+                    .limit(limit)
+                    .execute()?
             } else {
                 Vec::new()
             }
@@ -1599,7 +1625,10 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             if preserve_original_query || duplicates_existing {
                 Vec::new()
             } else {
-                self.search(variant).limit(limit).execute()?
+                self.search(variant)
+                    .with_stable_summary_policy(stable_summary_policy)
+                    .limit(limit)
+                    .execute()?
             }
         } else {
             Vec::new()
@@ -1902,7 +1931,17 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         query: &str,
         config: &crate::context::AssemblyConfig,
     ) -> Result<Vec<crate::search::builder::SearchResult>> {
-        self.multi_query_search(query, config)
+        self.search_with_config_and_summary_policy(query, config, StableSummaryPolicy::Auto)
+    }
+
+    /// Search with an explicit assembly configuration and stable-summary policy.
+    pub fn search_with_config_and_summary_policy(
+        &self,
+        query: &str,
+        config: &crate::context::AssemblyConfig,
+        stable_summary_policy: StableSummaryPolicy,
+    ) -> Result<Vec<crate::search::builder::SearchResult>> {
+        self.multi_query_search(query, config, stable_summary_policy)
     }
 
     /// Collect broad retrieval evidence for aggregation-style questions.
@@ -1919,7 +1958,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         aggregation_config.max_per_session = 0;
         aggregation_config.search_limit = aggregation_config.search_limit.max(max_matches.max(25));
 
-        let results = self.multi_query_search(query, &aggregation_config)?;
+        let results =
+            self.multi_query_search(query, &aggregation_config, StableSummaryPolicy::Auto)?;
 
         let total_matches = results.len();
         let mut distinct_keys = std::collections::HashSet::new();
@@ -2041,10 +2081,27 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         config: &crate::context::AssemblyConfig,
         max_matches: usize,
     ) -> Result<ComposedAnswerResult> {
+        self.compose_answer_with_config_and_summary_policy(
+            query,
+            config,
+            max_matches,
+            StableSummaryPolicy::Auto,
+        )
+    }
+
+    /// Compose a grounded answer with an explicit stable-summary promotion policy.
+    pub fn compose_answer_with_config_and_summary_policy(
+        &self,
+        query: &str,
+        config: &crate::context::AssemblyConfig,
+        max_matches: usize,
+        stable_summary_policy: StableSummaryPolicy,
+    ) -> Result<ComposedAnswerResult> {
         let requires_strict_grounding =
             crate::search::builder::query_requires_strict_grounding(query);
         let route = self
             .search(query)
+            .with_stable_summary_policy(stable_summary_policy)
             .limit(config.search_limit.max(max_matches.max(10)))
             .query_route();
 
@@ -2079,7 +2136,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             });
         }
 
-        let results = self.search_with_config(query, config)?;
+        let results =
+            self.search_with_config_and_summary_policy(query, config, stable_summary_policy)?;
         let mut evidence = self.collect_distinct_aggregated_matches(results, max_matches)?;
         filter_secret_guidance_evidence(query, &mut evidence);
 
@@ -2190,7 +2248,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 rationale,
             )
         } else if matches!(route.intent, crate::search::QueryIntent::StableSummary) {
-            compose_stable_summary_answer(query, &evidence)
+            compose_stable_summary_answer(query, &evidence, stable_summary_policy)
         } else if matches!(
             route.intent,
             crate::search::QueryIntent::CurrentState | crate::search::QueryIntent::HistoricalState
@@ -2247,7 +2305,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         config: &crate::context::AssemblyConfig,
     ) -> Result<ContextAssembly> {
         // Multi-query retrieval: run original + key-phrase variant, merge results
-        let results = self.multi_query_search(query, config)?;
+        let results = self.multi_query_search(query, config, StableSummaryPolicy::Auto)?;
 
         // Convert search results to context items
         let candidates: Vec<ContextItem> = results
@@ -2564,11 +2622,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 let Some(other_metadata_json) = other_metadata_json else {
                     continue;
                 };
-                let Ok(mut other_metadata) =
-                    serde_json::from_str::<std::collections::HashMap<String, String>>(
-                        &other_metadata_json,
-                    )
-                else {
+                let Ok(mut other_metadata) = serde_json::from_str::<
+                    std::collections::HashMap<String, String>,
+                >(&other_metadata_json) else {
                     continue;
                 };
 
@@ -2578,10 +2634,9 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 {
                     continue;
                 }
-                if other_metadata
-                    .get("knowledge_key")
-                    .is_none_or(|value| normalize_reflection_value(value) != normalize_reflection_value(&object.key))
-                {
+                if other_metadata.get("knowledge_key").is_none_or(|value| {
+                    normalize_reflection_value(value) != normalize_reflection_value(&object.key)
+                }) {
                     continue;
                 }
                 if other_metadata
@@ -2592,9 +2647,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 }
 
                 other_metadata.insert("reflection_status".to_string(), "superseded".to_string());
-                other_metadata
-                    .insert("reflection_replaced_by".to_string(), memory_id.to_string());
-                other_metadata.insert("reflection_superseded_at".to_string(), superseded_at.clone());
+                other_metadata.insert("reflection_replaced_by".to_string(), memory_id.to_string());
+                other_metadata.insert(
+                    "reflection_superseded_at".to_string(),
+                    superseded_at.clone(),
+                );
 
                 let other_metadata_json = serde_json::to_string(&other_metadata)?;
                 conn.execute(
@@ -3130,7 +3187,8 @@ fn reflection_refresh_reasons(
     let mut reasons = Vec::new();
 
     if policy.refresh_on_summary_change
-        && normalize_reflection_value(&current.summary) != normalize_reflection_value(&object.summary)
+        && normalize_reflection_value(&current.summary)
+            != normalize_reflection_value(&object.summary)
     {
         reasons.push(ReflectionRefreshReason::SummaryChanged);
     }
@@ -3342,6 +3400,7 @@ fn compose_stateful_answer(
 fn compose_stable_summary_answer(
     query: &str,
     evidence: &[AggregatedMatch],
+    stable_summary_policy: StableSummaryPolicy,
 ) -> (
     String,
     &'static str,
@@ -3349,13 +3408,44 @@ fn compose_stable_summary_answer(
     CompositionConfidence,
     &'static str,
 ) {
-    if let Some(reflection) = select_current_reflection_evidence(query, evidence) {
+    let current_reflection = select_current_reflection_evidence(query, evidence);
+    let best_source = select_best_source_evidence(query, evidence);
+
+    if matches!(stable_summary_policy, StableSummaryPolicy::PreferSource) {
+        if let Some(source) = best_source {
+            return (
+                source.text.trim().to_string(),
+                "stable-summary",
+                CompositionEvidenceBasis::Source,
+                if has_conflicting_state_evidence(query, evidence) {
+                    CompositionConfidence::Medium
+                } else {
+                    CompositionConfidence::High
+                },
+                "source-summary-policy",
+            );
+        }
+
+        if let Some(reflection) = current_reflection {
+            let summary = reflection_summary_text(reflection)
+                .unwrap_or_else(|| reflection.text.trim().to_string());
+            return (
+                summary,
+                "stable-summary",
+                CompositionEvidenceBasis::Reflected,
+                reflection_confidence(reflection),
+                "reflected-fallback-no-source",
+            );
+        }
+    }
+
+    if let Some(reflection) = current_reflection {
         let summary = reflection_summary_text(reflection)
             .unwrap_or_else(|| reflection.text.trim().to_string());
         let reflection_confidence = reflection_confidence(reflection);
 
         if query_requests_evidence_citation(query) {
-            if let Some(source) = select_best_source_evidence(query, evidence) {
+            if let Some(source) = best_source {
                 return (
                     format!("{summary} Supported by: {}", source.text.trim()),
                     "stable-summary",
@@ -3379,7 +3469,7 @@ fn compose_stable_summary_answer(
         );
     }
 
-    let best = select_best_evidence(query, evidence);
+    let best = best_source.unwrap_or_else(|| select_best_evidence(query, evidence));
     (
         best.text.trim().to_string(),
         "stable-summary",
@@ -3454,7 +3544,9 @@ fn reflection_summary_text(candidate: &AggregatedMatch) -> Option<String> {
         .get("knowledge_summary")
         .cloned()
         .or_else(|| {
-            let trimmed = strip_reflection_label(candidate.text.trim()).trim().to_string();
+            let trimmed = strip_reflection_label(candidate.text.trim())
+                .trim()
+                .to_string();
             (!trimmed.is_empty()).then_some(trimmed)
         })
 }
@@ -4613,6 +4705,76 @@ mod tests {
     }
 
     #[test]
+    fn compose_answer_prefers_source_for_stable_summary_queries_when_policy_requests_it() {
+        use crate::context::AssemblyConfig;
+        use crate::search::StableSummaryPolicy;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+        engine
+            .store(&rich_mem(
+                "Supported Windows startup path: use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "system"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store support");
+        engine
+            .store(&rich_mem(
+                "The current supported startup path uses the Windows Scheduled Task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store corroborating support");
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: format!("Current startup path: {}", object.summary),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist reflection");
+
+        let answer = engine
+            .compose_answer_with_config_and_summary_policy(
+                "What is the current supported startup path for femind-embed-service?",
+                &AssemblyConfig::default(),
+                5,
+                StableSummaryPolicy::PreferSource,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "stable-summary");
+        assert_eq!(answer.basis, CompositionEvidenceBasis::Source);
+        assert_eq!(answer.rationale, "source-summary-policy");
+        assert!(answer.answer.contains("Windows Scheduled Task"));
+        assert!(!answer.answer.starts_with("Use the Windows Scheduled Task"));
+    }
+
+    #[test]
     fn compose_answer_abstains_on_unsupported_exact_detail_with_nearby_evidence() {
         use crate::context::AssemblyConfig;
 
@@ -5282,14 +5444,19 @@ mod tests {
         engine
             .store(&RichTestMem {
                 id: None,
-                text: "Older supported startup path: use WSL systemd to launch femind-embed-service.".to_string(),
+                text:
+                    "Older supported startup path: use WSL systemd to launch femind-embed-service."
+                        .to_string(),
                 created_at: older,
                 memory_type: MemoryType::Procedural,
                 metadata: HashMap::from([
                     ("source_trust".to_string(), "trusted".to_string()),
                     ("source_kind".to_string(), "maintainer".to_string()),
                     ("source_verification".to_string(), "verified".to_string()),
-                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    (
+                        "knowledge_key".to_string(),
+                        "femind-startup-path".to_string(),
+                    ),
                     (
                         "knowledge_summary".to_string(),
                         "Use WSL systemd to launch femind-embed-service.".to_string(),
@@ -5393,7 +5560,12 @@ mod tests {
                 Ok(conn.query_row(
                     "SELECT metadata_json, valid_until FROM memories WHERE id = ?1",
                     [first[0].memory_id],
-                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                        ))
+                    },
                 )?)
             })
             .expect("load old persisted reflection");
@@ -5408,7 +5580,9 @@ mod tests {
             Some("superseded")
         );
         assert_eq!(
-            old_metadata.get("reflection_replaced_by").map(String::as_str),
+            old_metadata
+                .get("reflection_replaced_by")
+                .map(String::as_str),
             Some(replaced_by.as_str())
         );
         assert!(old_row.1.is_some(), "older reflection row should be closed");
@@ -5483,11 +5657,9 @@ mod tests {
             .expect("persist reflection");
         assert_eq!(persisted.len(), 1);
 
-        let relations = crate::memory::GraphMemory::direct_relations(
-            engine.database(),
-            persisted[0].memory_id,
-        )
-        .expect("load direct relations");
+        let relations =
+            crate::memory::GraphMemory::direct_relations(engine.database(), persisted[0].memory_id)
+                .expect("load direct relations");
         let mut validated_ids = relations
             .into_iter()
             .filter(|node| node.relation == crate::memory::RelationType::ValidatedBy)
@@ -5526,15 +5698,19 @@ mod tests {
         engine
             .store(&RichTestMem {
                 id: None,
-                text: "Migration note: WSL systemd was the supported startup path during migration."
-                    .to_string(),
+                text:
+                    "Migration note: WSL systemd was the supported startup path during migration."
+                        .to_string(),
                 created_at: Utc::now() - Duration::days(2),
                 memory_type: MemoryType::Procedural,
                 metadata: HashMap::from([
                     ("source_trust".to_string(), "normal".to_string()),
                     ("source_kind".to_string(), "project-doc".to_string()),
                     ("source_verification".to_string(), "declared".to_string()),
-                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    (
+                        "knowledge_key".to_string(),
+                        "femind-startup-path".to_string(),
+                    ),
                     (
                         "knowledge_summary".to_string(),
                         "Use WSL systemd to launch femind-embed-service.".to_string(),
@@ -5682,7 +5858,10 @@ mod tests {
                 metadata.insert("reflection_generated_at".to_string(), stale_at.clone());
                 conn.execute(
                     "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
-                    rusqlite::params![serde_json::to_string(&metadata).expect("serialize"), persisted_id],
+                    rusqlite::params![
+                        serde_json::to_string(&metadata).expect("serialize"),
+                        persisted_id
+                    ],
                 )?;
                 Ok::<(), FemindError>(())
             })
@@ -5698,9 +5877,11 @@ mod tests {
             )
             .expect("plan");
         assert_eq!(plan.len(), 1);
-        assert!(plan[0]
-            .reasons
-            .contains(&ReflectionRefreshReason::StaleByAge));
+        assert!(
+            plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::StaleByAge)
+        );
     }
 
     #[test]

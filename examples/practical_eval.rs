@@ -40,7 +40,7 @@ mod app {
     use femind::reranking::RemoteRerankerBackend;
     use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
     use femind::scoring::redact_secret_material;
-    use femind::search::{QueryIntent, QueryRoute, SearchMode};
+    use femind::search::{QueryIntent, QueryRoute, SearchMode, StableSummaryPolicy};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
 
@@ -138,9 +138,13 @@ mod app {
         #[serde(default)]
         expected_intent: Option<String>,
         #[serde(default)]
+        expected_stable_summary_policy: Option<String>,
+        #[serde(default)]
         expected_reflection_preference: Option<String>,
         #[serde(default)]
         expected_composed_basis: Option<String>,
+        #[serde(default)]
+        stable_summary_policy: Option<String>,
         #[serde(default)]
         required_fragments: Vec<String>,
         #[serde(default)]
@@ -706,6 +710,7 @@ mod app {
         mode: String,
         depth: String,
         graph_depth: u32,
+        stable_summary_policy: String,
         reflection_preference: String,
         temporal_policy: String,
         state_conflict_policy: String,
@@ -722,6 +727,7 @@ mod app {
                 mode: value.mode_name().to_string(),
                 depth: value.depth_name().to_string(),
                 graph_depth: value.graph_depth,
+                stable_summary_policy: value.stable_summary_policy_name().to_string(),
                 reflection_preference: value.reflection_preference_name().to_string(),
                 temporal_policy: value.temporal_policy_name().to_string(),
                 state_conflict_policy: value.state_conflict_policy_name().to_string(),
@@ -744,6 +750,7 @@ mod app {
     struct RetrievalCriteriaReport {
         expected_match: bool,
         intent_ok: bool,
+        stable_summary_policy_ok: bool,
         reflection_preference_ok: bool,
         composed_basis_ok: bool,
         required_fragments_ok: bool,
@@ -756,6 +763,10 @@ mod app {
         expected_intent: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         observed_intent: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_stable_summary_policy: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_stable_summary_policy: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         expected_reflection_preference: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -1190,7 +1201,8 @@ mod app {
         let mut retrieval = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.retrieval_checks {
-                let route = routed_query_route(&engine, &check.query);
+                let stable_summary_policy = retrieval_stable_summary_policy(check)?;
+                let route = routed_query_route(&engine, &check.query, stable_summary_policy);
                 let graph_depth = effective_graph_depth(
                     route.graph_depth,
                     check.graph_depth.or(scenario.graph_depth),
@@ -1211,6 +1223,7 @@ mod app {
                     &route,
                     graph_depth,
                     requested_matches,
+                    stable_summary_policy,
                 )?;
                 let (passed, criteria) = evaluate_retrieval_check(
                     &observation.observed,
@@ -1289,7 +1302,7 @@ mod app {
         let mut abstention = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             for check in &scenario.abstention_checks {
-                let route = routed_query_route(&engine, &check.query);
+                let route = routed_query_route(&engine, &check.query, StableSummaryPolicy::Auto);
                 let graph_depth = effective_graph_depth(
                     route.graph_depth,
                     check.graph_depth.or(scenario.graph_depth),
@@ -1302,6 +1315,7 @@ mod app {
                     &route,
                     graph_depth,
                     config.top_k.max(5),
+                    StableSummaryPolicy::Auto,
                 )?;
                 let passed = check.expected_behavior == "abstain"
                     && observation
@@ -1397,17 +1411,45 @@ mod app {
         })
     }
 
-    fn routed_query_route(engine: &MemoryEngine<EvalMemory>, query: &str) -> QueryRoute {
-        engine.search(query).query_route()
+    fn routed_query_route(
+        engine: &MemoryEngine<EvalMemory>,
+        query: &str,
+        stable_summary_policy: StableSummaryPolicy,
+    ) -> QueryRoute {
+        engine
+            .search(query)
+            .with_stable_summary_policy(stable_summary_policy)
+            .query_route()
+    }
+
+    fn retrieval_stable_summary_policy(
+        check: &RetrievalCheck,
+    ) -> Result<StableSummaryPolicy, Box<dyn std::error::Error>> {
+        parse_stable_summary_policy(check.stable_summary_policy.as_deref())
+    }
+
+    fn parse_stable_summary_policy(
+        value: Option<&str>,
+    ) -> Result<StableSummaryPolicy, Box<dyn std::error::Error>> {
+        match value.map(normalize).as_deref() {
+            None | Some("") | Some("auto") => Ok(StableSummaryPolicy::Auto),
+            Some("prefer-reflection") | Some("prefer reflection") => {
+                Ok(StableSummaryPolicy::PreferReflection)
+            }
+            Some("prefer-source") | Some("prefer source") => {
+                Ok(StableSummaryPolicy::PreferSource)
+            }
+            Some(other) => Err(format!(
+                "unknown stable_summary_policy '{other}', expected auto | prefer-reflection | prefer-source"
+            )
+            .into()),
+        }
     }
 
     fn reflection_config_for_scenario(scenario: &Scenario) -> ReflectionConfig {
         ReflectionConfig {
             min_support_count: scenario.reflection.min_support_count.unwrap_or(2),
-            min_trusted_support_count: scenario
-                .reflection
-                .min_trusted_support_count
-                .unwrap_or(1),
+            min_trusted_support_count: scenario.reflection.min_trusted_support_count.unwrap_or(1),
             max_objects: scenario.reflection.max_objects.unwrap_or(12),
         }
     }
@@ -1852,8 +1894,9 @@ mod app {
         route: &QueryRoute,
         graph_depth: u32,
         requested_matches: usize,
+        stable_summary_policy: StableSummaryPolicy,
     ) -> Result<RetrievalObservation, Box<dyn std::error::Error>> {
-        let composition = engine.compose_answer_with_config(
+        let composition = engine.compose_answer_with_config_and_summary_policy(
             query,
             &femind::context::AssemblyConfig {
                 graph_depth,
@@ -1861,6 +1904,7 @@ mod app {
                 ..femind::context::AssemblyConfig::default()
             },
             requested_matches,
+            stable_summary_policy,
         )?;
         let composed_answer = composition.answer.clone();
         let composed_kind = composition.kind.to_string();
@@ -1901,7 +1945,7 @@ mod app {
         }
 
         let observed = if composition.evidence.is_empty() {
-            top_hits(engine, query, top_k, graph_depth)?
+            top_hits(engine, query, top_k, graph_depth, stable_summary_policy)?
         } else {
             composition
                 .evidence
@@ -1935,6 +1979,7 @@ mod app {
         query: &str,
         top_k: usize,
         graph_depth: u32,
+        stable_summary_policy: StableSummaryPolicy,
     ) -> Result<Vec<ObservedHit>, Box<dyn std::error::Error>> {
         let mut hits = Vec::new();
         if graph_depth > 0 {
@@ -1943,7 +1988,11 @@ mod app {
                 max_per_session: 0,
                 ..femind::context::AssemblyConfig::default()
             };
-            let results = engine.search_with_config(query, &assembly_config)?;
+            let results = engine.search_with_config_and_summary_policy(
+                query,
+                &assembly_config,
+                stable_summary_policy,
+            )?;
             for result in results.into_iter().take(top_k) {
                 let text = engine.database().with_reader(|conn| {
                     conn.query_row(
@@ -1971,7 +2020,11 @@ mod app {
                 });
             }
         } else {
-            let results = engine.search(query).limit(top_k).execute()?;
+            let results = engine
+                .search(query)
+                .with_stable_summary_policy(stable_summary_policy)
+                .limit(top_k)
+                .execute()?;
 
             for result in results.into_iter().take(top_k) {
                 let row = engine.database().with_reader(|conn| {
@@ -2075,15 +2128,25 @@ mod app {
             .is_none_or(|min_hits| observed_hit_count >= min_hits);
         let observed_intent = route.intent.to_string();
         let expected_intent = check.expected_intent.clone();
-        let intent_ok = expected_intent.as_ref().is_none_or(|expected| {
-            normalize(expected) == normalize(&observed_intent)
-        });
+        let intent_ok = expected_intent
+            .as_ref()
+            .is_none_or(|expected| normalize(expected) == normalize(&observed_intent));
+        let observed_stable_summary_policy = route.stable_summary_policy_name().to_string();
+        let expected_stable_summary_policy = check.expected_stable_summary_policy.clone();
+        let stable_summary_policy_ok =
+            expected_stable_summary_policy
+                .as_ref()
+                .is_none_or(|expected| {
+                    normalize(expected) == normalize(&observed_stable_summary_policy)
+                });
         let observed_reflection_preference = route.reflection_preference_name().to_string();
         let expected_reflection_preference = check.expected_reflection_preference.clone();
         let reflection_preference_ok =
-            expected_reflection_preference.as_ref().is_none_or(|expected| {
-                normalize(expected) == normalize(&observed_reflection_preference)
-            });
+            expected_reflection_preference
+                .as_ref()
+                .is_none_or(|expected| {
+                    normalize(expected) == normalize(&observed_reflection_preference)
+                });
         let observed_composed_basis = composed_answer.map(|answer| answer.basis.clone());
         let expected_composed_basis = check.expected_composed_basis.clone();
         let composed_basis_ok = expected_composed_basis.as_ref().is_none_or(|expected| {
@@ -2095,6 +2158,7 @@ mod app {
         let criteria = RetrievalCriteriaReport {
             expected_match,
             intent_ok,
+            stable_summary_policy_ok,
             reflection_preference_ok,
             composed_basis_ok,
             required_fragments_ok,
@@ -2105,6 +2169,8 @@ mod app {
             observed_hit_count,
             expected_intent,
             observed_intent: Some(observed_intent),
+            expected_stable_summary_policy,
+            observed_stable_summary_policy: Some(observed_stable_summary_policy),
             expected_reflection_preference,
             observed_reflection_preference: Some(observed_reflection_preference),
             expected_composed_basis,
@@ -2117,6 +2183,7 @@ mod app {
         };
         let passed = criteria.expected_match
             && criteria.intent_ok
+            && criteria.stable_summary_policy_ok
             && criteria.reflection_preference_ok
             && criteria.composed_basis_ok
             && criteria.required_fragments_ok

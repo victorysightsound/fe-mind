@@ -100,6 +100,7 @@ The practical live-validation path is now established and repeatable:
     of validating only runtime reflection output
 - applications can now query and manage reflected knowledge explicitly through:
   - `search_stable_knowledge(...)`
+  - `search_stable_knowledge_with_policy(...)`
   - `search_stable_knowledge_only(...)`
   - `persisted_reflected_knowledge()`
   - `reflected_knowledge_for_key(...)`
@@ -131,6 +132,12 @@ The practical live-validation path is now established and repeatable:
   - fall back to raw source evidence
   - blend reflected summaries with supporting source evidence for
     provenance-sensitive questions
+- stable-summary promotion is now application-facing too:
+  callers can choose `auto`, `prefer-reflection`, or `prefer-source` for
+  stable-summary retrieval and composition instead of accepting only the
+  engine default
+- the practical suite now asserts stable-summary policy explicitly, not just
+  routed reflection preference
 - routed retrieval now includes an explicit temporal policy:
   current-state queries mildly favor newer evidence, historical-state queries
   mildly favor older evidence, and exact-detail / abstention routes stay
