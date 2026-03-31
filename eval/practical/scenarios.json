@@ -775,6 +775,70 @@
     ]
   },
   {
+    "id": "authoritative-runtime-source-chain",
+    "title": "Authoritative runtime chain should beat stronger wrong-domain trusted sources",
+    "category": "trust-and-procedural-safety",
+    "goal": "When trusted sources disagree, FeMind should follow the authoritative chain for the inferred runtime domain instead of only preferring the strongest generic provenance.",
+    "records": [
+      {
+        "timestamp": "2026-03-30T12:40:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_authority_domain": "deployment",
+          "source_authority_level": "authoritative",
+          "source_chain": "deployment-docs"
+        },
+        "text": "Supported deployment path: keep femind-embed-service running inside WSL systemd on the GPU host for the bootstrapping path."
+      },
+      {
+        "timestamp": "2026-03-30T12:41:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "source_authority_domain": "runtime",
+          "source_authority_level": "authoritative",
+          "source_chain": "runtime-ops"
+        },
+        "text": "Supported runtime path: run femind-embed-service as a native Windows scheduled task on the GPU host."
+      },
+      {
+        "timestamp": "2026-03-30T12:42:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_authority_domain": "deployment",
+          "source_authority_level": "primary",
+          "source_chain": "deployment-docs"
+        },
+        "text": "Supported startup bootstrap path: WSL systemd keeps the bridge warm before the Windows session starts."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the supported runtime path for femind-embed-service on the GPU host?",
+        "expected_answer": "Run femind-embed-service as a native Windows scheduled task on the GPU host.",
+        "top_k": 1,
+        "required_fragments": [
+          "native Windows scheduled task",
+          "GPU host"
+        ],
+        "forbidden_fragments": [
+          "WSL systemd"
+        ]
+      }
+    ]
+  },
+  {
     "id": "trusted-private-endpoint-conflict",
     "title": "Trusted sensitive guidance should prefer stronger provenance and abstain on exact infra detail",
     "category": "provenance-and-secret-guardrails",
@@ -1521,6 +1585,89 @@
         "expected_contested": true,
         "min_support_count": 2,
         "min_trusted_support_count": 2,
+        "min_confidence": "medium",
+        "required_fragments": [
+          "native Windows scheduled task",
+          "GPU host"
+        ],
+        "forbidden_fragments": [
+          "WSL systemd"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "reflection-authoritative-runtime-source-chain",
+    "title": "Reflection should prefer the authoritative chain for runtime guidance",
+    "category": "reflection-stable-knowledge",
+    "goal": "When trusted source chains disagree on a runtime knowledge key, FeMind should reflect the summary backed by the authoritative runtime chain.",
+    "records": [
+      {
+        "timestamp": "2026-03-30T12:50:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_authority_domain": "deployment",
+          "source_authority_level": "authoritative",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-remote-runtime-authority",
+          "knowledge_summary": "Run the remote embedding service inside WSL systemd on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Supported deployment guidance note: run the remote embedding service inside WSL systemd on the GPU host."
+      },
+      {
+        "timestamp": "2026-03-30T12:51:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_authority_domain": "deployment",
+          "source_authority_level": "primary",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-remote-runtime-authority",
+          "knowledge_summary": "Run the remote embedding service inside WSL systemd on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Supported bootstrap path note: keep the remote embedding service in WSL systemd on the GPU host."
+      },
+      {
+        "timestamp": "2026-03-30T12:52:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "source_authority_domain": "runtime",
+          "source_authority_level": "authoritative",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-remote-runtime-authority",
+          "knowledge_summary": "Run the remote embedding service as a native Windows scheduled task on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Supported runtime note: run the remote embedding service as a native Windows scheduled task on the GPU host."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 1,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_checks": [
+      {
+        "key": "femind-remote-runtime-authority",
+        "expected_summary": "Run the remote embedding service as a native Windows scheduled task on the GPU host.",
+        "expected_kind": "stable-procedure",
+        "expected_contested": true,
+        "min_support_count": 1,
+        "min_trusted_support_count": 1,
         "min_confidence": "medium",
         "required_fragments": [
           "native Windows scheduled task",

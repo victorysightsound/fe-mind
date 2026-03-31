@@ -1775,6 +1775,48 @@ quality behind it changed.
   practical `48/48` exact, practical `48/48` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 050: Model Source-Chain Authority Above Generic Provenance
+
+**Decision:** Add an explicit source-chain authority layer so FeMind can prefer
+the authoritative chain for an inferred query domain when trusted sources
+disagree, instead of relying only on trust plus provenance rank.
+
+**Context:** Provenance ranking was already strong enough for most trusted
+conflicts, but it still treated all trusted chains inside a domain as generic
+alternatives. That was too weak for cases where a record is trustworthy in
+general, yet not the authoritative source for the exact domain being asked
+about. Two important real-world cases exposed the gap:
+- runtime guidance versus deployment/bootstrap guidance on the same GPU host
+- reflected stable procedures where competing trusted chains had different
+  domain ownership
+
+The goal was not to invent another flat score tweak. FeMind needed an explicit
+authority model that could survive both direct retrieval and deterministic
+reflection.
+
+**Consequences:**
+- records can now carry source-chain authority metadata:
+  - `source_authority_domain`
+  - `source_authority_level`
+  - `source_chain`
+- FeMind now infers an authority domain from high-stakes procedural and
+  stable-knowledge queries
+- the default composite scorer now includes authority-aware query-time scoring
+- direct evidence selection now lets authoritative runtime/security/networking
+  chains outrank stronger generic provenance when the query domain is explicit
+- deterministic reflection now uses the same authority signal, so reflected
+  knowledge objects can prefer the authoritative chain for a domain instead of
+  only the cluster with the most generic support
+- practical coverage now includes:
+  - authoritative runtime-chain retrieval conflicts
+  - authoritative runtime-chain reflection conflicts
+- the practical harness now treats the top authoritative answer as the contract
+  rather than requiring every weaker alternate hit to vanish from the wider hit
+  list
+- Remote-GPU validation is green after the change:
+  practical `50/50` exact, practical `50/50` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

@@ -27,8 +27,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `46/46`
-- retrieval-only practical eval in `ann` mode currently passes `46/46`
+- retrieval-only practical eval in `exact` mode currently passes `50/50`
+- retrieval-only practical eval in `ann` mode currently passes `50/50`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
@@ -45,6 +45,9 @@ The practical live-validation path is now established and repeatable:
   - partially verified chains
   - relayed trusted guidance
   - sensitive internal network-range and share-path answers with redaction
+- practical eval now also covers source-chain authority conflicts for:
+  - runtime-vs-deployment procedural guidance
+  - reflected runtime guidance backed by authoritative chains
 - larger real-world follow-up library now lives under `eval/live-library/`
 - larger real-world library now covers 18 scenarios and 58 retrieval checks
 - larger real-world library currently passes `58/58` in the standard
@@ -62,7 +65,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `46/46` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `50/50` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
@@ -176,6 +179,13 @@ The practical live-validation path is now established and repeatable:
 - retrieval scoring now also honors richer provenance metadata:
   - `metadata.source_kind`
   - `metadata.source_verification`
+- retrieval scoring now also honors source-chain authority metadata:
+  - `metadata.source_authority_domain`
+  - `metadata.source_authority_level`
+  - `metadata.source_chain`
+- query routing now infers an authority domain for high-stakes procedural and
+  stable-knowledge conflicts, so authoritative chains can win over stronger
+  generic provenance when the domain is explicit
 - the engine now records pending-review metadata for high-impact procedural
   memories, and maintainers can inspect them through the review queue
 - review-state policy now supports:

@@ -7,6 +7,7 @@ mod procedural_safety;
 mod recency;
 mod review_safety;
 mod secret_policy;
+mod source_authority;
 mod source_provenance;
 mod source_trust;
 
@@ -31,6 +32,10 @@ pub use secret_policy::{
     SecretClass, evidence_contains_secret_material, query_requests_private_infra_detail,
     query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, secret_class_from_metadata,
+};
+pub use source_authority::SourceAuthorityScorer;
+pub(crate) use source_authority::{
+    SourceAuthorityDomain, infer_authority_domain, source_authority_rank, source_chain_for_domain,
 };
 pub use source_provenance::SourceProvenanceScorer;
 pub(crate) use source_provenance::source_provenance_rank;

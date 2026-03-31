@@ -150,6 +150,10 @@ Each scenario should include:
   - `knowledge_key`
   - `knowledge_summary`
   - `knowledge_kind`
+- source authority metadata on records such as:
+  - `source_authority_domain`
+  - `source_authority_level`
+  - `source_chain`
 - high-impact review policy examples now include:
   - auth bypass exceptions
   - destructive reset windows
@@ -304,8 +308,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `46/46`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `46/46`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `50/50`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `50/50`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
@@ -408,13 +412,19 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `48/48`
-- latest reranker-aware `remote-fallback` ANN run passes `48/48`
+- latest reranker-aware `remote-fallback` exact run passes `50/50`
+- latest reranker-aware `remote-fallback` ANN run passes `50/50`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`
 - live-library summary artifact: `target/live-library/live-library-exact.json`
 - retrieval-only memloft-slice exact run passes `90/90`
+- authority-chain coverage now proves two distinct behaviors:
+  - top-answer selection can prefer an authoritative runtime chain over a
+    stronger wrong-domain trusted source
+  - deterministic reflection can prefer the authoritative chain for a
+    knowledge key even when competing trusted chains have broader generic
+    support
 
 This exact-mode practical run is the standard local regression check before
 trying wider live usage samples or ANN comparisons.

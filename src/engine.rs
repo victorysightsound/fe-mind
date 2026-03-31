@@ -15,11 +15,11 @@ use crate::scoring::{
     CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
     ReviewApprovalTemplate, ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity,
     ReviewStatus, SecretClass, SourceProvenanceScorer, SourceTrustScorer, detect_review_flag,
-    effective_review_status, evidence_contains_secret_material,
+    effective_review_status, evidence_contains_secret_material, infer_authority_domain,
     query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
     review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
-    source_provenance_rank, source_trust_level,
+    source_authority_rank, source_provenance_rank, source_trust_level,
 };
 use crate::search::StableSummaryPolicy;
 use crate::search::builder::SearchBuilder;
@@ -2610,6 +2610,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 let Some(summary) = reflection_summary(&text, &metadata) else {
                     continue;
                 };
+                let authority_domain = reflection_authority_domain(&key, &summary, &text);
+                let authority_rank = source_authority_rank(&meta, authority_domain);
 
                 candidates.push(ReflectionCandidate {
                     memory_id,
@@ -2623,6 +2625,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                         crate::scoring::SourceTrustLevel::Trusted
                             | crate::scoring::SourceTrustLevel::Normal
                     ),
+                    authoritative_support: authority_rank > 0,
+                    authority_rank,
                     provenance_rank: source_provenance_rank(&meta),
                 });
             }
@@ -3109,6 +3113,8 @@ struct ReflectionCandidate {
     kind: KnowledgeObjectKind,
     created_at: DateTime<Utc>,
     trusted_support: bool,
+    authoritative_support: bool,
+    authority_rank: u8,
     provenance_rank: u8,
 }
 
@@ -3119,6 +3125,8 @@ struct ReflectionCluster {
     kind: KnowledgeObjectKind,
     source_ids: Vec<i64>,
     trusted_support_count: usize,
+    authoritative_support_count: usize,
+    authority_sum: u32,
     provenance_sum: u32,
     newest_created_at: DateTime<Utc>,
 }
@@ -3132,6 +3140,8 @@ impl ReflectionCluster {
             kind: candidate.kind,
             source_ids: vec![candidate.memory_id],
             trusted_support_count: usize::from(candidate.trusted_support),
+            authoritative_support_count: usize::from(candidate.authoritative_support),
+            authority_sum: u32::from(candidate.authority_rank),
             provenance_sum: u32::from(candidate.provenance_rank),
             newest_created_at,
         }
@@ -3144,6 +3154,10 @@ impl ReflectionCluster {
         if candidate.trusted_support {
             self.trusted_support_count += 1;
         }
+        if candidate.authoritative_support {
+            self.authoritative_support_count += 1;
+        }
+        self.authority_sum += u32::from(candidate.authority_rank);
         self.provenance_sum += u32::from(candidate.provenance_rank);
         if candidate.created_at >= self.newest_created_at {
             self.newest_created_at = candidate.created_at;
@@ -3215,8 +3229,10 @@ impl ReflectionCluster {
     }
 
     fn compare_rank(left: &Self, right: &Self) -> std::cmp::Ordering {
-        left.trusted_support_count
-            .cmp(&right.trusted_support_count)
+        left.authoritative_support_count
+            .cmp(&right.authoritative_support_count)
+            .then(left.authority_sum.cmp(&right.authority_sum))
+            .then(left.trusted_support_count.cmp(&right.trusted_support_count))
             .then(left.support_count().cmp(&right.support_count()))
             .then(left.provenance_sum.cmp(&right.provenance_sum))
             .then(left.newest_created_at.cmp(&right.newest_created_at))
@@ -3257,6 +3273,16 @@ fn reflection_summary(
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .or_else(|| derive_reflection_summary(text))
+}
+
+fn reflection_authority_domain(
+    key: &str,
+    summary: &str,
+    text: &str,
+) -> Option<crate::scoring::SourceAuthorityDomain> {
+    infer_authority_domain(key)
+        .or_else(|| infer_authority_domain(summary))
+        .or_else(|| infer_authority_domain(text))
 }
 
 fn derive_reflection_summary(text: &str) -> Option<String> {
@@ -3810,6 +3836,10 @@ fn query_prefers_trusted_guidance(query: &str) -> bool {
 
 fn evidence_selection_rank(query: &str, candidate: &AggregatedMatch) -> u16 {
     let meta = candidate_memory_meta(candidate);
+    let authority_rank = u16::from(source_authority_rank(
+        &meta,
+        infer_authority_domain(query),
+    ));
     let trust_rank = match source_trust_level(&meta) {
         crate::scoring::SourceTrustLevel::Trusted => 400_u16,
         crate::scoring::SourceTrustLevel::Normal => 320_u16,
@@ -3828,7 +3858,7 @@ fn evidence_selection_rank(query: &str, candidate: &AggregatedMatch) -> u16 {
         0
     };
 
-    trust_rank + provenance_rank + scope_rank + policy_rank
+    trust_rank + authority_rank + provenance_rank + scope_rank + policy_rank
 }
 
 fn text_implies_negative_state(text: &str) -> bool {
@@ -3897,7 +3927,7 @@ fn filter_secret_guidance_evidence(query: &str, evidence: &mut Vec<AggregatedMat
 
     let has_safe_trusted_evidence = evidence.iter().any(|candidate| {
         is_sensitive_guidance_class(secret_class_from_metadata(&candidate.metadata))
-            && trusted_guidance_rank(candidate) > 0
+            && trusted_guidance_rank(query, candidate) > 0
     });
 
     if !has_safe_trusted_evidence {
@@ -3909,7 +3939,7 @@ fn filter_secret_guidance_evidence(query: &str, evidence: &mut Vec<AggregatedMat
         .filter(|candidate| {
             is_sensitive_guidance_class(secret_class_from_metadata(&candidate.metadata))
         })
-        .map(trusted_guidance_rank)
+        .map(|candidate| trusted_guidance_rank(query, candidate))
         .max()
         .unwrap_or(0);
 
@@ -3917,7 +3947,7 @@ fn filter_secret_guidance_evidence(query: &str, evidence: &mut Vec<AggregatedMat
         if !is_sensitive_guidance_class(secret_class_from_metadata(&candidate.metadata)) {
             return true;
         }
-        trusted_guidance_rank(candidate) == best_trusted_rank && best_trusted_rank > 0
+        trusted_guidance_rank(query, candidate) == best_trusted_rank && best_trusted_rank > 0
     });
 }
 
@@ -3947,12 +3977,13 @@ fn candidate_memory_meta(candidate: &AggregatedMatch) -> MemoryMeta {
     }
 }
 
-fn trusted_guidance_rank(candidate: &AggregatedMatch) -> u8 {
+fn trusted_guidance_rank(query: &str, candidate: &AggregatedMatch) -> u8 {
     let meta = candidate_memory_meta(candidate);
 
     match source_trust_level(&meta) {
         crate::scoring::SourceTrustLevel::Trusted | crate::scoring::SourceTrustLevel::Normal => {
             source_provenance_rank(&meta)
+                .saturating_add(source_authority_rank(&meta, infer_authority_domain(query)))
         }
         crate::scoring::SourceTrustLevel::Low => 0,
         crate::scoring::SourceTrustLevel::Untrusted => 0,
@@ -4280,6 +4311,7 @@ fn default_composite_scorer() -> CompositeScorer {
         Box::new(ImportanceScorer::default()),
         Box::new(MemoryTypeScorer::default()),
         Box::new(SourceTrustScorer::default()),
+        Box::new(crate::scoring::SourceAuthorityScorer::default()),
         Box::new(SourceProvenanceScorer::default()),
         Box::new(ProceduralSafetyScorer::default()),
         Box::new(ReviewSafetyScorer::default()),
@@ -6215,6 +6247,92 @@ mod tests {
     }
 
     #[test]
+    fn reflection_prefers_authoritative_chain_for_runtime_domain() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        engine
+            .store(&rich_mem(
+                "Supported deployment guidance note: run the remote embedding service inside WSL systemd on the GPU host.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("source_authority_domain", "deployment"),
+                    ("source_authority_level", "authoritative"),
+                    ("source_chain", "deployment-docs"),
+                    ("knowledge_key", "femind-remote-runtime-authority"),
+                    (
+                        "knowledge_summary",
+                        "Run the remote embedding service inside WSL systemd on the GPU host.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store deployment summary");
+        engine
+            .store(&rich_mem(
+                "Supported bootstrap path note: keep the remote embedding service in WSL systemd on the GPU host.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("source_authority_domain", "deployment"),
+                    ("source_authority_level", "primary"),
+                    ("source_chain", "deployment-docs"),
+                    ("knowledge_key", "femind-remote-runtime-authority"),
+                    (
+                        "knowledge_summary",
+                        "Run the remote embedding service inside WSL systemd on the GPU host.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store deployment support");
+        engine
+            .store(&rich_mem(
+                "Supported runtime note: run the remote embedding service as a native Windows scheduled task on the GPU host.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "declared"),
+                    ("source_authority_domain", "runtime"),
+                    ("source_authority_level", "authoritative"),
+                    ("source_chain", "runtime-ops"),
+                    ("knowledge_key", "femind-remote-runtime-authority"),
+                    (
+                        "knowledge_summary",
+                        "Run the remote embedding service as a native Windows scheduled task on the GPU host.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store runtime support");
+
+        let objects = engine
+            .reflect_knowledge_objects(&ReflectionConfig {
+                min_support_count: 1,
+                min_trusted_support_count: 1,
+                max_objects: 8,
+            })
+            .expect("reflect");
+
+        let object = objects
+            .iter()
+            .find(|object| object.key == "femind-remote-runtime-authority")
+            .expect("runtime reflection");
+        assert_eq!(
+            object.summary,
+            "Run the remote embedding service as a native Windows scheduled task on the GPU host."
+        );
+        assert!(object.contested);
+    }
+
+    #[test]
     fn reflection_refresh_plan_marks_support_weakened_when_support_drops() {
         let engine = MemoryEngine::<RichTestMem>::builder()
             .build()
@@ -6688,6 +6806,71 @@ mod tests {
         );
 
         assert_eq!(best.memory_id, 1);
+    }
+
+    #[test]
+    fn trusted_procedural_guidance_prefers_authoritative_runtime_chain() {
+        let query = "What is the supported runtime path for femind-embed-service on the GPU host?";
+        let evidence = vec![
+            AggregatedMatch {
+                memory_id: 1,
+                text: "Supported deployment path: keep femind-embed-service running inside WSL systemd on the GPU host for the bootstrapping path.".to_string(),
+                category: None,
+                score: 2.57,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("source_authority_domain".to_string(), "deployment".to_string()),
+                    ("source_authority_level".to_string(), "authoritative".to_string()),
+                    ("source_chain".to_string(), "deployment-docs".to_string()),
+                ]),
+            },
+            AggregatedMatch {
+                memory_id: 2,
+                text: "Supported runtime path: run femind-embed-service as a native Windows scheduled task on the GPU host.".to_string(),
+                category: None,
+                score: 2.44,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "maintainer".to_string()),
+                    ("source_verification".to_string(), "declared".to_string()),
+                    ("source_authority_domain".to_string(), "runtime".to_string()),
+                    ("source_authority_level".to_string(), "authoritative".to_string()),
+                    ("source_chain".to_string(), "runtime-ops".to_string()),
+                ]),
+            },
+        ];
+
+        assert_eq!(
+            infer_authority_domain(query),
+            Some(crate::scoring::SourceAuthorityDomain::RuntimeOps)
+        );
+        let deployment_meta = candidate_memory_meta(&evidence[0]);
+        let runtime_meta = candidate_memory_meta(&evidence[1]);
+        assert_eq!(
+            source_authority_rank(
+                &deployment_meta,
+                Some(crate::scoring::SourceAuthorityDomain::RuntimeOps),
+            ),
+            0
+        );
+        assert_eq!(
+            source_authority_rank(
+                &runtime_meta,
+                Some(crate::scoring::SourceAuthorityDomain::RuntimeOps),
+            ),
+            100
+        );
+        assert!(query_prefers_trusted_guidance(query));
+        assert!(
+            evidence_selection_rank(query, &evidence[1])
+                > evidence_selection_rank(query, &evidence[0])
+        );
+
+        let best = select_best_evidence(query, &evidence);
+
+        assert_eq!(best.memory_id, 2);
     }
 
     #[test]

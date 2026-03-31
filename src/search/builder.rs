@@ -8,9 +8,10 @@ use crate::engine::VectorSearchMode;
 use crate::error::Result;
 use crate::memory::GraphMemory;
 use crate::scoring::{
-    SourceTrustLevel, query_requests_procedural_guidance, query_scope, review_denied,
-    review_policy_class, review_policy_class_matches_query, review_required, review_scope,
-    review_scope_matches_query, source_provenance_rank, source_trust_level,
+    SourceTrustLevel, infer_authority_domain, query_requests_procedural_guidance, query_scope,
+    review_denied, review_policy_class, review_policy_class_matches_query, review_required,
+    review_scope, review_scope_matches_query, source_authority_rank, source_chain_for_domain,
+    source_provenance_rank, source_trust_level,
 };
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
@@ -1515,6 +1516,7 @@ fn apply_trusted_procedural_conflict_resolution(
         return;
     }
 
+    let query_domain = infer_authority_domain(query);
     let mut procedural = Vec::new();
     for result in results.iter() {
         let Some((memory_type, text, metadata)) = db
@@ -1571,25 +1573,80 @@ fn apply_trusted_procedural_conflict_resolution(
         }
 
         let rank = procedural_conflict_rank(query, &meta, result.score);
-        procedural.push((result.memory_id, rank));
+        procedural.push(ProceduralConflictCandidate {
+            memory_id: result.memory_id,
+            rank,
+            authority_rank: source_authority_rank(&meta, query_domain),
+            authority_chain: source_chain_for_domain(&meta, query_domain),
+        });
     }
 
     if procedural.len() < 2 {
         return;
     }
 
-    procedural.sort_by(|left, right| right.1.cmp(&left.1));
-    let best = procedural[0];
-    let second = procedural[1];
-    if best.1 <= second.1 + 15 {
+    apply_authoritative_source_chain_resolution(&mut procedural);
+    if procedural.len() < 2 {
+        return;
+    }
+
+    procedural.sort_by(|left, right| right.rank.cmp(&left.rank));
+    let best = procedural[0].clone();
+    let second = &procedural[1];
+    if best.rank <= second.rank + 15 {
         return;
     }
 
     let trusted_ids = procedural
         .iter()
-        .map(|(memory_id, _)| *memory_id)
+        .map(|candidate| candidate.memory_id)
         .collect::<std::collections::HashSet<_>>();
-    results.retain(|result| !trusted_ids.contains(&result.memory_id) || result.memory_id == best.0);
+    results.retain(|result| {
+        !trusted_ids.contains(&result.memory_id) || result.memory_id == best.memory_id
+    });
+}
+
+#[derive(Debug, Clone)]
+struct ProceduralConflictCandidate {
+    memory_id: i64,
+    rank: i32,
+    authority_rank: u8,
+    authority_chain: Option<String>,
+}
+
+fn apply_authoritative_source_chain_resolution(candidates: &mut Vec<ProceduralConflictCandidate>) {
+    let mut chain_scores = std::collections::HashMap::<String, (u8, i32)>::new();
+    for candidate in candidates.iter() {
+        let Some(chain) = candidate.authority_chain.as_ref() else {
+            continue;
+        };
+        let entry = chain_scores
+            .entry(chain.clone())
+            .or_insert((candidate.authority_rank, candidate.rank));
+        entry.0 = entry.0.max(candidate.authority_rank);
+        entry.1 = entry.1.max(candidate.rank);
+    }
+
+    if chain_scores.is_empty() {
+        return;
+    }
+
+    let mut ranked = chain_scores.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .0
+            .cmp(&left.1.0)
+            .then(right.1.1.cmp(&left.1.1))
+    });
+
+    let (best_chain, (best_authority, _)) = &ranked[0];
+    let second_authority = ranked.get(1).map(|(_, score)| score.0).unwrap_or(0);
+    if *best_authority == 0 || *best_authority <= second_authority {
+        return;
+    }
+
+    candidates.retain(|candidate| candidate.authority_chain.as_deref() == Some(best_chain));
 }
 
 fn procedural_conflict_rank(query: &str, meta: &MemoryMeta, score: f32) -> i32 {
@@ -1601,7 +1658,8 @@ fn procedural_conflict_rank(query: &str, meta: &MemoryMeta, score: f32) -> i32 {
         SourceTrustLevel::Normal => 300,
         SourceTrustLevel::Low => 80,
         SourceTrustLevel::Untrusted => 0,
-    } + source_provenance_rank(meta) as i32
+    } + source_authority_rank(meta, infer_authority_domain(query)) as i32
+        + source_provenance_rank(meta) as i32
         + (score * 100.0) as i32;
 
     if review_scope_matches_query(meta, query) {
@@ -4302,6 +4360,92 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].memory_id, staging_id);
+    }
+
+    #[test]
+    fn procedural_conflicts_prefer_authoritative_chain_for_runtime_domain() {
+        let db = setup();
+        let store = MemoryStore::<TestMem>::new();
+
+        let deployment = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text:
+                        "Supported deployment path: keep femind-embed-service running inside WSL systemd on the GPU host for the bootstrapping path."
+                            .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store deployment");
+        let runtime = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text:
+                        "Supported runtime path: run femind-embed-service as a native Windows scheduled task on the GPU host."
+                            .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store runtime");
+        let bootstrap = store
+            .store(
+                &db,
+                &TestMem {
+                    id: None,
+                    text:
+                        "Supported startup bootstrap path: WSL systemd keeps the bridge warm before the Windows session starts."
+                            .to_string(),
+                    category: None,
+                    created_at: Utc::now(),
+                },
+            )
+            .expect("store bootstrap");
+
+        let deployment_id = match deployment {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let runtime_id = match runtime {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+        let bootstrap_id = match bootstrap {
+            crate::memory::store::StoreResult::Added(id) => id,
+            other => panic!("unexpected store result: {other:?}"),
+        };
+
+        db.with_writer(|conn| {
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![deployment_id, r#"{"source_trust":"trusted","source_kind":"project-doc","source_verification":"verified","source_authority_domain":"deployment","source_authority_level":"authoritative","source_chain":"deployment-docs"}"#],
+            )?;
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![runtime_id, r#"{"source_trust":"trusted","source_kind":"maintainer","source_verification":"declared","source_authority_domain":"runtime","source_authority_level":"authoritative","source_chain":"runtime-ops"}"#],
+            )?;
+            conn.execute(
+                "UPDATE memories SET memory_type = 'procedural', metadata_json = ?2 WHERE id = ?1",
+                params![bootstrap_id, r#"{"source_trust":"trusted","source_kind":"project-doc","source_verification":"verified","source_authority_domain":"deployment","source_authority_level":"primary","source_chain":"deployment-docs"}"#],
+            )?;
+            Ok::<(), crate::error::FemindError>(())
+        })
+        .expect("update metadata");
+
+        let results = SearchBuilder::<TestMem>::new(
+            &db,
+            "What is the supported runtime path for femind-embed-service on the GPU host?",
+        )
+        .execute()
+        .expect("execute search");
+
+        assert!(!results.is_empty());
+        assert_eq!(results[0].memory_id, runtime_id);
     }
 
     #[test]
