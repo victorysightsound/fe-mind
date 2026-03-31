@@ -1310,6 +1310,60 @@ guidance from:
 
 ---
 
+## Decision 041: Sensitive Infrastructure Guidance Must Prefer Fully Verified Sources
+
+**Date:** 2026-03-30
+
+**Decision:** Extend FeMind's provenance and secret-handling model so trusted
+but partially verified or relayed infrastructure notes cannot outrank fully
+verified guidance, and broaden redaction to cover sensitive internal share
+paths and private network ranges.
+
+**Context:** FeMind already handled private endpoints and internal hostnames as
+sensitive guidance, and it already resolved trusted conflicts by provenance.
+The remaining gap was narrower but important:
+- trusted source chains could still include indirect or partially verified notes
+- exact subnet and internal path questions needed the same abstention posture
+  as exact endpoint questions
+- safe guidance answers needed to stay useful without surfacing raw internal
+  infrastructure values
+
+**Rationale:**
+- top-tier memory safety depends on distinguishing direct verified guidance from
+  partially verified or relayed chains, not just trusted vs untrusted
+- internal share paths and private network ranges can be operationally
+  sensitive even when they are not credentials
+- the engine-first practical suite should prove both:
+  - preferred trusted-source selection
+  - abstention/redaction on exact sensitive-detail requests
+
+**Consequences:**
+- `source_verification` now also recognizes:
+  - `partially-verified`
+  - `relayed`
+- provenance ranking now prefers:
+  - fully verified guidance over partially verified guidance
+  - declared direct guidance over relayed chains
+- secret-policy classes now also include:
+  - `internal-share-path`
+  - `private-network-range`
+- exact-detail queries for:
+  - internal share paths
+  - private subnets / CIDR ranges
+  now follow the same abstention path as other sensitive infrastructure details
+- safe guidance answers now redact:
+  - exact internal share paths as `[REDACTED_PATH]`
+  - exact private network ranges as `[REDACTED_NETWORK]`
+- practical eval now includes explicit scenarios for:
+  - trusted private-network-range conflicts
+  - trusted internal-share-path conflicts
+  - partial and relayed trusted provenance chains for sensitive guidance
+- Remote-GPU validation is green after the change:
+  practical `41/41` exact, practical `41/41` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

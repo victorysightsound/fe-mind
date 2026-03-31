@@ -71,6 +71,14 @@ Common high-impact values now covered in the suite:
 - `review_template`: `lab-auth-bypass`, `maintenance-reset`,
   `traffic-cutover`
 
+Common provenance / sensitivity values now covered in the suite:
+
+- `source_verification`: `verified`, `observed`, `partially-verified`,
+  `declared`, `relayed`, `copied`, `unverified`
+- `content_secret_class`: `credential-location`, `credential-material`,
+  `secret-reference`, `private-endpoint`, `internal-hostname`,
+  `internal-share-path`, `private-network-range`
+
 ## Review Workflow
 
 1. ingest the scenario records using the selected provider path
@@ -161,11 +169,16 @@ Current local baseline:
   review-policy-transition scenarios
 - the practical set now also includes trusted private-endpoint conflict
   coverage with exact-detail abstention on sensitive infrastructure values
+- the practical set now also includes:
+  - trusted private-network-range conflict coverage
+  - trusted internal-share-path conflict coverage
+  - partial and relayed provenance-chain coverage for sensitive infrastructure
+    guidance
 - the practical set now also includes higher-impact approval-class routing for
   auth bypass, destructive resets, and traffic cutovers, plus pending-review
   detection for those note types
-- reranker-aware remote-fallback regression is currently green at `37/37`
-- reranker-aware remote-fallback ANN regression is also green at `37/37`
+- reranker-aware remote-fallback regression is currently green at `41/41`
+- reranker-aware remote-fallback ANN regression is also green at `41/41`
 - latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

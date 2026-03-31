@@ -499,6 +499,11 @@ pub(crate) fn review_policy_class_matches_query(record: &MemoryMeta, query: &str
                 || normalized.contains("relay")
                 || normalized.contains("internal host")
                 || normalized.contains("endpoint")
+                || normalized.contains("subnet")
+                || normalized.contains("cidr")
+                || normalized.contains("share path")
+                || normalized.contains("unc path")
+                || normalized.contains("internal path")
                 || normalized.contains("tunnel")
         }
         ReviewPolicyClass::AuthBypassException => {

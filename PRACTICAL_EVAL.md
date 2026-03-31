@@ -270,8 +270,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `37/37`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `37/37`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `41/41`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `41/41`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
@@ -283,6 +283,13 @@ Current validated baseline:
 - the trusted private-endpoint scenario now proves FeMind will prefer the
   strongest trusted source for sensitive infrastructure guidance and abstain on
   exact private-endpoint values
+- the practical set now also proves that trusted-but-partially-verified or
+  relayed infrastructure notes do not beat fully verified guidance for:
+  - private network ranges
+  - internal share paths
+- exact subnet and internal-path questions now abstain while safe guidance
+  answers return redacted references such as `[REDACTED_NETWORK]` and
+  `[REDACTED_PATH]`
 - safe secret-location retrieval now also redacts raw credential-bearing hits in
   the surfaced evidence list, not only in the composed answer
 - practical scenarios can now validate pending-review queue behavior for
@@ -310,8 +317,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `37/37`
-- latest reranker-aware `remote-fallback` ANN run passes `37/37`
+- latest reranker-aware `remote-fallback` exact run passes `41/41`
+- latest reranker-aware `remote-fallback` ANN run passes `41/41`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

@@ -169,17 +169,24 @@ Current status after the 2026-03-30 trust/safety pass:
   - destructive reset windows
   - traffic cutovers
   with template defaults and scope-aware retrieval behavior
-- secret-policy classes now also cover private endpoints and internal hostnames
+- secret-policy classes now also cover:
+  - private endpoints
+  - internal hostnames
+  - internal share paths
+  - private network ranges
 - trusted sensitive guidance now resolves conflicts by provenance strength, so
   higher-confidence internal sources can suppress weaker trusted alternatives
   for sensitive infrastructure guidance
+- richer provenance states now include partially verified and relayed chains so
+  trusted-but-indirect guidance does not outrank fully verified internal
+  sources
 - trusted procedural guidance now also resolves conflicts by scope, support
   state, policy class, and provenance so scoped supported-path answers can
   suppress generic defaults or weaker workaround notes when the query is
   explicit
 - the current remote-GPU engine-first baseline is:
-  - practical `37/37` exact
-  - practical `37/37` ann
+  - practical `41/41` exact
+  - practical `41/41` ann
   - live-library `58/58` exact
   - memloft-slice `90/90` exact
 

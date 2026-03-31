@@ -21,6 +21,10 @@ pub enum SecretClass {
     PrivateEndpoint,
     /// An internal-only hostname that should not be surfaced verbatim.
     InternalHostname,
+    /// An internal-only share or filesystem path that should not be surfaced verbatim.
+    InternalSharePath,
+    /// A private subnet or network range that should not be surfaced verbatim.
+    PrivateNetworkRange,
 }
 
 impl SecretClass {
@@ -33,6 +37,8 @@ impl SecretClass {
             Self::SecretReference => "secret-reference",
             Self::PrivateEndpoint => "private-endpoint",
             Self::InternalHostname => "internal-hostname",
+            Self::InternalSharePath => "internal-share-path",
+            Self::PrivateNetworkRange => "private-network-range",
         }
     }
 
@@ -63,6 +69,14 @@ impl SecretClass {
             "internal-hostname" | "private-hostname" | "internal-host" => {
                 Some(Self::InternalHostname)
             }
+            "internal-share-path" | "internal-path" | "share-path" | "unc-path" => {
+                Some(Self::InternalSharePath)
+            }
+            "private-network-range"
+            | "internal-network-range"
+            | "network-range"
+            | "subnet"
+            | "cidr" => Some(Self::PrivateNetworkRange),
             _ => None,
         }
     }
@@ -143,6 +157,8 @@ pub fn evidence_contains_secret_material(text: &str, metadata: &HashMap<String, 
                 | SecretClass::KeyMaterial
                 | SecretClass::PrivateEndpoint
                 | SecretClass::InternalHostname
+                | SecretClass::InternalSharePath
+                | SecretClass::PrivateNetworkRange
         )
     ) || text
         .split_whitespace()
@@ -154,7 +170,12 @@ pub fn redact_secret_material(text: &str, metadata: &HashMap<String, String>) ->
     if !evidence_contains_secret_material(text, metadata)
         && !matches!(
             secret_class,
-            Some(SecretClass::PrivateEndpoint | SecretClass::InternalHostname)
+            Some(
+                SecretClass::PrivateEndpoint
+                    | SecretClass::InternalHostname
+                    | SecretClass::InternalSharePath
+                    | SecretClass::PrivateNetworkRange
+            )
         )
     {
         return text.to_string();
@@ -201,6 +222,12 @@ pub fn redact_secret_material(text: &str, metadata: &HashMap<String, String>) ->
     if matches!(secret_class, Some(SecretClass::InternalHostname)) {
         redacted = redact_internal_hostname_material(&redacted);
     }
+    if matches!(secret_class, Some(SecretClass::InternalSharePath)) {
+        redacted = redact_internal_share_path_material(&redacted);
+    }
+    if matches!(secret_class, Some(SecretClass::PrivateNetworkRange)) {
+        redacted = redact_private_network_range_material(&redacted);
+    }
 
     redacted
 }
@@ -243,6 +270,14 @@ pub fn query_requests_private_infra_guidance(query: &str) -> bool {
         || normalized.contains("private hostname")
         || normalized.contains("internal host")
         || normalized.contains("private host")
+        || normalized.contains("internal share path")
+        || normalized.contains("share path")
+        || normalized.contains("unc path")
+        || normalized.contains("internal path")
+        || normalized.contains("private subnet")
+        || normalized.contains("internal subnet")
+        || normalized.contains("network range")
+        || normalized.contains("cidr")
 }
 
 fn token_contains_secret_assignment(token: &str) -> bool {
@@ -303,6 +338,35 @@ fn redact_internal_hostname_material(text: &str) -> String {
         .join(" ")
 }
 
+fn redact_internal_share_path_material(text: &str) -> String {
+    text.split_whitespace()
+        .map(|token| {
+            let trimmed = token.trim_matches(|c: char| c == ',' || c == ';' || c == '.');
+            if looks_like_internal_share_path(trimmed) {
+                token.replace(trimmed, "[REDACTED_PATH]")
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn redact_private_network_range_material(text: &str) -> String {
+    text.split_whitespace()
+        .map(|token| {
+            let trimmed =
+                token.trim_matches(|c: char| c == ',' || c == ';' || c == '.' || c == ')');
+            if looks_like_private_network_range(trimmed) {
+                token.replace(trimmed, "[REDACTED_NETWORK]")
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn looks_like_ipv4(token: &str) -> bool {
     let token = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != ':');
     let host = token.split(':').next().unwrap_or(token);
@@ -317,6 +381,27 @@ fn looks_like_internal_hostname(token: &str) -> bool {
             || token.contains(".local")
             || token.contains(".lan")
             || token.ends_with(".corp"))
+}
+
+fn looks_like_internal_share_path(token: &str) -> bool {
+    let token = token.trim_matches(|c: char| c == '"' || c == '\'');
+    token.starts_with("\\\\")
+        || token.starts_with("//")
+        || token.starts_with("/srv/")
+        || token.starts_with("/mnt/internal/")
+        || token.starts_with("/opt/internal/")
+        || token.starts_with("/var/lib/internal/")
+}
+
+fn looks_like_private_network_range(token: &str) -> bool {
+    let token = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '/');
+    let Some((host, prefix)) = token.split_once('/') else {
+        return false;
+    };
+    let Ok(prefix) = prefix.parse::<u8>() else {
+        return false;
+    };
+    prefix <= 32 && looks_like_ipv4(host)
 }
 
 #[cfg(test)]
@@ -369,6 +454,12 @@ mod tests {
         assert!(query_requests_private_infra_detail(
             "What is the exact internal hostname for the service?"
         ));
+        assert!(query_requests_private_infra_detail(
+            "What is the exact internal share path for the relay config?"
+        ));
+        assert!(query_requests_private_infra_detail(
+            "What is the exact internal subnet CIDR for the GPU relay?"
+        ));
     }
 
     #[test]
@@ -397,6 +488,35 @@ mod tests {
                 &hostname,
             )
             .contains("[REDACTED_HOSTNAME]")
+        );
+    }
+
+    #[test]
+    fn internal_share_path_and_network_range_are_redacted() {
+        let mut share_path = HashMap::new();
+        share_path.insert(
+            "content_secret_class".to_string(),
+            "internal-share-path".to_string(),
+        );
+        let mut network_range = HashMap::new();
+        network_range.insert(
+            "content_secret_class".to_string(),
+            "private-network-range".to_string(),
+        );
+
+        assert!(
+            redact_secret_material(
+                "The relay bundle lives at \\\\calvaryav\\secure$\\femind\\relay-config.",
+                &share_path,
+            )
+            .contains("[REDACTED_PATH]")
+        );
+        assert!(
+            redact_secret_material(
+                "The approved relay subnet is 10.44.8.0/24 on the audited GPU VLAN.",
+                &network_range,
+            )
+            .contains("[REDACTED_NETWORK]")
         );
     }
 }

@@ -5,12 +5,14 @@ use crate::traits::{MemoryMeta, ScoringStrategy};
 /// Expected metadata keys:
 /// - `source_kind`: `system` | `maintainer` | `project-doc` | `local-observation`
 ///   | `user-note` | `copied-chat` | `forum-post` | `external-web`
-/// - `source_verification`: `verified` | `observed` | `declared` | `copied`
-///   | `unverified`
+/// - `source_verification`: `verified` | `observed` | `partially-verified`
+///   | `declared` | `relayed` | `copied` | `unverified`
 pub struct SourceProvenanceScorer {
     internal_weight: f32,
     project_doc_weight: f32,
     local_observation_weight: f32,
+    partial_verified_weight: f32,
+    relayed_weight: f32,
     copied_chat_weight: f32,
     external_weight: f32,
     verified_weight: f32,
@@ -24,6 +26,8 @@ impl SourceProvenanceScorer {
         internal_weight: f32,
         project_doc_weight: f32,
         local_observation_weight: f32,
+        partial_verified_weight: f32,
+        relayed_weight: f32,
         copied_chat_weight: f32,
         external_weight: f32,
         verified_weight: f32,
@@ -34,6 +38,8 @@ impl SourceProvenanceScorer {
             internal_weight,
             project_doc_weight,
             local_observation_weight,
+            partial_verified_weight,
+            relayed_weight,
             copied_chat_weight,
             external_weight,
             verified_weight,
@@ -45,7 +51,7 @@ impl SourceProvenanceScorer {
 
 impl Default for SourceProvenanceScorer {
     fn default() -> Self {
-        Self::new(1.08, 1.06, 1.08, 0.88, 0.8, 1.08, 0.9, 0.78)
+        Self::new(1.08, 1.06, 1.08, 1.03, 0.94, 0.88, 0.8, 1.08, 0.9, 0.78)
     }
 }
 
@@ -62,7 +68,9 @@ impl ScoringStrategy for SourceProvenanceScorer {
 
         let verification_weight = match source_verification(record) {
             SourceVerification::Verified | SourceVerification::Observed => self.verified_weight,
+            SourceVerification::PartiallyVerified => self.partial_verified_weight,
             SourceVerification::Declared | SourceVerification::Unknown => 1.0,
+            SourceVerification::Relayed => self.relayed_weight,
             SourceVerification::Copied => self.copied_weight,
             SourceVerification::Unverified => self.unverified_weight,
         };
@@ -88,7 +96,9 @@ pub(crate) enum SourceKind {
 pub(crate) enum SourceVerification {
     Verified,
     Observed,
+    PartiallyVerified,
     Declared,
+    Relayed,
     Copied,
     Unverified,
     Unknown,
@@ -122,7 +132,11 @@ pub(crate) fn source_verification(record: &MemoryMeta) -> SourceVerification {
     match normalize_tag(value).as_str() {
         "verified" => SourceVerification::Verified,
         "observed" => SourceVerification::Observed,
+        "partially-verified" | "partially_verified" | "partial" | "partially-observed" => {
+            SourceVerification::PartiallyVerified
+        }
         "declared" => SourceVerification::Declared,
+        "relayed" | "second-hand" | "second_hand" => SourceVerification::Relayed,
         "copied" => SourceVerification::Copied,
         "unverified" => SourceVerification::Unverified,
         _ => SourceVerification::Unknown,
@@ -144,7 +158,9 @@ pub(crate) fn source_provenance_rank(record: &MemoryMeta) -> u8 {
     let verification_rank = match source_verification(record) {
         SourceVerification::Verified => 20,
         SourceVerification::Observed => 18,
+        SourceVerification::PartiallyVerified => 14,
         SourceVerification::Declared => 10,
+        SourceVerification::Relayed => 7,
         SourceVerification::Copied => 5,
         SourceVerification::Unverified => 0,
         SourceVerification::Unknown => 8,
@@ -205,5 +221,21 @@ mod tests {
         assert!(
             source_provenance_rank(&system_verified) > source_provenance_rank(&maintainer_declared)
         );
+    }
+
+    #[test]
+    fn provenance_rank_prefers_partial_verification_over_declared() {
+        let partial = meta(Some("maintainer"), Some("partially-verified"));
+        let declared = meta(Some("maintainer"), Some("declared"));
+
+        assert!(source_provenance_rank(&partial) > source_provenance_rank(&declared));
+    }
+
+    #[test]
+    fn provenance_rank_prefers_declared_over_relayed_chain() {
+        let declared = meta(Some("project-doc"), Some("declared"));
+        let relayed = meta(Some("project-doc"), Some("relayed"));
+
+        assert!(source_provenance_rank(&declared) > source_provenance_rank(&relayed));
     }
 }

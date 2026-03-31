@@ -2402,6 +2402,8 @@ fn is_sensitive_guidance_class(secret_class: Option<SecretClass>) -> bool {
                 | SecretClass::SecretReference
                 | SecretClass::PrivateEndpoint
                 | SecretClass::InternalHostname
+                | SecretClass::InternalSharePath
+                | SecretClass::PrivateNetworkRange
         )
     )
 }
@@ -2470,6 +2472,10 @@ fn apply_secret_response_policy(
                     SecretClass::CredentialMaterial
                         | SecretClass::CredentialLocation
                         | SecretClass::SecretReference
+                        | SecretClass::PrivateEndpoint
+                        | SecretClass::InternalHostname
+                        | SecretClass::InternalSharePath
+                        | SecretClass::PrivateNetworkRange
                 )
             )
     });
@@ -3684,6 +3690,56 @@ mod tests {
 
         filter_secret_guidance_evidence(
             "Which private endpoint should the FeMind tunnel use now?",
+            &mut evidence,
+        );
+
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].memory_id, 1);
+    }
+
+    #[test]
+    fn trusted_sensitive_guidance_prefers_fully_verified_chain_over_partial_and_relayed() {
+        let mut evidence = vec![
+            AggregatedMatch {
+                memory_id: 1,
+                text: "The approved relay subnet is 10.44.8.0/24 on the audited GPU VLAN.".to_string(),
+                category: None,
+                score: 0.8,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "system".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("content_secret_class".to_string(), "private-network-range".to_string()),
+                ]),
+            },
+            AggregatedMatch {
+                memory_id: 2,
+                text: "Partially verified migration note: use 10.44.9.0/24 while the relay VLAN audit is still in progress.".to_string(),
+                category: None,
+                score: 0.81,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "maintainer".to_string()),
+                    ("source_verification".to_string(), "partially-verified".to_string()),
+                    ("content_secret_class".to_string(), "private-network-range".to_string()),
+                ]),
+            },
+            AggregatedMatch {
+                memory_id: 3,
+                text: "Relayed ops note: the early bridge mentioned 10.44.7.0/24 for the relay subnet.".to_string(),
+                category: None,
+                score: 0.82,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "relayed".to_string()),
+                    ("content_secret_class".to_string(), "private-network-range".to_string()),
+                ]),
+            },
+        ];
+
+        filter_secret_guidance_evidence(
+            "Which internal network range should the GPU relay use now?",
             &mut evidence,
         );
 
