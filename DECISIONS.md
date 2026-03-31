@@ -1467,6 +1467,67 @@ letting applications keep higher-order stable knowledge in their own stores.
 
 ---
 
+## Decision 044: Give Persisted Reflection Rows a Lifecycle and Retrieval Contract
+
+**Date:** 2026-03-31
+
+**Decision:** Extend persisted reflected knowledge so it behaves like real
+memory, not a static dump. Older reflected rows with the same
+`knowledge_key` must be superseded when the derived summary changes, reflected
+rows must link back to their supporting source memories, and the practical
+suite must query persisted reflections directly through ordinary retrieval
+checks.
+
+**Context:** Decision 043 made reflection persistence consumer-safe, but the
+first pass only stamped reflection metadata onto the persisted row. That left
+three gaps:
+
+- older persisted reflections never aged out when the derived summary changed
+- persisted reflections had `source_ids`, but not explicit graph links to their
+  supporting memories
+- the practical suite validated runtime reflection objects, but not direct
+  retrieval over persisted reflected rows
+
+That was enough for storage safety, but not enough for production-quality
+higher-order memory.
+
+**Rationale:**
+- reflected knowledge should participate in the same current-vs-stale mechanics
+  as other memories
+- explicit graph links make persisted reflections inspectable and traversable by
+  consumers without re-parsing metadata blobs
+- direct retrieval checks over persisted reflections keep the engine-first eval
+  loop honest; the system should prove not only that it can synthesize stable
+  knowledge, but that the stored result is actually queryable
+- source-aware retrieval criteria give the practical harness the granularity to
+  prove a reflected row was surfaced, not merely inferred from nearby source
+  notes
+
+**Consequences:**
+- `persist_reflected_knowledge_objects_with(...)` now:
+  - marks the current persisted reflection row as `reflection_status=current`
+  - supersedes older reflected rows with the same `knowledge_key` when the
+    summary changes
+  - records `reflection_replaced_by` and `reflection_superseded_at`
+  - clears `valid_until` on the current reflected row
+  - creates `superseded_by` links from old reflected rows to the current one
+  - creates `validated_by` links from the persisted reflection row to its
+    supporting source memories
+- practical retrieval checks now support:
+  - `required_sources`
+  - `forbidden_sources`
+  - per-check `top_k`
+- reflection scenarios can now set `reflection.persist=true` so the practical
+  harness persists reflected knowledge before running retrieval checks
+- practical coverage now proves two things separately:
+  - runtime reflection objects are synthesized correctly
+  - persisted reflection rows can be surfaced directly through retrieval
+- Remote-GPU validation is green after the change:
+  practical `45/45` exact, practical `45/45` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

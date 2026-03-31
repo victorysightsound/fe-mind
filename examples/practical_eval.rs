@@ -140,9 +140,15 @@ mod app {
         #[serde(default)]
         forbidden_fragments: Vec<String>,
         #[serde(default)]
+        required_sources: Vec<String>,
+        #[serde(default)]
+        forbidden_sources: Vec<String>,
+        #[serde(default)]
         min_observed_hits: Option<usize>,
         #[serde(default)]
         graph_depth: Option<u32>,
+        #[serde(default)]
+        top_k: Option<usize>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -180,6 +186,8 @@ mod app {
         min_trusted_support_count: Option<usize>,
         #[serde(default)]
         max_objects: Option<usize>,
+        #[serde(default)]
+        persist: bool,
     }
 
     #[derive(Debug, Deserialize)]
@@ -675,6 +683,8 @@ mod app {
     struct ObservedHit {
         text: String,
         score: f32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     }
 
     #[derive(Debug, Serialize)]
@@ -727,6 +737,8 @@ mod app {
         expected_match: bool,
         required_fragments_ok: bool,
         forbidden_fragments_ok: bool,
+        required_sources_ok: bool,
+        forbidden_sources_ok: bool,
         hit_count_ok: bool,
         observed_hit_count: usize,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -735,6 +747,10 @@ mod app {
         missing_required_fragments: Vec<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         present_forbidden_fragments: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        missing_required_sources: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        present_forbidden_sources: Vec<String>,
     }
 
     #[derive(Debug, Serialize)]
@@ -1128,6 +1144,24 @@ mod app {
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
             seed_retrieval_corpus(&engine, scenario, config, extractor)?;
         }
+        let reflection_config = reflection_config_for_scenario(scenario);
+        let reflected_objects = if matches!(config.mode, EvalMode::Retrieval | EvalMode::All)
+            && (scenario.reflection.persist || !scenario.reflection_checks.is_empty())
+        {
+            if scenario.reflection.persist {
+                engine
+                    .persist_reflected_knowledge_objects_with(&reflection_config, |object| {
+                        Some(persisted_eval_memory_from_knowledge_object(object))
+                    })?
+                    .into_iter()
+                    .map(|persisted| persisted.object)
+                    .collect::<Vec<_>>()
+            } else {
+                engine.reflect_knowledge_objects(&reflection_config)?
+            }
+        } else {
+            Vec::new()
+        };
 
         let mut retrieval = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
@@ -1138,15 +1172,18 @@ mod app {
                     check.graph_depth.or(scenario.graph_depth),
                     config.graph_depth,
                 );
+                let observed_limit = check.top_k.unwrap_or(config.top_k);
                 let requested_matches = config
                     .top_k
+                    .max(observed_limit)
                     .max(check.min_observed_hits.unwrap_or(0))
                     .max(check.required_fragments.len())
+                    .max(check.required_sources.len())
                     .max(5);
                 let observation = collect_retrieval_observation(
                     &engine,
                     &check.query,
-                    config.top_k,
+                    observed_limit,
                     &route,
                     graph_depth,
                     requested_matches,
@@ -1208,7 +1245,11 @@ mod app {
                     expected: check.expected_fact.clone(),
                     observed: observed
                         .into_iter()
-                        .map(|text| ObservedHit { text, score: 1.0 })
+                        .map(|text| ObservedHit {
+                            text,
+                            score: 1.0,
+                            source: None,
+                        })
                         .collect(),
                     graph_depth: 0,
                     route: None,
@@ -1299,22 +1340,14 @@ mod app {
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All)
             && !scenario.reflection_checks.is_empty()
         {
-            let reflection_config = ReflectionConfig {
-                min_support_count: scenario.reflection.min_support_count.unwrap_or(2),
-                min_trusted_support_count: scenario
-                    .reflection
-                    .min_trusted_support_count
-                    .unwrap_or(1),
-                max_objects: scenario.reflection.max_objects.unwrap_or(12),
-            };
-            let objects = engine.reflect_knowledge_objects(&reflection_config)?;
-            let observed = objects
+            let observed = reflected_objects
                 .iter()
                 .map(knowledge_object_report)
                 .collect::<Vec<_>>();
 
             for check in &scenario.reflection_checks {
-                let (passed, criteria, matched) = evaluate_reflection_check(&objects, check);
+                let (passed, criteria, matched) =
+                    evaluate_reflection_check(&reflected_objects, check);
                 reflection.push(ReflectionReport {
                     passed,
                     key: check.key.clone(),
@@ -1341,6 +1374,53 @@ mod app {
 
     fn routed_query_route(engine: &MemoryEngine<EvalMemory>, query: &str) -> QueryRoute {
         engine.search(query).query_route()
+    }
+
+    fn reflection_config_for_scenario(scenario: &Scenario) -> ReflectionConfig {
+        ReflectionConfig {
+            min_support_count: scenario.reflection.min_support_count.unwrap_or(2),
+            min_trusted_support_count: scenario
+                .reflection
+                .min_trusted_support_count
+                .unwrap_or(1),
+            max_objects: scenario.reflection.max_objects.unwrap_or(12),
+        }
+    }
+
+    fn persisted_eval_memory_from_knowledge_object(object: &KnowledgeObject) -> EvalMemory {
+        let memory_type = match object.kind {
+            femind::engine::KnowledgeObjectKind::StableProcedure => MemoryType::Procedural,
+            _ => MemoryType::Semantic,
+        };
+        let label = humanize_knowledge_key(&object.key);
+
+        EvalMemory {
+            id: None,
+            text: format!("Current {label}: {}", object.summary),
+            source: "reflection".to_string(),
+            memory_type,
+            created_at: object.generated_at,
+            valid_from: Some(object.generated_at),
+            valid_until: None,
+            metadata: HashMap::from([
+                ("source_trust".to_string(), "trusted".to_string()),
+                ("source_kind".to_string(), "reflection".to_string()),
+                ("source_verification".to_string(), "derived".to_string()),
+                ("knowledge_key".to_string(), object.key.clone()),
+                ("knowledge_summary".to_string(), object.summary.clone()),
+                ("knowledge_kind".to_string(), object.kind.to_string()),
+            ]),
+        }
+    }
+
+    fn humanize_knowledge_key(key: &str) -> String {
+        key.split('-')
+            .map(|part| match part {
+                "eval" => "evaluation".to_string(),
+                other => other.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn effective_graph_depth(
@@ -1776,6 +1856,7 @@ mod app {
                 .map(|candidate| ObservedHit {
                     text: redact_secret_material(&candidate.text, &candidate.metadata),
                     score: candidate.score,
+                    source: candidate.category,
                 })
                 .collect();
 
@@ -1803,6 +1884,7 @@ mod app {
                 .map(|candidate| ObservedHit {
                     text: redact_secret_material(&candidate.text, &candidate.metadata),
                     score: candidate.score,
+                    source: candidate.category.clone(),
                 })
                 .collect()
         };
@@ -1838,20 +1920,27 @@ mod app {
             for result in results.into_iter().take(top_k) {
                 let text = engine.database().with_reader(|conn| {
                     conn.query_row(
-                        "SELECT searchable_text, metadata_json FROM memories WHERE id = ?1",
+                        "SELECT searchable_text, category, metadata_json FROM memories WHERE id = ?1",
                         [result.memory_id],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                            ))
+                        },
                     )
                     .map_err(Into::into)
                 })?;
                 let metadata = text
-                    .1
+                    .2
                     .as_deref()
                     .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
                     .unwrap_or_default();
                 hits.push(ObservedHit {
                     text: redact_secret_material(&text.0, &metadata),
                     score: result.score,
+                    source: text.1,
                 });
             }
         } else {
@@ -1860,20 +1949,27 @@ mod app {
             for result in results.into_iter().take(top_k) {
                 let row = engine.database().with_reader(|conn| {
                     conn.query_row(
-                        "SELECT searchable_text, metadata_json FROM memories WHERE id = ?1",
+                        "SELECT searchable_text, category, metadata_json FROM memories WHERE id = ?1",
                         [result.memory_id],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                            ))
+                        },
                     )
                     .map_err(Into::into)
                 })?;
                 let metadata = row
-                    .1
+                    .2
                     .as_deref()
                     .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
                     .unwrap_or_default();
                 hits.push(ObservedHit {
                     text: redact_secret_material(&row.0, &metadata),
                     score: result.score,
+                    source: row.1,
                 });
             }
         }
@@ -1918,8 +2014,34 @@ mod app {
             .filter(|fragment| fragment_present(fragment, observed, &combined))
             .cloned()
             .collect::<Vec<_>>();
+        let missing_required_sources = check
+            .required_sources
+            .iter()
+            .filter(|source| {
+                !observed.iter().any(|hit| {
+                    hit.source
+                        .as_ref()
+                        .is_some_and(|candidate| normalize(candidate) == normalize(source))
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let present_forbidden_sources = check
+            .forbidden_sources
+            .iter()
+            .filter(|source| {
+                observed.iter().any(|hit| {
+                    hit.source
+                        .as_ref()
+                        .is_some_and(|candidate| normalize(candidate) == normalize(source))
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         let required_fragments_ok = missing_required_fragments.is_empty();
         let forbidden_fragments_ok = present_forbidden_fragments.is_empty();
+        let required_sources_ok = missing_required_sources.is_empty();
+        let forbidden_sources_ok = present_forbidden_sources.is_empty();
         let hit_count_ok = check
             .min_observed_hits
             .is_none_or(|min_hits| observed_hit_count >= min_hits);
@@ -1928,15 +2050,21 @@ mod app {
             expected_match,
             required_fragments_ok,
             forbidden_fragments_ok,
+            required_sources_ok,
+            forbidden_sources_ok,
             hit_count_ok,
             observed_hit_count,
             min_observed_hits: check.min_observed_hits,
             missing_required_fragments,
             present_forbidden_fragments,
+            missing_required_sources,
+            present_forbidden_sources,
         };
         let passed = criteria.expected_match
             && criteria.required_fragments_ok
             && criteria.forbidden_fragments_ok
+            && criteria.required_sources_ok
+            && criteria.forbidden_sources_ok
             && criteria.hit_count_ok;
         (passed, criteria)
     }
@@ -2152,6 +2280,7 @@ mod app {
             hits.push(ObservedHit {
                 text,
                 score: result.score,
+                source: None,
             });
         }
         Ok(hits)

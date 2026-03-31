@@ -185,8 +185,8 @@ Current status after the 2026-03-30 trust/safety pass:
   suppress generic defaults or weaker workaround notes when the query is
   explicit
 - the current remote-GPU engine-first baseline is:
-  - practical `43/43` exact
-  - practical `43/43` ann
+  - practical `45/45` exact
+  - practical `45/45` ann
   - live-library `58/58` exact
   - memloft-slice `90/90` exact
 - the practical suite now also validates deterministic reflection over repeated
@@ -195,6 +195,13 @@ Current status after the 2026-03-30 trust/safety pass:
 - FeMind now also has a consumer-safe persistence contract for those reflected
   objects, so applications can opt into storing stable derived knowledge
   without breaking generic `MemoryRecord` deserialization
+- persisted reflection now also has lifecycle behavior:
+  - older reflected rows with the same `knowledge_key` are superseded when the
+    derived summary changes
+  - persisted reflection rows get graph links back to supporting source
+    memories
+  - the practical suite now queries persisted reflection rows directly, not
+    only runtime reflection outputs
 
 ### 6. Keep Evaluation Engine-Centric
 

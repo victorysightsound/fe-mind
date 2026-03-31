@@ -2256,6 +2256,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             metadata.insert("knowledge_key".to_string(), object.key.clone());
             metadata.insert("knowledge_summary".to_string(), object.summary.clone());
             metadata.insert("knowledge_kind".to_string(), object.kind.to_string());
+            metadata.insert("reflection_status".to_string(), "current".to_string());
             metadata.insert(
                 "reflection_confidence".to_string(),
                 object.confidence.as_str().to_string(),
@@ -2272,13 +2273,111 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 "reflection_generated_at".to_string(),
                 object.generated_at.to_rfc3339(),
             );
+            metadata.remove("reflection_replaced_by");
+            metadata.remove("reflection_superseded_at");
 
             let metadata_json = serde_json::to_string(&metadata)?;
             let source_ids_json = serde_json::to_string(&object.source_ids)?;
             conn.execute(
-                "UPDATE memories SET metadata_json = ?1, tier = 2, source_ids = ?2 WHERE id = ?3",
+                "UPDATE memories
+                 SET metadata_json = ?1,
+                     tier = 2,
+                     source_ids = ?2,
+                     valid_until = NULL
+                 WHERE id = ?3",
                 rusqlite::params![metadata_json, source_ids_json, memory_id],
             )?;
+
+            conn.execute(
+                "DELETE FROM memory_relations
+                 WHERE source_id = ?1
+                   AND relation IN (?2, ?3)",
+                rusqlite::params![
+                    memory_id,
+                    crate::memory::RelationType::SupersededBy.as_str(),
+                    crate::memory::RelationType::ValidatedBy.as_str()
+                ],
+            )?;
+
+            for source_id in &object.source_ids {
+                conn.execute(
+                    "INSERT OR IGNORE INTO memory_relations (source_id, target_id, relation)
+                     VALUES (?1, ?2, ?3)",
+                    rusqlite::params![
+                        memory_id,
+                        source_id,
+                        crate::memory::RelationType::ValidatedBy.as_str()
+                    ],
+                )?;
+            }
+
+            let mut stmt = conn.prepare(
+                "SELECT id, metadata_json
+                 FROM memories
+                 WHERE id != ?1
+                   AND metadata_json IS NOT NULL",
+            )?;
+            let rows = stmt.query_map([memory_id], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+            })?;
+            let current_summary_key = normalize_reflection_value(&object.summary);
+            let superseded_at = object.generated_at.to_rfc3339();
+
+            for row in rows {
+                let (other_id, other_metadata_json) = row?;
+                let Some(other_metadata_json) = other_metadata_json else {
+                    continue;
+                };
+                let Ok(mut other_metadata) =
+                    serde_json::from_str::<std::collections::HashMap<String, String>>(
+                        &other_metadata_json,
+                    )
+                else {
+                    continue;
+                };
+
+                if !other_metadata
+                    .get("derived_kind")
+                    .is_some_and(|value| value.eq_ignore_ascii_case("reflection"))
+                {
+                    continue;
+                }
+                if other_metadata
+                    .get("knowledge_key")
+                    .is_none_or(|value| normalize_reflection_value(value) != normalize_reflection_value(&object.key))
+                {
+                    continue;
+                }
+                if other_metadata
+                    .get("knowledge_summary")
+                    .is_some_and(|value| normalize_reflection_value(value) == current_summary_key)
+                {
+                    continue;
+                }
+
+                other_metadata.insert("reflection_status".to_string(), "superseded".to_string());
+                other_metadata
+                    .insert("reflection_replaced_by".to_string(), memory_id.to_string());
+                other_metadata.insert("reflection_superseded_at".to_string(), superseded_at.clone());
+
+                let other_metadata_json = serde_json::to_string(&other_metadata)?;
+                conn.execute(
+                    "UPDATE memories
+                     SET metadata_json = ?1,
+                         valid_until = ?2
+                     WHERE id = ?3",
+                    rusqlite::params![other_metadata_json, superseded_at, other_id],
+                )?;
+                conn.execute(
+                    "INSERT OR IGNORE INTO memory_relations (source_id, target_id, relation)
+                     VALUES (?1, ?2, ?3)",
+                    rusqlite::params![
+                        other_id,
+                        memory_id,
+                        crate::memory::RelationType::SupersededBy.as_str()
+                    ],
+                )?;
+            }
             Ok(())
         })
     }
@@ -4483,6 +4582,235 @@ mod tests {
         assert!(matches!(first[0].store_result, StoreResult::Added(_)));
         assert!(matches!(second[0].store_result, StoreResult::Duplicate(_)));
         assert_eq!(first[0].memory_id, second[0].memory_id);
+    }
+
+    #[test]
+    fn persisted_reflection_rows_supersede_older_reflection_versions() {
+        use chrono::Duration;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        let older = Utc::now() - Duration::days(2);
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Older supported startup path: use WSL systemd to launch femind-embed-service.".to_string(),
+                created_at: older,
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "maintainer".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Use WSL systemd to launch femind-embed-service.".to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store old note");
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Migration note: WSL systemd was the supported startup path during the transition.".to_string(),
+                created_at: older + Duration::hours(1),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "normal".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "declared".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Use WSL systemd to launch femind-embed-service.".to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store old support");
+
+        let build_record = |object: &KnowledgeObject| {
+            Some(RichTestMem {
+                id: None,
+                text: object.summary.clone(),
+                created_at: object.generated_at,
+                memory_type: MemoryType::Semantic,
+                metadata: HashMap::new(),
+            })
+        };
+
+        let first = engine
+            .persist_reflected_knowledge_objects_with(
+                &ReflectionConfig {
+                    min_support_count: 2,
+                    min_trusted_support_count: 1,
+                    max_objects: 4,
+                },
+                build_record,
+            )
+            .expect("persist older reflection");
+        assert_eq!(first.len(), 1);
+
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Current supported startup path: use the Windows Scheduled Task at logon to launch femind-embed-service.".to_string(),
+                created_at: Utc::now() - Duration::hours(2),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "system".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service."
+                            .to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store new note");
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Project documentation now says the supported startup path is the Windows Scheduled Task at logon.".to_string(),
+                created_at: Utc::now() - Duration::hours(1),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service."
+                            .to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store new support");
+
+        let second = engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), build_record)
+            .expect("persist newer reflection");
+        assert_eq!(second.len(), 1);
+        assert_ne!(first[0].memory_id, second[0].memory_id);
+
+        let old_row = engine
+            .database()
+            .with_reader(|conn| {
+                Ok(conn.query_row(
+                    "SELECT metadata_json, valid_until FROM memories WHERE id = ?1",
+                    [first[0].memory_id],
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+                )?)
+            })
+            .expect("load old persisted reflection");
+        let old_metadata = old_row
+            .0
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+            .expect("old reflection metadata");
+        let replaced_by = second[0].memory_id.to_string();
+        assert_eq!(
+            old_metadata.get("reflection_status").map(String::as_str),
+            Some("superseded")
+        );
+        assert_eq!(
+            old_metadata.get("reflection_replaced_by").map(String::as_str),
+            Some(replaced_by.as_str())
+        );
+        assert!(old_row.1.is_some(), "older reflection row should be closed");
+
+        let successors = crate::memory::GraphMemory::superseded_successors(
+            engine.database(),
+            first[0].memory_id,
+        )
+        .expect("load supersession relation");
+        assert_eq!(successors, vec![second[0].memory_id]);
+    }
+
+    #[test]
+    fn persisted_reflection_rows_link_back_to_source_memories() {
+        use chrono::Duration;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Supported Windows startup path: use the Windows Scheduled Task at logon to launch femind-embed-service.".to_string(),
+                created_at: Utc::now() - Duration::hours(2),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "system".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service."
+                            .to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store note");
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Current supported startup path uses the Windows Scheduled Task at logon to launch femind-embed-service.".to_string(),
+                created_at: Utc::now(),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service."
+                            .to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store support");
+
+        let persisted = engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist reflection");
+        assert_eq!(persisted.len(), 1);
+
+        let relations = crate::memory::GraphMemory::direct_relations(
+            engine.database(),
+            persisted[0].memory_id,
+        )
+        .expect("load direct relations");
+        let mut validated_ids = relations
+            .into_iter()
+            .filter(|node| node.relation == crate::memory::RelationType::ValidatedBy)
+            .map(|node| node.memory_id)
+            .collect::<Vec<_>>();
+        validated_ids.sort_unstable();
+        let mut expected = persisted[0].object.source_ids.clone();
+        expected.sort_unstable();
+        assert_eq!(validated_ids, expected);
     }
 
     #[test]

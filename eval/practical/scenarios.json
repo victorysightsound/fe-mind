@@ -1291,8 +1291,24 @@
     "reflection": {
       "min_support_count": 2,
       "min_trusted_support_count": 1,
-      "max_objects": 4
+      "max_objects": 4,
+      "persist": true
     },
+    "retrieval_checks": [
+      {
+        "query": "What is the current supported startup path for femind-embed-service?",
+        "expected_answer": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+        "required_fragments": [
+          "Windows Scheduled Task",
+          "logon"
+        ],
+        "required_sources": [
+          "reflection"
+        ],
+        "min_observed_hits": 1,
+        "top_k": 5
+      }
+    ],
     "reflection_checks": [
       {
         "key": "femind-startup-path",
@@ -1363,8 +1379,24 @@
     "reflection": {
       "min_support_count": 2,
       "min_trusted_support_count": 1,
-      "max_objects": 4
+      "max_objects": 4,
+      "persist": true
     },
+    "retrieval_checks": [
+      {
+        "query": "What is FeMind's current evaluation strategy?",
+        "expected_answer": "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
+        "required_fragments": [
+          "engine-first",
+          "benchmark checkpoints"
+        ],
+        "required_sources": [
+          "reflection"
+        ],
+        "min_observed_hits": 1,
+        "top_k": 5
+      }
+    ],
     "reflection_checks": [
       {
         "key": "femind-eval-strategy",

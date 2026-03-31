@@ -38,6 +38,10 @@ Each scenario includes:
 - optional `retrieval_checks[].forbidden_fragments`
 - optional `retrieval_checks[].min_observed_hits`
 - optional `retrieval_checks[].graph_depth` to override scenario/default graph depth
+- optional `retrieval_checks[].top_k` to inspect a deeper observed shortlist for
+  coverage-sensitive checks
+- optional `retrieval_checks[].required_sources`
+- optional `retrieval_checks[].forbidden_sources`
 - optional `extraction_checks`
 - optional `abstention_checks`
 - optional `abstention_checks[].graph_depth`
@@ -51,6 +55,8 @@ Each scenario includes:
 - optional `reflection.min_support_count`
 - optional `reflection.min_trusted_support_count`
 - optional `reflection.max_objects`
+- optional `reflection.persist` to persist reflected knowledge objects into the
+  scenario database before retrieval checks run
 - optional `reflection_checks`
 - optional `reflection_checks[].key`
 - optional `reflection_checks[].expected_summary`
@@ -196,12 +202,15 @@ Current local baseline:
 - the practical set now also includes higher-impact approval-class routing for
   auth bypass, destructive resets, and traffic cutovers, plus pending-review
   detection for those note types
-- reranker-aware remote-fallback regression is currently green at `43/43`
-- reranker-aware remote-fallback ANN regression is also green at `43/43`
+- reranker-aware remote-fallback regression is currently green at `45/45`
+- reranker-aware remote-fallback ANN regression is also green at `45/45`
 - the practical set now also validates deterministic reflection over repeated
   trusted evidence for:
   - stable supported procedures
   - stable current decisions
+- reflection scenarios can now persist those derived knowledge objects and then
+  query them directly through ordinary retrieval checks using
+  `required_sources = ["reflection"]`
 - latest ANN summary: `target/practical-eval/retrieval-ann.json`
 
 LongMemEval and MemoryAgentBench remain useful, but only as secondary

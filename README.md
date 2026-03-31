@@ -27,8 +27,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `43/43`
-- retrieval-only practical eval in `ann` mode currently passes `43/43`
+- retrieval-only practical eval in `exact` mode currently passes `45/45`
+- retrieval-only practical eval in `ann` mode currently passes `45/45`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
@@ -62,7 +62,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `43/43` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `45/45` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
@@ -73,7 +73,8 @@ The practical live-validation path is now established and repeatable:
   state/conflict policy, and graph depth, along with the routed search plan
   used for each retrieval-style check
 - retrieval-style checks can now declare required fragments, forbidden
-  fragments, and minimum observed-hit counts so aggregation and provenance
+  fragments, required sources, forbidden sources, explicit observed depth, and
+  minimum observed-hit counts so aggregation, provenance, and reflection
   regressions fail for the right reason instead of only by loose token overlap
 - aggregation-style retrieval now uses an engine-level composition path that
   preserves distinct supporting memories, records total/distinct match counts,
@@ -90,6 +91,13 @@ The practical live-validation path is now established and repeatable:
   `persist_reflected_knowledge_objects_with(...)`, which lets FeMind annotate
   provenance, `source_ids`, and tier `2` without inventing its own opaque
   internal record format
+- persisted reflected knowledge now has a lifecycle:
+  - older reflected rows with the same `knowledge_key` are superseded when the
+    derived summary changes
+  - persisted reflection rows get `validated_by` graph links back to their
+    source memories
+  - the practical suite now queries persisted reflection rows directly instead
+    of validating only runtime reflection output
 - composed answers now also record confidence, abstention, and rationale so
   maintainers can see when FeMind answered confidently, when it abstained, and
   why

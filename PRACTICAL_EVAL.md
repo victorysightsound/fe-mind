@@ -114,6 +114,9 @@ Each scenario should include:
 - optional explicit retrieval criteria such as:
   - `required_fragments`
   - `forbidden_fragments`
+  - `required_sources`
+  - `forbidden_sources`
+  - `top_k`
   - `min_observed_hits`
 - optional `review_checks` for pending-review queue validation, including:
   - `min_pending_items`
@@ -126,6 +129,7 @@ Each scenario should include:
   - `min_support_count`
   - `min_trusted_support_count`
   - `max_objects`
+  - `persist`
 - optional `reflection_checks`, including:
   - `key`
   - `expected_summary`
@@ -232,7 +236,8 @@ The summary now also records:
   query-alignment, and rerank settings
 - per-check retrieval criteria reports showing whether the expected answer
   matched, whether required fragments were present, whether forbidden fragments
-  leaked in, and whether enough hits surfaced for coverage-sensitive checks
+  leaked in, whether required or forbidden sources appeared, and whether enough
+  hits surfaced for coverage-sensitive checks
 - per-check aggregation reports showing total matches, distinct supporting
   matches, and the composed evidence text used for rollup-style validation
 - per-check composed-answer reports showing the deterministic answer text and
@@ -293,8 +298,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `43/43`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `43/43`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `45/45`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `45/45`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
@@ -345,11 +350,19 @@ Current validated baseline:
   consumer-supplied record builder, so higher-order stable knowledge can move
   into application memory stores without FeMind forcing an internal record
   schema
+- persisted reflected knowledge now has an explicit lifecycle:
+  - older reflected rows with the same `knowledge_key` are superseded when the
+    derived summary changes
+  - persisted reflection rows get `validated_by` graph links back to their
+    supporting source memories
+  - the practical suite now queries persisted reflection rows directly through
+    retrieval checks using source-aware criteria instead of validating only the
+    runtime reflection object list
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `43/43`
-- latest reranker-aware `remote-fallback` ANN run passes `43/43`
+- latest reranker-aware `remote-fallback` exact run passes `45/45`
+- latest reranker-aware `remote-fallback` ANN run passes `45/45`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`
