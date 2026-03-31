@@ -159,6 +159,11 @@ Each scenario should include:
   build time through `SourceAuthorityRegistry`, so records that only declare
   `source_chain` or `source_kind` can still participate in authority
   arbitration
+- app-facing `source_kind` defaults are now validated in two ways:
+  - runtime guidance can win without any `source_chain` metadata
+  - provenance still matters inside an authoritative source kind, so
+    `partially-verified` and `relayed` guidance do not collapse into the same
+    answer quality
 - high-impact review policy examples now include:
   - auth bypass exceptions
   - destructive reset windows
@@ -446,6 +451,9 @@ Current validated baseline:
   registry works when records carry:
   - `source_chain`
   - `source_kind`
+- the practical suite now also proves that source-kind defaults respect
+  provenance ordering inside the same authoritative kind, instead of treating
+  all authoritative-kind records as interchangeable
 
 This exact-mode practical run is the standard local regression check before
 trying wider live usage samples or ANN comparisons.

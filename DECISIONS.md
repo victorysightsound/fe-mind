@@ -1970,6 +1970,39 @@ practical gap for real apps:
   practical `55/55` exact, practical `55/55` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 055: Validate Provenance Ordering Inside Source-Kind Authority Defaults
+
+**Decision:** Extend the practical suite so app-facing `source_kind`
+authority defaults are validated not only for top-level authority selection,
+but also for provenance-sensitive ordering inside the same authoritative kind.
+
+**Context:** Decision 054 established that apps can promote authority by
+domain and `source_kind`, which made it possible for runtime guidance to win
+without `source_chain` metadata. That still left an important quality
+question:
+- if two records share the same authoritative source kind,
+- and one is `partially-verified` while the other is only `relayed`,
+- app policy must not flatten those two into equivalent answers
+
+The practical gap mattered because real operational memory often has exactly
+that shape during migrations: the same trusted maintainer lane may contain both
+current partially-verified guidance and older relayed notes.
+
+**Consequences:**
+- the practical suite now includes `registry-kind-networking-provenance`
+- that scenario proves three things at once:
+  - app-facing `source_kind` policy can outrank a lower-authority verified
+    project doc
+  - provenance still orders records inside the authoritative maintainer lane
+  - `partially-verified` networking guidance beats `relayed` guidance instead
+    of collapsing into the same answer quality
+- no new engine heuristic was needed; the existing authority + provenance math
+  was already correct, and the value of this pass is the new permanent
+  regression coverage
+- Remote-GPU validation is green after the change:
+  practical `56/56` exact, practical `56/56` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

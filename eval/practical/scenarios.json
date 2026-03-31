@@ -607,6 +607,119 @@
     ]
   },
   {
+    "id": "registry-kind-networking-provenance",
+    "title": "Authority kind registry should still honor provenance within an authoritative kind",
+    "category": "authority-registry",
+    "goal": "App-facing source-kind defaults should let authoritative maintainer networking guidance beat a lower-authority verified project doc, while still preferring partially verified maintainer evidence over relayed maintainer evidence.",
+    "authority_kind_policies": [
+      {
+        "domain": "networking",
+        "kind": "maintainer",
+        "level": "authoritative"
+      },
+      {
+        "domain": "networking",
+        "kind": "project-doc",
+        "level": "primary"
+      }
+    ],
+    "records": [
+      {
+        "key": "kind-network-client",
+        "timestamp": "2026-03-31T09:14:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The current relay migration path depends on the active internal subnet guidance instead of the older bridge subnet notes."
+      },
+      {
+        "key": "kind-network-link",
+        "timestamp": "2026-03-31T09:15:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The migration relay guidance links the current maintainer subnet note, a relayed maintainer bridge subnet note, and the older project-doc bootstrap subnet note."
+      },
+      {
+        "key": "kind-network-partial",
+        "timestamp": "2026-03-31T09:16:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "partially-verified",
+          "content_secret_class": "private-network-range"
+        },
+        "text": "Current migration subnet: use 10.44.9.0/24 while the audited GPU VLAN move finishes."
+      },
+      {
+        "key": "kind-network-relayed",
+        "timestamp": "2026-03-31T09:17:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "relayed",
+          "content_secret_class": "private-network-range"
+        },
+        "text": "Relayed bridge note: use 10.44.7.0/24 from the early bridge subnet while the migration settles."
+      },
+      {
+        "key": "kind-network-project-doc",
+        "timestamp": "2026-03-31T09:18:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "content_secret_class": "private-network-range"
+        },
+        "text": "Bootstrap deployment subnet: 10.44.6.0/24 on the older bridge staging VLAN before the migration path was adopted."
+      }
+    ],
+    "relations": [
+      {
+        "from": "kind-network-client",
+        "to": "kind-network-link",
+        "relation": "related_to"
+      },
+      {
+        "from": "kind-network-link",
+        "to": "kind-network-partial",
+        "relation": "depends_on"
+      },
+      {
+        "from": "kind-network-link",
+        "to": "kind-network-relayed",
+        "relation": "depends_on"
+      },
+      {
+        "from": "kind-network-link",
+        "to": "kind-network-project-doc",
+        "relation": "depends_on"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How does the GPU relay connect to the current internal migration subnet now?",
+        "expected_answer": "Current migration subnet: use [REDACTED_NETWORK] while the audited GPU VLAN move finishes.",
+        "expected_intent": "exact-detail",
+        "expected_graph_depth": 2,
+        "top_k": 1,
+        "required_fragments": [
+          "Current migration subnet",
+          "audited GPU VLAN move"
+        ],
+        "forbidden_fragments": [
+          "10.44.7.0/24",
+          "10.44.6.0/24"
+        ],
+        "min_observed_hits": 1
+      }
+    ]
+  },
+  {
     "id": "graph-verified-private-network-guidance",
     "title": "Graph-linked private network guidance should prefer the fully verified subnet",
     "category": "multi-hop-graph",
