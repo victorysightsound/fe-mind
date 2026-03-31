@@ -136,6 +136,10 @@ mod app {
         query: String,
         expected_answer: String,
         #[serde(default)]
+        expected_intent: Option<String>,
+        #[serde(default)]
+        expected_reflection_preference: Option<String>,
+        #[serde(default)]
         required_fragments: Vec<String>,
         #[serde(default)]
         forbidden_fragments: Vec<String>,
@@ -700,6 +704,7 @@ mod app {
         mode: String,
         depth: String,
         graph_depth: u32,
+        reflection_preference: String,
         temporal_policy: String,
         state_conflict_policy: String,
         strict_grounding: bool,
@@ -715,6 +720,7 @@ mod app {
                 mode: value.mode_name().to_string(),
                 depth: value.depth_name().to_string(),
                 graph_depth: value.graph_depth,
+                reflection_preference: value.reflection_preference_name().to_string(),
                 temporal_policy: value.temporal_policy_name().to_string(),
                 state_conflict_policy: value.state_conflict_policy_name().to_string(),
                 strict_grounding: value.strict_grounding,
@@ -735,12 +741,22 @@ mod app {
     #[derive(Debug, Serialize)]
     struct RetrievalCriteriaReport {
         expected_match: bool,
+        intent_ok: bool,
+        reflection_preference_ok: bool,
         required_fragments_ok: bool,
         forbidden_fragments_ok: bool,
         required_sources_ok: bool,
         forbidden_sources_ok: bool,
         hit_count_ok: bool,
         observed_hit_count: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_intent: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_intent: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_reflection_preference: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_reflection_preference: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         min_observed_hits: Option<usize>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -1196,6 +1212,7 @@ mod app {
                         .aggregation
                         .as_ref()
                         .map(|details| details.composed_summary.as_str()),
+                    &route,
                     &check.query,
                     check,
                 );
@@ -1981,6 +1998,7 @@ mod app {
         observed_hit_count: usize,
         composed_answer: Option<&ComposedAnswerReport>,
         composed_summary: Option<&str>,
+        route: &QueryRoute,
         query: &str,
         check: &RetrievalCheck,
     ) -> (bool, RetrievalCriteriaReport) {
@@ -2045,15 +2063,32 @@ mod app {
         let hit_count_ok = check
             .min_observed_hits
             .is_none_or(|min_hits| observed_hit_count >= min_hits);
+        let observed_intent = route.intent.to_string();
+        let expected_intent = check.expected_intent.clone();
+        let intent_ok = expected_intent.as_ref().is_none_or(|expected| {
+            normalize(expected) == normalize(&observed_intent)
+        });
+        let observed_reflection_preference = route.reflection_preference_name().to_string();
+        let expected_reflection_preference = check.expected_reflection_preference.clone();
+        let reflection_preference_ok =
+            expected_reflection_preference.as_ref().is_none_or(|expected| {
+                normalize(expected) == normalize(&observed_reflection_preference)
+            });
 
         let criteria = RetrievalCriteriaReport {
             expected_match,
+            intent_ok,
+            reflection_preference_ok,
             required_fragments_ok,
             forbidden_fragments_ok,
             required_sources_ok,
             forbidden_sources_ok,
             hit_count_ok,
             observed_hit_count,
+            expected_intent,
+            observed_intent: Some(observed_intent),
+            expected_reflection_preference,
+            observed_reflection_preference: Some(observed_reflection_preference),
             min_observed_hits: check.min_observed_hits,
             missing_required_fragments,
             present_forbidden_fragments,
@@ -2061,6 +2096,8 @@ mod app {
             present_forbidden_sources,
         };
         let passed = criteria.expected_match
+            && criteria.intent_ok
+            && criteria.reflection_preference_ok
             && criteria.required_fragments_ok
             && criteria.forbidden_fragments_ok
             && criteria.required_sources_ok

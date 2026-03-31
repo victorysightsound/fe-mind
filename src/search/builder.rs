@@ -58,6 +58,7 @@ pub enum QueryIntent {
     General,
     ExactDetail,
     CurrentState,
+    StableSummary,
     HistoricalState,
     Aggregation,
     AbstentionRisk,
@@ -69,6 +70,7 @@ impl QueryIntent {
             Self::General => "general",
             Self::ExactDetail => "exact-detail",
             Self::CurrentState => "current-state",
+            Self::StableSummary => "stable-summary",
             Self::HistoricalState => "historical-state",
             Self::Aggregation => "aggregation",
             Self::AbstentionRisk => "abstention-risk",
@@ -161,6 +163,7 @@ pub struct QueryRoute {
     pub mode: SearchMode,
     pub depth: SearchDepth,
     pub graph_depth: u32,
+    pub reflection_preference: ReflectionSearchPreference,
     pub temporal_policy: TemporalPolicy,
     pub state_conflict_policy: StateConflictPolicy,
     pub strict_grounding: bool,
@@ -194,6 +197,10 @@ impl QueryRoute {
 
     pub fn state_conflict_policy_name(&self) -> &'static str {
         self.state_conflict_policy.as_str()
+    }
+
+    pub fn reflection_preference_name(&self) -> &'static str {
+        self.reflection_preference.as_str()
     }
 }
 
@@ -406,6 +413,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                 mode: self.mode.clone(),
                 depth: self.depth,
                 graph_depth: 0,
+                reflection_preference: self.reflection_preference,
                 temporal_policy: TemporalPolicy::Neutral,
                 state_conflict_policy: StateConflictPolicy::Neutral,
                 strict_grounding: self.strict_grounding_enabled,
@@ -447,6 +455,18 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             0
         };
 
+        let reflection_preference = if !matches!(
+            self.reflection_preference,
+            ReflectionSearchPreference::Neutral
+        ) {
+            self.reflection_preference
+        } else {
+            match intent {
+                QueryIntent::StableSummary => ReflectionSearchPreference::PreferCurrent,
+                _ => ReflectionSearchPreference::Neutral,
+            }
+        };
+
         let strict_grounding = if self.strict_grounding_overridden {
             self.strict_grounding_enabled
         } else {
@@ -457,7 +477,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         };
 
         let temporal_policy = match intent {
-            QueryIntent::CurrentState => TemporalPolicy::PreferNewer,
+            QueryIntent::CurrentState | QueryIntent::StableSummary => TemporalPolicy::PreferNewer,
             QueryIntent::HistoricalState => TemporalPolicy::PreferOlder,
             QueryIntent::General
             | QueryIntent::ExactDetail
@@ -466,7 +486,9 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         };
 
         let state_conflict_policy = match intent {
-            QueryIntent::CurrentState => StateConflictPolicy::PreferCurrent,
+            QueryIntent::CurrentState | QueryIntent::StableSummary => {
+                StateConflictPolicy::PreferCurrent
+            }
             QueryIntent::HistoricalState => StateConflictPolicy::PreferHistorical,
             QueryIntent::General
             | QueryIntent::ExactDetail
@@ -488,7 +510,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         } else {
             match intent {
                 QueryIntent::ExactDetail => self.rerank_limit.clamp(8, 16),
-                QueryIntent::CurrentState | QueryIntent::HistoricalState => {
+                QueryIntent::CurrentState | QueryIntent::StableSummary | QueryIntent::HistoricalState => {
                     self.rerank_limit.max(30)
                 }
                 QueryIntent::Aggregation | QueryIntent::AbstentionRisk => 0,
@@ -504,6 +526,9 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             QueryIntent::ExactDetail => "exact-detail query; keep grounding and compact reranking",
             QueryIntent::CurrentState => {
                 "current-state query; widen reranking and favor current-state evidence"
+            }
+            QueryIntent::StableSummary => {
+                "stable-summary query; prefer current reflected knowledge and durable current-state evidence"
             }
             QueryIntent::HistoricalState => {
                 "historical-state query; widen reranking and favor earlier-state evidence"
@@ -521,6 +546,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             mode,
             depth,
             graph_depth,
+            reflection_preference,
             temporal_policy,
             state_conflict_policy,
             strict_grounding,
@@ -603,7 +629,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let min_tier = self.depth_to_min_tier(route.depth);
         let precise_procedural_detail = query_requests_precise_procedural_detail(&self.query);
         let fetch_limit = if matches!(
-            self.reflection_preference,
+            route.reflection_preference,
             ReflectionSearchPreference::PreferCurrent | ReflectionSearchPreference::OnlyCurrent
         ) {
             self.limit * 3
@@ -631,7 +657,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         };
         let fts_results = self.maybe_rerank_results(fts_results, route.rerank_limit)?;
 
-        let mut results = self.apply_filters(fts_results);
+        let mut results = self.apply_filters(fts_results, route.reflection_preference);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
@@ -647,7 +673,11 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             results.retain(|r| r.score >= threshold);
         }
 
-        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
+        sort_results_with_reflection_preference(
+            self.db,
+            &mut results,
+            route.reflection_preference,
+        );
         results.truncate(self.limit);
         Ok(results)
     }
@@ -668,7 +698,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         )?;
         let fts_results = self.maybe_rerank_results(fts_results, route.rerank_limit)?;
 
-        let mut results = self.apply_filters(fts_results);
+        let mut results = self.apply_filters(fts_results, route.reflection_preference);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
@@ -679,7 +709,11 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             rerank_for_query_alignment(self.db, &self.query, &mut results);
         }
         results.retain(|r| r.score >= min_score);
-        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
+        sort_results_with_reflection_preference(
+            self.db,
+            &mut results,
+            route.reflection_preference,
+        );
         Ok(results)
     }
 
@@ -703,7 +737,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let vector_results = self.vector_results(&query_vec, &model_names, self.limit * 3)?;
         let vector_results = self.maybe_rerank_results(vector_results, route.rerank_limit)?;
 
-        let mut results = self.apply_filters(vector_results);
+        let mut results = self.apply_filters(vector_results, route.reflection_preference);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
@@ -716,7 +750,11 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
         }
-        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
+        sort_results_with_reflection_preference(
+            self.db,
+            &mut results,
+            route.reflection_preference,
+        );
         results.truncate(self.limit);
         Ok(results)
     }
@@ -758,7 +796,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let merged = rrf_merge(&fts_results, &vector_results, &self.query, self.limit * 2);
         let merged = self.maybe_rerank_results(merged, route.rerank_limit)?;
 
-        let mut results = self.apply_filters(merged);
+        let mut results = self.apply_filters(merged, route.reflection_preference);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
@@ -779,7 +817,11 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
         }
-        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
+        sort_results_with_reflection_preference(
+            self.db,
+            &mut results,
+            route.reflection_preference,
+        );
         results.truncate(self.limit);
         Ok(results)
     }
@@ -895,7 +937,11 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     }
 
     /// Apply scoring and filters to FTS results.
-    fn apply_filters(&self, fts_results: Vec<FtsResult>) -> Vec<SearchResult> {
+    fn apply_filters(
+        &self,
+        fts_results: Vec<FtsResult>,
+        reflection_preference: ReflectionSearchPreference,
+    ) -> Vec<SearchResult> {
         let mut results: Vec<SearchResult> = fts_results
             .into_iter()
             .map(|r| SearchResult {
@@ -919,7 +965,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         }
 
         apply_procedural_safety_isolation(self.db, &self.query, &mut results);
-        apply_reflection_preference(self.db, &mut results, self.reflection_preference);
+        apply_reflection_preference(self.db, &mut results, reflection_preference);
 
         // Re-sort by final score (descending)
         results.sort_by(|a, b| {
@@ -927,7 +973,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
+        sort_results_with_reflection_preference(self.db, &mut results, reflection_preference);
 
         results
     }
@@ -2059,6 +2105,8 @@ pub fn infer_query_intent(query: &str) -> QueryIntent {
         QueryIntent::Aggregation
     } else if query_requests_abstention_risk(query) {
         QueryIntent::AbstentionRisk
+    } else if query_requests_stable_summary(query) {
+        QueryIntent::StableSummary
     } else if query_requests_operational_constraint(query) {
         QueryIntent::CurrentState
     } else if query_requests_precise_procedural_detail(query) {
@@ -2072,6 +2120,77 @@ pub fn infer_query_intent(query: &str) -> QueryIntent {
     } else {
         QueryIntent::General
     }
+}
+
+fn query_requests_stable_summary(query: &str) -> bool {
+    if query_requests_aggregation(query)
+        || query_requests_abstention_risk(query)
+        || query_requests_historical_state(query)
+    {
+        return false;
+    }
+
+    let normalized = normalize_text(query);
+    let tokens: Vec<_> = normalized.split_whitespace().collect();
+    let exact_detail_signal = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "exact"
+                | "precise"
+                | "specific"
+                | "host"
+                | "address"
+                | "port"
+                | "filename"
+                | "hash"
+                | "id"
+                | "value"
+                | "number"
+                | "plist"
+        )
+    });
+    if exact_detail_signal {
+        return false;
+    }
+
+    let stability_signal = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "supported" | "preferred" | "recommended" | "standard" | "official" | "default"
+        )
+    }) || normalized.contains("current strategy")
+        || normalized.contains("current architecture")
+        || normalized.contains("supported startup path")
+        || normalized.contains("supported path")
+        || normalized.contains("preferred path")
+        || normalized.contains("evaluation strategy");
+
+    let summary_target = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "path"
+                | "workflow"
+                | "approach"
+                | "strategy"
+                | "guidance"
+                | "procedure"
+                | "setup"
+                | "architecture"
+                | "decision"
+                | "direction"
+        )
+    }) || normalized.contains("startup path")
+        || normalized.contains("evaluation strategy")
+        || normalized.contains("architecture decision");
+
+    let current_bias = query_requests_current_state(query)
+        || normalized.contains("supported")
+        || normalized.contains("preferred")
+        || normalized.contains("recommended")
+        || normalized.contains("standard")
+        || normalized.contains("official");
+
+    stability_signal && summary_target && current_bias
 }
 
 pub(crate) fn lexical_grounding_ok(query: &str, text: &str) -> bool {
@@ -2250,6 +2369,17 @@ fn query_alignment_multiplier(query: &str, text: &str) -> f32 {
                 multiplier *= 1.55;
             } else if historical {
                 multiplier *= 0.8;
+            }
+        }
+        QueryIntent::StableSummary => {
+            let current = text_indicates_current_state(&normalized_text)
+                || text_indicates_support_state(&normalized_text, &lowered_text)
+                || text_indicates_preference(&normalized_text);
+            let historical = text_indicates_historical_state(&normalized_text);
+            if current {
+                multiplier *= 1.6;
+            } else if historical {
+                multiplier *= 0.78;
             }
         }
         QueryIntent::HistoricalState => {
@@ -3150,7 +3280,7 @@ mod tests {
         );
         assert_eq!(
             infer_query_intent("What is the current preferred embedding path?"),
-            QueryIntent::CurrentState
+            QueryIntent::StableSummary
         );
         assert_eq!(
             infer_query_intent("What did we use before the rename?"),
@@ -3180,7 +3310,7 @@ mod tests {
             infer_query_intent(
                 "What is the supported Windows startup path for femind-embed-service?"
             ),
-            QueryIntent::ExactDetail
+            QueryIntent::StableSummary
         );
     }
 
@@ -3246,8 +3376,8 @@ mod tests {
     #[test]
     fn query_route_widens_reranking_for_state_queries() {
         let db = setup();
-        let current =
-            SearchBuilder::<TestMem>::new(&db, "What is the current preferred path?").query_route();
+        let current = SearchBuilder::<TestMem>::new(&db, "What is the current active endpoint?")
+            .query_route();
         let historical =
             SearchBuilder::<TestMem>::new(&db, "What was the preferred path before?").query_route();
         assert_eq!(current.intent, QueryIntent::CurrentState);
@@ -3266,6 +3396,24 @@ mod tests {
         assert!(historical.query_alignment);
         assert_eq!(current.rerank_limit, 30);
         assert_eq!(historical.rerank_limit, 30);
+    }
+
+    #[test]
+    fn query_route_prefers_reflection_for_stable_summary_queries() {
+        let db = setup();
+        let route = SearchBuilder::<TestMem>::new(
+            &db,
+            "What is the current supported startup path for femind-embed-service?",
+        )
+        .query_route();
+        assert_eq!(route.intent, QueryIntent::StableSummary);
+        assert_eq!(
+            route.reflection_preference,
+            ReflectionSearchPreference::PreferCurrent
+        );
+        assert_eq!(route.temporal_policy, TemporalPolicy::PreferNewer);
+        assert_eq!(route.state_conflict_policy, StateConflictPolicy::PreferCurrent);
+        assert_eq!(route.rerank_limit, 30);
     }
 
     #[test]

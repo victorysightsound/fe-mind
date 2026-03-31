@@ -111,6 +111,14 @@ The practical live-validation path is now established and repeatable:
 - reflection refresh planning is now application-facing:
   stale, changed, or newly reinforced derived knowledge can be recomputed using
   an explicit `ReflectionRefreshPolicy` instead of ad hoc timer logic
+- routed retrieval now also has an explicit `stable-summary` intent:
+  questions that clearly ask for the supported, preferred, recommended, or
+  current durable summary can automatically prefer current reflected knowledge
+  instead of relying on ordinary retrieval to surface the right row by chance
+- the practical suite now asserts route-level reflection behavior for those
+  scenarios, including:
+  - expected routed intent
+  - expected reflection preference
 - composed answers now also record confidence, abstention, and rationale so
   maintainers can see when FeMind answered confidently, when it abstained, and
   why

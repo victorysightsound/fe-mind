@@ -207,6 +207,10 @@ Current status after the 2026-03-30 trust/safety pass:
   - applications can inspect persisted reflected knowledge by key
   - applications can compute an explicit reflection refresh plan instead of
     treating recomputation as an internal-only concern
+- FeMind now also routes `stable-summary` queries automatically when the query
+  shape clearly asks for the supported, preferred, or recommended durable
+  summary of a fact family, so reflection can participate in ordinary engine
+  behavior instead of staying only an application opt-in
 
 ### 6. Keep Evaluation Engine-Centric
 

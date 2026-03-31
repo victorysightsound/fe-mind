@@ -1579,6 +1579,47 @@ knowledge remained technically present but operationally awkward.
 
 ---
 
+## Decision 046: Route Stable-Summary Queries to Current Reflected Knowledge
+
+**Date:** 2026-03-31
+
+**Decision:** Add a first-class `stable-summary` query intent to routed
+retrieval. Queries that clearly ask for the supported, preferred,
+recommended, or current durable summary of a fact family should
+automatically prefer current reflected rows and current-state evidence.
+
+**Context:** Decision 045 exposed stable-knowledge helpers explicitly, but
+left ordinary retrieval unchanged. That meant reflection remained opt-in at the
+API boundary, and practical scenarios could still pass for the wrong reason if
+ordinary retrieval happened to surface the reflected row without the route
+actually recognizing the query shape.
+
+**Rationale:**
+- stable-summary behavior should be part of the engine, not only a consumer
+  helper
+- applications should not need to know FeMind internals to ask a natural
+  “what is the current supported path/strategy” question
+- the practical suite needs route-level assertions so intent-routing regressions
+  are visible even when the final answer still looks right
+
+**Consequences:**
+- `QueryIntent` now includes `StableSummary`
+- routed plans now carry `reflection_preference`
+- stable-summary routes:
+  - prefer current reflected rows
+  - favor newer/current-state evidence
+  - widen reranking like current-state queries
+- practical retrieval checks can now assert:
+  - `expected_intent`
+  - `expected_reflection_preference`
+- reflection scenarios now prove both:
+  - the answer is correct
+  - the engine actually routed them through `stable-summary`
+- Remote-GPU validation is green after the change:
+  practical `45/45` exact and practical `45/45` ANN
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

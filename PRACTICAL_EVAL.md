@@ -112,6 +112,8 @@ Each scenario should include:
   `source_trust`, `source_kind`, `source_verification`, and
   `content_sensitivity`
 - optional explicit retrieval criteria such as:
+  - `expected_intent`
+  - `expected_reflection_preference`
   - `required_fragments`
   - `forbidden_fragments`
   - `required_sources`
@@ -368,6 +370,13 @@ Current validated baseline:
 - reflection refresh is now driven by `ReflectionRefreshPolicy`, so apps can
   recompute persisted knowledge when it is stale, materially changed, or backed
   by stronger support instead of relying on an opaque background cadence
+- the engine now also routes a first-class `stable-summary` intent:
+  supported/preferred/recommended/current durable-summary questions can
+  automatically prefer current reflected rows without forcing callers to opt
+  into a separate helper
+- practical retrieval checks can now fail explicitly when the routed intent or
+  routed reflection preference is wrong, even if the answer still happens to
+  pass by accident
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
