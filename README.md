@@ -81,7 +81,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `50/50` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `73/73` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
@@ -139,6 +139,16 @@ The practical live-validation path is now established and repeatable:
   quality:
   support weakening, trusted-summary conflicts, and retirement when a current
   reflected row no longer qualifies
+- the practical harness now also supports a second reflection phase through:
+  - `reflection_followup_records`
+  - `reflection_followup_mutations`
+  - `reflection_refresh`
+  - `reflection_refresh_checks`
+- that means reflection lifecycle is now covered end to end in the engine-first
+  suite, not only through unit tests:
+  - stronger authoritative evidence can refresh a persisted summary
+  - weakened support can force a refresh with lower support counts
+  - lost qualification can retire a persisted reflected row
 - routed retrieval now also has an explicit `stable-summary` intent:
   questions that clearly ask for the supported, preferred, recommended, or
   current durable summary can automatically prefer current reflected knowledge

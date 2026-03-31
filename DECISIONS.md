@@ -2134,6 +2134,45 @@ longer the literal string the query mentions.
   practical `68/68` exact, practical `68/68` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 060: Add Reflection Refresh Lifecycle Regressions
+
+**Decision:** Extend the engine-first practical harness so persisted reflection
+lifecycle can be validated end to end after a second evidence phase, not only
+through unit tests.
+
+**Context:** FeMind already had application-facing reflection refresh planning
+and execution through `ReflectionRefreshPolicy`, but the practical harness only
+covered one-pass reflection. That left an important gap between engine unit
+tests and real-world regression coverage:
+- stronger authoritative follow-up evidence could change a reflected summary
+  without any practical scenario proving it
+- support weakening and retirement were only covered in direct engine tests
+- the engine-first loop could validate the existence of a reflection API, but
+  not whether persisted reflected rows actually refreshed or retired after
+  realistic follow-up evidence
+
+For a production memory engine, reflection quality needs the same durable
+scenario coverage as retrieval, authority, and safety.
+
+**Consequences:**
+- the practical harness now supports:
+  - `reflection_followup_records`
+  - `reflection_followup_mutations`
+  - `reflection_refresh`
+  - `reflection_refresh_checks`
+- practical scenarios can now:
+  - add follow-up evidence after an initial persisted reflection pass
+  - mutate supporting records so support genuinely weakens or disappears
+  - assert refresh-plan action/reasons
+  - assert the persisted lifecycle state after refresh execution
+- the engine-first suite now includes:
+  - `reflection-refresh-runtime-authority-update`
+  - `reflection-refresh-support-weakened`
+  - `reflection-refresh-retire-no-longer-qualified`
+- Remote-GPU validation is green after the change:
+  practical `73/73` exact, practical `73/73` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

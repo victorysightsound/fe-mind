@@ -2812,5 +2812,293 @@
         ]
       }
     ]
+  },
+  {
+    "id": "reflection-refresh-runtime-authority-update",
+    "title": "Reflection refresh should replace weaker runtime guidance when stronger evidence arrives",
+    "category": "reflection-refresh-lifecycle",
+    "goal": "A persisted reflection should refresh to the stronger current runtime summary when more authoritative support appears later.",
+    "records": [
+      {
+        "key": "runtime-old-one",
+        "timestamp": "2026-03-29T08:00:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_authority_domain": "deployment",
+          "source_authority_level": "primary",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-hosting",
+          "knowledge_summary": "Run femind-embed-service inside WSL systemd on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Deployment guidance note: run femind-embed-service inside WSL systemd on the GPU host."
+      },
+      {
+        "key": "runtime-old-two",
+        "timestamp": "2026-03-29T08:05:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_authority_domain": "deployment",
+          "source_authority_level": "primary",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-hosting",
+          "knowledge_summary": "Run femind-embed-service inside WSL systemd on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Older deployment note repeats WSL systemd on the GPU host."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 1,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_followup_records": [
+      {
+        "key": "runtime-new-one",
+        "timestamp": "2026-03-31T08:00:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "verified",
+          "source_authority_domain": "runtime",
+          "source_authority_level": "authoritative",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-hosting",
+          "knowledge_summary": "Run femind-embed-service as a native Windows scheduled task on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Current runtime guidance: run femind-embed-service as a native Windows scheduled task on the GPU host."
+      },
+      {
+        "key": "runtime-new-two",
+        "timestamp": "2026-03-31T08:10:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "source_authority_domain": "runtime",
+          "source_authority_level": "authoritative",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-hosting",
+          "knowledge_summary": "Run femind-embed-service as a native Windows scheduled task on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Observed runtime note confirms the native Windows scheduled task on the GPU host."
+      }
+    ],
+    "reflection_refresh_checks": [
+      {
+        "key": "femind-runtime-hosting",
+        "expected_action": "persist",
+        "required_reasons": [
+          "summary-changed"
+        ],
+        "expected_current_present": true,
+        "expected_current_summary": "Run femind-embed-service as a native Windows scheduled task on the GPU host.",
+        "expected_latest_status": "current"
+      }
+    ],
+    "reflection_checks": [
+      {
+        "key": "femind-runtime-hosting",
+        "expected_summary": "Run femind-embed-service as a native Windows scheduled task on the GPU host.",
+        "expected_kind": "stable-procedure",
+        "expected_contested": true,
+        "min_support_count": 2,
+        "min_trusted_support_count": 2,
+        "min_confidence": "medium",
+        "required_fragments": [
+          "native Windows scheduled task",
+          "GPU host"
+        ],
+        "forbidden_fragments": [
+          "WSL systemd"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "reflection-refresh-support-weakened",
+    "title": "Reflection refresh should detect when support for a stable summary weakens",
+    "category": "reflection-refresh-lifecycle",
+    "goal": "A persisted reflection should refresh when one of its trusted supporting records stops qualifying.",
+    "records": [
+      {
+        "key": "startup-support-one",
+        "timestamp": "2026-03-30T07:00:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "knowledge_key": "femind-startup-path-refresh",
+          "knowledge_summary": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "System note: the supported startup path uses the Windows Scheduled Task at logon."
+      },
+      {
+        "key": "startup-support-two",
+        "timestamp": "2026-03-30T07:05:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "knowledge_key": "femind-startup-path-refresh",
+          "knowledge_summary": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Project doc confirms the Windows Scheduled Task at logon is the current startup path."
+      },
+      {
+        "key": "startup-support-three",
+        "timestamp": "2026-03-30T07:10:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "verified",
+          "knowledge_key": "femind-startup-path-refresh",
+          "knowledge_summary": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Ops note also repeats the Windows Scheduled Task at logon startup path."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 2,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_followup_mutations": [
+      {
+        "key": "startup-support-three",
+        "remove_metadata_keys": [
+          "knowledge_key",
+          "knowledge_summary",
+          "knowledge_kind"
+        ]
+      }
+    ],
+    "reflection_refresh_checks": [
+      {
+        "key": "femind-startup-path-refresh",
+        "expected_action": "persist",
+        "required_reasons": [
+          "support-weakened",
+          "trusted-support-weakened"
+        ],
+        "expected_current_present": true,
+        "expected_current_summary": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+        "expected_latest_status": "current"
+      }
+    ],
+    "reflection_checks": [
+      {
+        "key": "femind-startup-path-refresh",
+        "expected_summary": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+        "expected_kind": "stable-procedure",
+        "expected_contested": false,
+        "min_support_count": 2,
+        "min_trusted_support_count": 2,
+        "min_confidence": "high",
+        "required_fragments": [
+          "Windows Scheduled Task",
+          "logon"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "reflection-refresh-retire-no-longer-qualified",
+    "title": "Reflection refresh should retire persisted knowledge that no longer qualifies",
+    "category": "reflection-refresh-lifecycle",
+    "goal": "When every supporting knowledge record loses its reflection metadata, the persisted reflection should retire.",
+    "records": [
+      {
+        "key": "retire-support-one",
+        "timestamp": "2026-03-30T09:00:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "knowledge_key": "femind-retired-procedure",
+          "knowledge_summary": "Use the native Windows scheduled task to start the remote service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Earlier procedure note: use the native Windows scheduled task to start the remote service."
+      },
+      {
+        "key": "retire-support-two",
+        "timestamp": "2026-03-30T09:05:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "knowledge_key": "femind-retired-procedure",
+          "knowledge_summary": "Use the native Windows scheduled task to start the remote service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Project doc also recorded the native Windows scheduled task startup procedure."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 2,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_followup_mutations": [
+      {
+        "key": "retire-support-one",
+        "remove_metadata_keys": [
+          "knowledge_key",
+          "knowledge_summary",
+          "knowledge_kind"
+        ]
+      },
+      {
+        "key": "retire-support-two",
+        "remove_metadata_keys": [
+          "knowledge_key",
+          "knowledge_summary",
+          "knowledge_kind"
+        ]
+      }
+    ],
+    "reflection_refresh_checks": [
+      {
+        "key": "femind-retired-procedure",
+        "expected_action": "retire",
+        "required_reasons": [
+          "no-longer-qualifies"
+        ],
+        "expected_current_present": false,
+        "expected_latest_status": "retired"
+      }
+    ]
   }
 ]

@@ -143,6 +143,19 @@ Each scenario should include:
   - `min_confidence`
   - `required_fragments`
   - `forbidden_fragments`
+- optional reflection refresh follow-up inputs, including:
+  - `reflection_followup_records`
+  - `reflection_followup_mutations`
+  - `reflection_refresh`
+  - `reflection_refresh_checks`
+- optional `reflection_refresh_checks`, including:
+  - `key`
+  - `expected_action`
+  - `required_reasons`
+  - `forbidden_reasons`
+  - `expected_current_present`
+  - `expected_current_summary`
+  - `expected_latest_status`
 - review metadata on records such as `review_scope`, `review_policy_class`,
   `review_reviewer`, `review_template`, `review_expires_at`, and
   `review_replaced_by`
@@ -401,6 +414,11 @@ Current validated baseline:
   - support weakening
   - trusted-summary contention
   - retirement when a current reflected row no longer qualifies
+- the practical harness can now validate those refresh decisions end to end:
+  - apply follow-up records after the initial persisted reflection pass
+  - mutate supporting records so support can genuinely weaken or disappear
+  - assert refresh plan action/reasons
+  - assert persisted current/retired lifecycle state after refresh execution
 - the engine now also routes a first-class `stable-summary` intent:
   supported/preferred/recommended/current durable-summary questions can
   automatically prefer current reflected rows without forcing callers to opt
@@ -428,8 +446,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `68/68`
-- latest reranker-aware `remote-fallback` ANN run passes `68/68`
+- latest reranker-aware `remote-fallback` exact run passes `73/73`
+- latest reranker-aware `remote-fallback` ANN run passes `73/73`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

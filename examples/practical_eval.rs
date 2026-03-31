@@ -11,9 +11,9 @@ mod app {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::{Duration as StdDuration, Instant};
 
-    use chrono::{DateTime, Utc};
+    use chrono::{DateTime, Duration as ChronoDuration, Utc};
     #[cfg(feature = "api-embeddings")]
     use femind::embeddings::ApiBackend;
     use femind::embeddings::EmbeddingBackend;
@@ -24,7 +24,9 @@ mod app {
     #[cfg(feature = "local-embeddings")]
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
     use femind::engine::{
-        EngineConfig, KnowledgeObject, MemoryEngine, ReflectionConfig, ReviewItem, VectorSearchMode,
+        EngineConfig, KnowledgeObject, MemoryEngine, PersistedKnowledgeSummary, ReflectionConfig,
+        ReflectionLifecycleStatus, ReflectionRefreshPlanItem, ReflectionRefreshPolicy, ReviewItem,
+        VectorSearchMode,
     };
     #[cfg(feature = "api-llm")]
     use femind::llm::ApiLlmCallback;
@@ -136,6 +138,19 @@ mod app {
     }
 
     #[derive(Debug, Deserialize)]
+    struct ScenarioRecordMutation {
+        key: String,
+        #[serde(default)]
+        remove_metadata_keys: Vec<String>,
+        #[serde(default)]
+        set_metadata: HashMap<String, String>,
+        #[serde(default)]
+        valid_from: Option<String>,
+        #[serde(default)]
+        valid_until: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
     struct ScenarioAuthorityKindPolicyConfig {
         domain: String,
         kind: String,
@@ -235,6 +250,44 @@ mod app {
     }
 
     #[derive(Debug, Deserialize)]
+    struct ScenarioReflectionRefreshConfig {
+        #[serde(default = "default_true")]
+        execute: bool,
+        #[serde(default)]
+        max_age_hours: Option<i64>,
+        #[serde(default)]
+        min_support_growth: Option<usize>,
+        #[serde(default)]
+        min_trusted_support_growth: Option<usize>,
+        #[serde(default)]
+        min_support_drop: Option<usize>,
+        #[serde(default)]
+        min_trusted_support_drop: Option<usize>,
+        #[serde(default)]
+        refresh_on_summary_change: Option<bool>,
+        #[serde(default)]
+        refresh_on_competing_trusted_summary: Option<bool>,
+        #[serde(default)]
+        retire_when_no_longer_qualified: Option<bool>,
+    }
+
+    impl Default for ScenarioReflectionRefreshConfig {
+        fn default() -> Self {
+            Self {
+                execute: true,
+                max_age_hours: None,
+                min_support_growth: None,
+                min_trusted_support_growth: None,
+                min_support_drop: None,
+                min_trusted_support_drop: None,
+                refresh_on_summary_change: None,
+                refresh_on_competing_trusted_summary: None,
+                retire_when_no_longer_qualified: None,
+            }
+        }
+    }
+
+    #[derive(Debug, Deserialize)]
     struct ReflectionCheck {
         key: String,
         expected_summary: String,
@@ -252,6 +305,22 @@ mod app {
         required_fragments: Vec<String>,
         #[serde(default)]
         forbidden_fragments: Vec<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ReflectionRefreshCheck {
+        key: String,
+        expected_action: String,
+        #[serde(default)]
+        required_reasons: Vec<String>,
+        #[serde(default)]
+        forbidden_reasons: Vec<String>,
+        #[serde(default)]
+        expected_current_present: Option<bool>,
+        #[serde(default)]
+        expected_current_summary: Option<String>,
+        #[serde(default)]
+        expected_latest_status: Option<String>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -279,6 +348,14 @@ mod app {
         review_checks: Vec<ReviewCheck>,
         #[serde(default)]
         reflection: ScenarioReflectionConfig,
+        #[serde(default)]
+        reflection_followup_records: Vec<ScenarioRecord>,
+        #[serde(default)]
+        reflection_followup_mutations: Vec<ScenarioRecordMutation>,
+        #[serde(default)]
+        reflection_refresh: ScenarioReflectionRefreshConfig,
+        #[serde(default)]
+        reflection_refresh_checks: Vec<ReflectionRefreshCheck>,
         #[serde(default)]
         reflection_checks: Vec<ReflectionCheck>,
     }
@@ -906,6 +983,23 @@ mod app {
         source_ids: Vec<i64>,
     }
 
+    #[derive(Debug, Serialize, Clone)]
+    struct PersistedKnowledgeSummaryReport {
+        memory_id: i64,
+        key: String,
+        summary: String,
+        kind: String,
+        status: String,
+        confidence: String,
+        support_count: usize,
+        trusted_support_count: usize,
+        contested: bool,
+        source_ids: Vec<i64>,
+        created_at: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        valid_until: Option<String>,
+    }
+
     #[derive(Debug, Serialize)]
     struct ReflectionCriteriaReport {
         found: bool,
@@ -923,6 +1017,46 @@ mod app {
         missing_required_fragments: Vec<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         present_forbidden_fragments: Vec<String>,
+    }
+
+    #[derive(Debug, Serialize, Clone)]
+    struct ReflectionRefreshPlanItemReport {
+        key: String,
+        action: String,
+        reasons: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        object: Option<KnowledgeObjectReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        current: Option<PersistedKnowledgeSummaryReport>,
+    }
+
+    #[derive(Debug, Serialize)]
+    struct ReflectionRefreshCriteriaReport {
+        found: bool,
+        action_ok: bool,
+        current_present_ok: bool,
+        current_summary_ok: bool,
+        latest_status_ok: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_action: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_action: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_current_present: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_current_present: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_current_summary: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_current_summary: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_latest_status: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_latest_status: Option<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        missing_required_reasons: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        present_forbidden_reasons: Vec<String>,
     }
 
     struct RetrievalObservation {
@@ -971,6 +1105,19 @@ mod app {
     }
 
     #[derive(Debug, Serialize)]
+    struct ReflectionRefreshReport {
+        passed: bool,
+        key: String,
+        expected: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        matched: Option<ReflectionRefreshPlanItemReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        current_after: Option<PersistedKnowledgeSummaryReport>,
+        observed_after: Vec<PersistedKnowledgeSummaryReport>,
+        criteria: ReflectionRefreshCriteriaReport,
+    }
+
+    #[derive(Debug, Serialize)]
     struct ScenarioReport {
         id: String,
         title: String,
@@ -981,6 +1128,7 @@ mod app {
         abstention: Vec<CheckReport>,
         review: Vec<ReviewReport>,
         reflection: Vec<ReflectionReport>,
+        reflection_refresh: Vec<ReflectionRefreshReport>,
     }
 
     #[derive(Debug, Serialize)]
@@ -1105,13 +1253,15 @@ mod app {
                 .map(|c| c.passed)
                 .chain(report.review.iter().map(|c| c.passed))
                 .chain(report.reflection.iter().map(|c| c.passed))
+                .chain(report.reflection_refresh.iter().map(|c| c.passed))
                 .filter(|passed| *passed)
                 .count();
             let scenario_total = report.retrieval.len()
                 + report.extraction.len()
                 + report.abstention.len()
                 + report.review.len()
-                + report.reflection.len();
+                + report.reflection.len()
+                + report.reflection_refresh.len();
             passed_checks += scenario_passed;
             total_checks += scenario_total;
 
@@ -1240,11 +1390,20 @@ mod app {
             ..EngineConfig::default()
         };
 
-        if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
-            seed_retrieval_corpus(&engine, scenario, config, extractor)?;
+        let mut record_ids_by_key = if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
+            seed_retrieval_corpus(&engine, scenario, config, extractor)?
+        } else {
+            HashMap::new()
+        };
+        if !scenario.reflection_refresh_checks.is_empty() && !scenario.reflection.persist {
+            return Err(format!(
+                "scenario '{}' uses reflection_refresh_checks but reflection.persist is false",
+                scenario.id
+            )
+            .into());
         }
         let reflection_config = reflection_config_for_scenario(scenario);
-        let reflected_objects = if matches!(config.mode, EvalMode::Retrieval | EvalMode::All)
+        let mut reflected_objects = if matches!(config.mode, EvalMode::Retrieval | EvalMode::All)
             && (scenario.reflection.persist || !scenario.reflection_checks.is_empty())
         {
             if scenario.reflection.persist {
@@ -1261,6 +1420,51 @@ mod app {
         } else {
             Vec::new()
         };
+        let mut reflection_refresh_reports = Vec::new();
+        if matches!(config.mode, EvalMode::Retrieval | EvalMode::All)
+            && (!scenario.reflection_followup_records.is_empty()
+                || !scenario.reflection_followup_mutations.is_empty()
+                || !scenario.reflection_refresh_checks.is_empty())
+        {
+            seed_reflection_followup_records(
+                &engine,
+                scenario,
+                config,
+                extractor,
+                &mut record_ids_by_key,
+            )?;
+            apply_reflection_followup_mutations(&engine, scenario, &record_ids_by_key)?;
+            reflected_objects = engine.reflect_knowledge_objects(&reflection_config)?;
+
+            let refresh_policy = reflection_refresh_policy_for_scenario(scenario);
+            let refresh_plan =
+                engine.reflection_refresh_plan(&reflection_config, &refresh_policy)?;
+            if scenario.reflection_refresh.execute {
+                let _ = engine.refresh_reflected_knowledge_objects_with_policy(
+                    &reflection_config,
+                    &refresh_policy,
+                    |object| Some(persisted_eval_memory_from_knowledge_object(object)),
+                )?;
+            }
+            let persisted_after = engine.persisted_reflected_knowledge()?;
+
+            for check in &scenario.reflection_refresh_checks {
+                let (passed, criteria, matched, current_after, observed_after) =
+                    evaluate_reflection_refresh_check(&refresh_plan, &persisted_after, check);
+                reflection_refresh_reports.push(ReflectionRefreshReport {
+                    passed,
+                    key: check.key.clone(),
+                    expected: check.expected_action.clone(),
+                    matched: matched.map(reflection_refresh_plan_item_report),
+                    current_after: current_after.map(persisted_knowledge_summary_report),
+                    observed_after: observed_after
+                        .iter()
+                        .map(|summary| persisted_knowledge_summary_report(summary))
+                        .collect(),
+                    criteria,
+                });
+            }
+        }
 
         let mut retrieval = Vec::new();
         if matches!(config.mode, EvalMode::Retrieval | EvalMode::All) {
@@ -1472,6 +1676,7 @@ mod app {
             abstention,
             review,
             reflection,
+            reflection_refresh: reflection_refresh_reports,
         })
     }
 
@@ -1516,6 +1721,38 @@ mod app {
             min_trusted_support_count: scenario.reflection.min_trusted_support_count.unwrap_or(1),
             max_objects: scenario.reflection.max_objects.unwrap_or(12),
         }
+    }
+
+    fn reflection_refresh_policy_for_scenario(scenario: &Scenario) -> ReflectionRefreshPolicy {
+        let mut policy = ReflectionRefreshPolicy::default();
+        if let Some(hours) = scenario.reflection_refresh.max_age_hours {
+            policy.max_age = Some(ChronoDuration::hours(hours));
+        }
+        if let Some(value) = scenario.reflection_refresh.min_support_growth {
+            policy.min_support_growth = value;
+        }
+        if let Some(value) = scenario.reflection_refresh.min_trusted_support_growth {
+            policy.min_trusted_support_growth = value;
+        }
+        if let Some(value) = scenario.reflection_refresh.min_support_drop {
+            policy.min_support_drop = value;
+        }
+        if let Some(value) = scenario.reflection_refresh.min_trusted_support_drop {
+            policy.min_trusted_support_drop = value;
+        }
+        if let Some(value) = scenario.reflection_refresh.refresh_on_summary_change {
+            policy.refresh_on_summary_change = value;
+        }
+        if let Some(value) = scenario
+            .reflection_refresh
+            .refresh_on_competing_trusted_summary
+        {
+            policy.refresh_on_competing_trusted_summary = value;
+        }
+        if let Some(value) = scenario.reflection_refresh.retire_when_no_longer_qualified {
+            policy.retire_when_no_longer_qualified = value;
+        }
+        policy
     }
 
     fn persisted_eval_memory_from_knowledge_object(object: &KnowledgeObject) -> EvalMemory {
@@ -1634,16 +1871,31 @@ mod app {
                 reflection_passed,
             );
 
+            let reflection_refresh_total = report.reflection_refresh.len();
+            let reflection_refresh_passed = report
+                .reflection_refresh
+                .iter()
+                .filter(|check| check.passed)
+                .count();
+            record_stat(
+                &mut check_type_stats,
+                "reflection-refresh",
+                reflection_refresh_total,
+                reflection_refresh_passed,
+            );
+
             let scenario_total = retrieval_total
                 + extraction_total
                 + abstention_total
                 + review_total
-                + reflection_total;
+                + reflection_total
+                + reflection_refresh_total;
             let scenario_passed = retrieval_passed
                 + extraction_passed
                 + abstention_passed
                 + review_passed
-                + reflection_passed;
+                + reflection_passed
+                + reflection_refresh_passed;
             record_stat(
                 &mut category_stats,
                 &report.category,
@@ -1818,7 +2070,7 @@ mod app {
                     Some(Arc::new(RemoteEmbeddingBackend::minilm_with_timeout(
                         &config.embed_remote_base_url,
                         Some(auth_token),
-                        config.embed_remote_timeout_secs.map(Duration::from_secs),
+                        config.embed_remote_timeout_secs.map(StdDuration::from_secs),
                     )?))
                 }
                 #[cfg(not(feature = "remote-embeddings"))]
@@ -1841,7 +2093,7 @@ mod app {
                             &config.embed_remote_base_url,
                             Some(auth_token),
                             fallback,
-                            config.embed_remote_timeout_secs.map(Duration::from_secs),
+                            config.embed_remote_timeout_secs.map(StdDuration::from_secs),
                         )?,
                     ))
                 }
@@ -1902,7 +2154,9 @@ mod app {
                         Some(auth_token),
                         &config.reranking_model,
                         femind::reranking::RERANKER_PROFILE,
-                        config.rerank_remote_timeout_secs.map(Duration::from_secs),
+                        config
+                            .rerank_remote_timeout_secs
+                            .map(StdDuration::from_secs),
                     )?))
                 }
                 #[cfg(not(feature = "remote-reranking"))]
@@ -1927,7 +2181,9 @@ mod app {
                             &config.reranking_model,
                             femind::reranking::RERANKER_PROFILE,
                             fallback,
-                            config.rerank_remote_timeout_secs.map(Duration::from_secs),
+                            config
+                                .rerank_remote_timeout_secs
+                                .map(StdDuration::from_secs),
                         )?,
                     ))
                 }
@@ -2340,6 +2596,40 @@ mod app {
         }
     }
 
+    fn persisted_knowledge_summary_report(
+        summary: &PersistedKnowledgeSummary,
+    ) -> PersistedKnowledgeSummaryReport {
+        PersistedKnowledgeSummaryReport {
+            memory_id: summary.memory_id,
+            key: summary.key.clone(),
+            summary: summary.summary.clone(),
+            kind: summary.kind.to_string(),
+            status: summary.status.to_string(),
+            confidence: summary.confidence.as_str().to_string(),
+            support_count: summary.support_count,
+            trusted_support_count: summary.trusted_support_count,
+            contested: summary.contested,
+            source_ids: summary.source_ids.clone(),
+            created_at: summary.created_at.to_rfc3339(),
+            valid_until: summary.valid_until.map(|value| value.to_rfc3339()),
+        }
+    }
+
+    fn reflection_refresh_plan_item_report(
+        item: &ReflectionRefreshPlanItem,
+    ) -> ReflectionRefreshPlanItemReport {
+        ReflectionRefreshPlanItemReport {
+            key: item.key.clone(),
+            action: item.action.to_string(),
+            reasons: item.reasons.iter().map(ToString::to_string).collect(),
+            object: item.object.as_ref().map(knowledge_object_report),
+            current: item
+                .current
+                .as_ref()
+                .map(persisted_knowledge_summary_report),
+        }
+    }
+
     fn evaluate_reflection_check<'a>(
         objects: &'a [KnowledgeObject],
         check: &ReflectionCheck,
@@ -2423,6 +2713,114 @@ mod app {
         (passed, criteria, matched)
     }
 
+    fn evaluate_reflection_refresh_check<'a>(
+        plan: &'a [ReflectionRefreshPlanItem],
+        persisted_after: &'a [PersistedKnowledgeSummary],
+        check: &ReflectionRefreshCheck,
+    ) -> (
+        bool,
+        ReflectionRefreshCriteriaReport,
+        Option<&'a ReflectionRefreshPlanItem>,
+        Option<&'a PersistedKnowledgeSummary>,
+        Vec<&'a PersistedKnowledgeSummary>,
+    ) {
+        let matched = plan
+            .iter()
+            .find(|item| normalize(&item.key) == normalize(&check.key));
+        let observed_after = persisted_after
+            .iter()
+            .filter(|item| normalize(&item.key) == normalize(&check.key))
+            .collect::<Vec<_>>();
+        let current_after = observed_after
+            .iter()
+            .copied()
+            .find(|item| item.status == ReflectionLifecycleStatus::Current);
+        let latest_after = observed_after
+            .iter()
+            .copied()
+            .max_by(|left, right| left.created_at.cmp(&right.created_at));
+
+        let action_ok = matched.is_some_and(|item| {
+            normalize(&item.action.to_string()) == normalize(&check.expected_action)
+        });
+        let missing_required_reasons = matched
+            .map(|item| {
+                check
+                    .required_reasons
+                    .iter()
+                    .filter(|reason| {
+                        !item
+                            .reasons
+                            .iter()
+                            .any(|candidate| normalize(&candidate.to_string()) == normalize(reason))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| check.required_reasons.clone());
+        let present_forbidden_reasons = matched
+            .map(|item| {
+                check
+                    .forbidden_reasons
+                    .iter()
+                    .filter(|reason| {
+                        item.reasons
+                            .iter()
+                            .any(|candidate| normalize(&candidate.to_string()) == normalize(reason))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let observed_current_present = Some(current_after.is_some());
+        let current_present_ok = check
+            .expected_current_present
+            .is_none_or(|expected| current_after.is_some() == expected);
+        let observed_current_summary = current_after.map(|item| item.summary.clone());
+        let current_summary_ok = check
+            .expected_current_summary
+            .as_ref()
+            .is_none_or(|expected| {
+                current_after
+                    .is_some_and(|item| expected_match(&item.summary, &check.key, expected))
+            });
+        let observed_latest_status = latest_after.map(|item| item.status.to_string());
+        let latest_status_ok = check
+            .expected_latest_status
+            .as_ref()
+            .is_none_or(|expected| {
+                latest_after
+                    .is_some_and(|item| normalize(&item.status.to_string()) == normalize(expected))
+            });
+
+        let criteria = ReflectionRefreshCriteriaReport {
+            found: matched.is_some(),
+            action_ok,
+            current_present_ok,
+            current_summary_ok,
+            latest_status_ok,
+            expected_action: Some(check.expected_action.clone()),
+            observed_action: matched.map(|item| item.action.to_string()),
+            expected_current_present: check.expected_current_present,
+            observed_current_present,
+            expected_current_summary: check.expected_current_summary.clone(),
+            observed_current_summary,
+            expected_latest_status: check.expected_latest_status.clone(),
+            observed_latest_status,
+            missing_required_reasons,
+            present_forbidden_reasons,
+        };
+        let passed = criteria.found
+            && criteria.action_ok
+            && criteria.current_present_ok
+            && criteria.current_summary_ok
+            && criteria.latest_status_ok
+            && criteria.missing_required_reasons.is_empty()
+            && criteria.present_forbidden_reasons.is_empty();
+
+        (passed, criteria, matched, current_after, observed_after)
+    }
+
     fn confidence_rank(value: &str) -> u8 {
         match normalize(value).as_str() {
             "high" => 2,
@@ -2500,16 +2898,14 @@ mod app {
         scenario: &Scenario,
         config: &Config,
         extractor: Option<&dyn LlmCallback>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<HashMap<String, i64>, Box<dyn std::error::Error>> {
         match config.retrieval_ingest {
             RetrievalIngest::Records => {
-                let records: Vec<EvalMemory> = scenario
-                    .records
-                    .iter()
-                    .map(to_eval_memory)
-                    .collect::<Result<Vec<_>, _>>()?;
-                let store_results = engine.store_batch(&records)?;
-                apply_scenario_relations(engine, scenario, &store_results)?;
+                let (store_results, ids_by_key) =
+                    store_scenario_records(engine, &scenario.records)?;
+                apply_scenario_relations(engine, &scenario.id, &scenario.relations, &ids_by_key)?;
+                let _ = store_results;
+                return Ok(ids_by_key);
             }
             RetrievalIngest::Extraction => {
                 if !scenario.relations.is_empty() {
@@ -2528,17 +2924,14 @@ mod app {
                     .collect::<Vec<_>>()
                     .join("\n");
                 let _ = engine.store_with_extraction(&raw_text, extractor)?;
+                return Ok(HashMap::new());
             }
             RetrievalIngest::Hybrid => {
                 let extractor =
                     extractor.ok_or("retrieval ingest 'hybrid' requires an extraction backend")?;
-                let records: Vec<EvalMemory> = scenario
-                    .records
-                    .iter()
-                    .map(to_eval_memory)
-                    .collect::<Result<Vec<_>, _>>()?;
-                let store_results = engine.store_batch(&records)?;
-                apply_scenario_relations(engine, scenario, &store_results)?;
+                let (_store_results, ids_by_key) =
+                    store_scenario_records(engine, &scenario.records)?;
+                apply_scenario_relations(engine, &scenario.id, &scenario.relations, &ids_by_key)?;
 
                 let raw_text = scenario
                     .records
@@ -2547,48 +2940,155 @@ mod app {
                     .collect::<Vec<_>>()
                     .join("\n");
                 let _ = engine.store_with_extraction(&raw_text, extractor)?;
+                return Ok(ids_by_key);
+            }
+        }
+    }
+
+    fn seed_reflection_followup_records(
+        engine: &MemoryEngine<EvalMemory>,
+        scenario: &Scenario,
+        config: &Config,
+        extractor: Option<&dyn LlmCallback>,
+        ids_by_key: &mut HashMap<String, i64>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if scenario.reflection_followup_records.is_empty() {
+            return Ok(());
+        }
+
+        match config.retrieval_ingest {
+            RetrievalIngest::Records => {
+                let (_store_results, new_ids) =
+                    store_scenario_records(engine, &scenario.reflection_followup_records)?;
+                ids_by_key.extend(new_ids);
+            }
+            RetrievalIngest::Hybrid => {
+                let extractor =
+                    extractor.ok_or("retrieval ingest 'hybrid' requires an extraction backend")?;
+                let (_store_results, new_ids) =
+                    store_scenario_records(engine, &scenario.reflection_followup_records)?;
+                ids_by_key.extend(new_ids);
+                let raw_text = scenario
+                    .reflection_followup_records
+                    .iter()
+                    .map(|r| format!("[{}] {}", r.source, r.text))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let _ = engine.store_with_extraction(&raw_text, extractor)?;
+            }
+            RetrievalIngest::Extraction => {
+                return Err(format!(
+                    "scenario '{}' uses reflection_followup_records, but retrieval ingest 'extraction' does not preserve reflection metadata",
+                    scenario.id
+                )
+                .into());
             }
         }
 
         Ok(())
     }
 
-    fn apply_scenario_relations(
+    fn store_scenario_records(
         engine: &MemoryEngine<EvalMemory>,
-        scenario: &Scenario,
-        store_results: &[StoreResult],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if scenario.relations.is_empty() {
-            return Ok(());
-        }
-
-        let mut ids_by_key = std::collections::HashMap::new();
-        for (record, result) in scenario.records.iter().zip(store_results.iter()) {
+        records: &[ScenarioRecord],
+    ) -> Result<(Vec<StoreResult>, HashMap<String, i64>), Box<dyn std::error::Error>> {
+        let eval_records = records
+            .iter()
+            .map(to_eval_memory)
+            .collect::<Result<Vec<_>, _>>()?;
+        let store_results = engine.store_batch(&eval_records)?;
+        let mut ids_by_key = HashMap::new();
+        for (record, result) in records.iter().zip(store_results.iter()) {
             let Some(key) = &record.key else {
                 continue;
             };
-
             let id = match result {
                 StoreResult::Added(id) | StoreResult::Duplicate(id) => *id,
             };
             ids_by_key.insert(key.clone(), id);
         }
+        Ok((store_results, ids_by_key))
+    }
 
-        for relation in &scenario.relations {
+    fn apply_scenario_relations(
+        engine: &MemoryEngine<EvalMemory>,
+        scenario_id: &str,
+        relations: &[ScenarioRelation],
+        ids_by_key: &HashMap<String, i64>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if relations.is_empty() {
+            return Ok(());
+        }
+
+        for relation in relations {
             let source_id = *ids_by_key.get(&relation.from).ok_or_else(|| {
                 format!(
                     "scenario '{}' relation references unknown source key '{}'",
-                    scenario.id, relation.from
+                    scenario_id, relation.from
                 )
             })?;
             let target_id = *ids_by_key.get(&relation.to).ok_or_else(|| {
                 format!(
                     "scenario '{}' relation references unknown target key '{}'",
-                    scenario.id, relation.to
+                    scenario_id, relation.to
                 )
             })?;
             let relation_type = parse_relation_type(&relation.relation);
             GraphMemory::relate(engine.database(), source_id, target_id, &relation_type)?;
+        }
+
+        Ok(())
+    }
+
+    fn apply_reflection_followup_mutations(
+        engine: &MemoryEngine<EvalMemory>,
+        scenario: &Scenario,
+        ids_by_key: &HashMap<String, i64>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if scenario.reflection_followup_mutations.is_empty() {
+            return Ok(());
+        }
+
+        for mutation in &scenario.reflection_followup_mutations {
+            let memory_id = *ids_by_key.get(&mutation.key).ok_or_else(|| {
+                format!(
+                    "scenario '{}' followup mutation references unknown record key '{}'",
+                    scenario.id, mutation.key
+                )
+            })?;
+            let valid_from = parse_optional_timestamp(mutation.valid_from.as_deref())?;
+            let valid_until = parse_optional_timestamp(mutation.valid_until.as_deref())?;
+            let metadata_json = engine.database().with_reader(|conn| {
+                conn.query_row(
+                    "SELECT metadata_json FROM memories WHERE id = ?1",
+                    [memory_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .map_err(Into::into)
+            })?;
+            let mut metadata = metadata_json
+                .as_deref()
+                .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+                .unwrap_or_default();
+            for key in &mutation.remove_metadata_keys {
+                metadata.remove(key);
+            }
+            for (key, value) in &mutation.set_metadata {
+                metadata.insert(key.clone(), value.clone());
+            }
+            let metadata_json = serde_json::to_string(&metadata)?;
+            engine.database().with_writer(|conn| {
+                conn.execute(
+                    "UPDATE memories SET metadata_json = ?1, valid_from = ?2, valid_until = ?3 WHERE id = ?4",
+                    rusqlite::params![
+                        metadata_json,
+                        valid_from.map(|value| value.to_rfc3339()),
+                        valid_until.map(|value| value.to_rfc3339()),
+                        memory_id
+                    ],
+                )?;
+                Ok::<(), femind::prelude::FemindError>(())
+            })?;
         }
 
         Ok(())
@@ -2702,6 +3202,10 @@ mod app {
 
     fn parse_relation_type(value: &str) -> RelationType {
         RelationType::from_str(&value.to_lowercase())
+    }
+
+    fn default_true() -> bool {
+        true
     }
 
     fn parse_authority_domain(
