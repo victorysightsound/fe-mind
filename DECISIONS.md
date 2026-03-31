@@ -1817,6 +1817,46 @@ reflection.
   practical `50/50` exact, practical `50/50` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 051: Add an Application-Facing Source Authority Registry
+
+**Decision:** Add `SourceAuthorityRegistry` as an engine-level policy object so
+applications can declare authoritative source chains per domain once, instead
+of requiring every memory row to repeat full authority metadata.
+
+**Context:** Decision 050 established source-chain authority above generic
+provenance, but the initial contract was still too record-centric. That was
+workable for synthetic eval rows, yet too repetitive for real applications.
+Production apps need to say things like "the `runtime-ops` chain is
+authoritative for runtime questions" one time at engine build, then let stored
+records participate through `source_chain` metadata alone. The registry also
+needed to compose correctly with per-record authority metadata instead of
+silently replacing it.
+
+**Consequences:**
+- FeMind now exposes an application-facing authority registry through the
+  engine builder:
+  - `authority_registry(...)`
+  - `authority_registry_arc(...)`
+  - `authority_policy(...)`
+  - `authoritative_source_chain(...)`
+  - `primary_source_chain(...)`
+- `MemoryEngine` now exposes the active registry through
+  `authority_registry()`
+- the default composite scorer, routed search builder, direct evidence
+  selection, trusted-guidance filtering, and deterministic reflection all use
+  the same shared registry
+- authority can now come from either:
+  - per-record metadata (`source_authority_domain`, `source_authority_level`)
+  - the application registry plus `source_chain`
+- when both apply, FeMind uses the stronger authority level for the inferred
+  query domain
+- targeted engine tests now prove:
+  - builder-configured registry policies are visible at runtime
+  - authoritative runtime selection still works when records carry only
+    `source_chain`
+- broad Remote-GPU regression validation must remain green after the change:
+  practical exact, practical ANN, live-library exact, and memloft-slice exact
+
 ---
 
 ## Open Questions

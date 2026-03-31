@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::traits::{MemoryMeta, ScoringStrategy};
 
 /// Query-aware source-chain authority scoring.
@@ -7,11 +9,16 @@ use crate::traits::{MemoryMeta, ScoringStrategy};
 /// - `source_authority_domains`: comma/semicolon/pipe separated domain tags
 /// - `source_authority_level`: `authoritative` | `primary` | `delegated` | `reference`
 /// - `source_chain`: stable source-chain identifier for arbitration
+///
+/// Applications can also provide a [`SourceAuthorityRegistry`] at engine build
+/// time so authority can be defined centrally rather than only on individual
+/// records.
 pub struct SourceAuthorityScorer {
     authoritative_weight: f32,
     primary_weight: f32,
     delegated_weight: f32,
     reference_weight: f32,
+    registry: Arc<SourceAuthorityRegistry>,
 }
 
 impl SourceAuthorityScorer {
@@ -26,7 +33,13 @@ impl SourceAuthorityScorer {
             primary_weight,
             delegated_weight,
             reference_weight,
+            registry: Arc::new(SourceAuthorityRegistry::default()),
         }
+    }
+
+    pub fn with_registry(mut self, registry: Arc<SourceAuthorityRegistry>) -> Self {
+        self.registry = registry;
+        self
     }
 }
 
@@ -42,7 +55,7 @@ impl ScoringStrategy for SourceAuthorityScorer {
             return 1.0;
         };
 
-        match source_authority_level_for_domain(record, Some(domain)) {
+        match source_authority_level_for_domain(record, Some(domain), Some(&self.registry)) {
             SourceAuthorityLevel::Authoritative => self.authoritative_weight,
             SourceAuthorityLevel::Primary => self.primary_weight,
             SourceAuthorityLevel::Delegated => self.delegated_weight,
@@ -52,8 +65,8 @@ impl ScoringStrategy for SourceAuthorityScorer {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum SourceAuthorityDomain {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum SourceAuthorityDomain {
     RuntimeOps,
     Deployment,
     Networking,
@@ -62,13 +75,150 @@ pub(crate) enum SourceAuthorityDomain {
     Maintenance,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SourceAuthorityLevel {
+impl SourceAuthorityDomain {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RuntimeOps => "runtime-ops",
+            Self::Deployment => "deployment",
+            Self::Networking => "networking",
+            Self::Security => "security",
+            Self::BuildToolchain => "build-toolchain",
+            Self::Maintenance => "maintenance",
+        }
+    }
+}
+
+impl std::fmt::Display for SourceAuthorityDomain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub enum SourceAuthorityLevel {
     Unknown,
     Reference,
     Delegated,
     Primary,
     Authoritative,
+}
+
+impl SourceAuthorityLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Reference => "reference",
+            Self::Delegated => "delegated",
+            Self::Primary => "primary",
+            Self::Authoritative => "authoritative",
+        }
+    }
+}
+
+impl std::fmt::Display for SourceAuthorityLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceAuthorityPolicy {
+    pub domain: SourceAuthorityDomain,
+    pub chain: String,
+    pub level: SourceAuthorityLevel,
+}
+
+impl SourceAuthorityPolicy {
+    pub fn new(
+        domain: SourceAuthorityDomain,
+        chain: impl Into<String>,
+        level: SourceAuthorityLevel,
+    ) -> Self {
+        Self {
+            domain,
+            chain: normalize_tag(&chain.into()),
+            level,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceAuthorityRegistry {
+    policies: Vec<SourceAuthorityPolicy>,
+}
+
+impl SourceAuthorityRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn policies(&self) -> &[SourceAuthorityPolicy] {
+        &self.policies
+    }
+
+    pub fn with_policy(mut self, policy: SourceAuthorityPolicy) -> Self {
+        self.add_policy(policy);
+        self
+    }
+
+    pub fn add_policy(&mut self, policy: SourceAuthorityPolicy) {
+        let normalized_chain = normalize_tag(&policy.chain);
+        if let Some(existing) = self
+            .policies
+            .iter_mut()
+            .find(|existing| existing.domain == policy.domain && existing.chain == normalized_chain)
+        {
+            existing.level = policy.level;
+            return;
+        }
+
+        self.policies.push(SourceAuthorityPolicy {
+            chain: normalized_chain,
+            ..policy
+        });
+    }
+
+    pub fn set_chain(
+        &mut self,
+        domain: SourceAuthorityDomain,
+        chain: impl Into<String>,
+        level: SourceAuthorityLevel,
+    ) -> &mut Self {
+        self.add_policy(SourceAuthorityPolicy::new(domain, chain, level));
+        self
+    }
+
+    pub fn set_authoritative(
+        &mut self,
+        domain: SourceAuthorityDomain,
+        chain: impl Into<String>,
+    ) -> &mut Self {
+        self.set_chain(domain, chain, SourceAuthorityLevel::Authoritative)
+    }
+
+    pub fn set_primary(
+        &mut self,
+        domain: SourceAuthorityDomain,
+        chain: impl Into<String>,
+    ) -> &mut Self {
+        self.set_chain(domain, chain, SourceAuthorityLevel::Primary)
+    }
+
+    pub fn level_for_chain(
+        &self,
+        domain: SourceAuthorityDomain,
+        chain: &str,
+    ) -> SourceAuthorityLevel {
+        let normalized = normalize_tag(chain);
+        self.policies
+            .iter()
+            .filter(|policy| policy.domain == domain && policy.chain == normalized)
+            .map(|policy| policy.level)
+            .max()
+            .unwrap_or(SourceAuthorityLevel::Unknown)
+    }
 }
 
 pub(crate) fn infer_authority_domain(text: &str) -> Option<SourceAuthorityDomain> {
@@ -189,8 +339,9 @@ pub(crate) fn infer_authority_domain(text: &str) -> Option<SourceAuthorityDomain
 pub(crate) fn source_authority_rank(
     record: &MemoryMeta,
     domain: Option<SourceAuthorityDomain>,
+    registry: Option<&SourceAuthorityRegistry>,
 ) -> u8 {
-    match source_authority_level_for_domain(record, domain) {
+    match source_authority_level_for_domain(record, domain, registry) {
         SourceAuthorityLevel::Authoritative => 100,
         SourceAuthorityLevel::Primary => 80,
         SourceAuthorityLevel::Delegated => 55,
@@ -202,32 +353,36 @@ pub(crate) fn source_authority_rank(
 pub(crate) fn source_chain_for_domain(
     record: &MemoryMeta,
     domain: Option<SourceAuthorityDomain>,
+    registry: Option<&SourceAuthorityRegistry>,
 ) -> Option<String> {
-    if source_authority_rank(record, domain) == 0 {
+    if source_authority_rank(record, domain, registry) == 0 {
         return None;
     }
 
-    record
-        .metadata
-        .get("source_chain")
-        .or_else(|| record.metadata.get("source_authority_chain"))
-        .or_else(|| record.metadata.get("authority_chain"))
-        .map(|value| normalize_tag(value))
-        .filter(|value| !value.is_empty())
+    record_source_chain(record)
 }
 
 pub(crate) fn source_authority_level_for_domain(
     record: &MemoryMeta,
     domain: Option<SourceAuthorityDomain>,
+    registry: Option<&SourceAuthorityRegistry>,
 ) -> SourceAuthorityLevel {
     let Some(domain) = domain else {
         return SourceAuthorityLevel::Unknown;
     };
-    if !source_authority_domains(record).contains(&domain) {
-        return SourceAuthorityLevel::Unknown;
-    }
 
-    source_authority_level(record)
+    let metadata_level = if source_authority_domains(record).contains(&domain) {
+        source_authority_level(record)
+    } else {
+        SourceAuthorityLevel::Unknown
+    };
+
+    let registry_level = record_source_chain(record)
+        .as_deref()
+        .map(|chain| source_authority_level_from_registry(domain, chain, registry))
+        .unwrap_or(SourceAuthorityLevel::Unknown);
+
+    metadata_level.max(registry_level)
 }
 
 fn source_authority_domains(record: &MemoryMeta) -> Vec<SourceAuthorityDomain> {
@@ -243,6 +398,26 @@ fn source_authority_domains(record: &MemoryMeta) -> Vec<SourceAuthorityDomain> {
     raw.split([',', ';', '|'])
         .filter_map(parse_domain_tag)
         .collect()
+}
+
+fn record_source_chain(record: &MemoryMeta) -> Option<String> {
+    record
+        .metadata
+        .get("source_chain")
+        .or_else(|| record.metadata.get("source_authority_chain"))
+        .or_else(|| record.metadata.get("authority_chain"))
+        .map(|value| normalize_tag(value))
+        .filter(|value| !value.is_empty())
+}
+
+fn source_authority_level_from_registry(
+    domain: SourceAuthorityDomain,
+    chain: &str,
+    registry: Option<&SourceAuthorityRegistry>,
+) -> SourceAuthorityLevel {
+    registry
+        .map(|registry| registry.level_for_chain(domain, chain))
+        .unwrap_or(SourceAuthorityLevel::Unknown)
 }
 
 fn source_authority_level(record: &MemoryMeta) -> SourceAuthorityLevel {
@@ -299,7 +474,8 @@ fn normalize_tag(value: &str) -> String {
 }
 
 fn normalize_match_text(value: &str) -> String {
-    value.to_lowercase()
+    value
+        .to_lowercase()
         .chars()
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { ' ' })
         .collect::<String>()
@@ -372,11 +548,11 @@ mod tests {
         let record = meta(Some("runtime"), Some("authoritative"), Some("runtime-ops"));
 
         assert_eq!(
-            source_authority_rank(&record, Some(SourceAuthorityDomain::RuntimeOps)),
+            source_authority_rank(&record, Some(SourceAuthorityDomain::RuntimeOps), None),
             100
         );
         assert_eq!(
-            source_authority_rank(&record, Some(SourceAuthorityDomain::Deployment)),
+            source_authority_rank(&record, Some(SourceAuthorityDomain::Deployment), None),
             0
         );
     }
@@ -390,12 +566,50 @@ mod tests {
         );
 
         assert_eq!(
-            source_chain_for_domain(&record, Some(SourceAuthorityDomain::RuntimeOps)),
+            source_chain_for_domain(&record, Some(SourceAuthorityDomain::RuntimeOps), None),
             Some("platform-runtime-chain".to_string())
         );
         assert_eq!(
-            source_chain_for_domain(&record, Some(SourceAuthorityDomain::Security)),
+            source_chain_for_domain(&record, Some(SourceAuthorityDomain::Security), None),
             None
+        );
+    }
+
+    #[test]
+    fn registry_can_promote_chain_without_record_domain_metadata() {
+        let record = meta(None, None, Some("runtime-ops"));
+        let registry = SourceAuthorityRegistry::new().with_policy(SourceAuthorityPolicy::new(
+            SourceAuthorityDomain::RuntimeOps,
+            "runtime-ops",
+            SourceAuthorityLevel::Authoritative,
+        ));
+
+        assert_eq!(
+            source_authority_rank(
+                &record,
+                Some(SourceAuthorityDomain::RuntimeOps),
+                Some(&registry),
+            ),
+            100
+        );
+    }
+
+    #[test]
+    fn registry_and_metadata_use_the_stronger_authority_level() {
+        let record = meta(Some("runtime"), Some("primary"), Some("runtime-ops"));
+        let registry = SourceAuthorityRegistry::new().with_policy(SourceAuthorityPolicy::new(
+            SourceAuthorityDomain::RuntimeOps,
+            "runtime-ops",
+            SourceAuthorityLevel::Authoritative,
+        ));
+
+        assert_eq!(
+            source_authority_level_for_domain(
+                &record,
+                Some(SourceAuthorityDomain::RuntimeOps),
+                Some(&registry),
+            ),
+            SourceAuthorityLevel::Authoritative
         );
     }
 }

@@ -48,6 +48,10 @@ The practical live-validation path is now established and repeatable:
 - practical eval now also covers source-chain authority conflicts for:
   - runtime-vs-deployment procedural guidance
   - reflected runtime guidance backed by authoritative chains
+- FeMind now also supports an application-facing source authority registry, so
+  apps can declare authoritative chains per domain once and let records
+  participate with `source_chain` metadata instead of repeating full authority
+  metadata on every row
 - larger real-world follow-up library now lives under `eval/live-library/`
 - larger real-world library now covers 18 scenarios and 58 retrieval checks
 - larger real-world library currently passes `58/58` in the standard
@@ -183,6 +187,15 @@ The practical live-validation path is now established and repeatable:
   - `metadata.source_authority_domain`
   - `metadata.source_authority_level`
   - `metadata.source_chain`
+- applications can now also configure authority centrally through the engine
+  builder:
+  - `authority_registry(...)`
+  - `authority_registry_arc(...)`
+  - `authority_policy(...)`
+  - `authoritative_source_chain(...)`
+  - `primary_source_chain(...)`
+- when both record metadata and the application authority registry apply,
+  FeMind uses the stronger authority level for that query domain
 - query routing now infers an authority domain for high-stakes procedural and
   stable-knowledge conflicts, so authoritative chains can win over stronger
   generic provenance when the domain is explicit

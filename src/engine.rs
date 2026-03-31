@@ -14,7 +14,8 @@ use crate::reranking::RerankerRuntime;
 use crate::scoring::{
     CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
     ReviewApprovalTemplate, ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity,
-    ReviewStatus, SecretClass, SourceProvenanceScorer, SourceTrustScorer, detect_review_flag,
+    ReviewStatus, SecretClass, SourceAuthorityDomain, SourceAuthorityPolicy,
+    SourceAuthorityRegistry, SourceProvenanceScorer, SourceTrustScorer, detect_review_flag,
     effective_review_status, evidence_contains_secret_material, infer_authority_domain,
     query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
@@ -538,6 +539,7 @@ pub struct MemoryEngine<T: MemoryRecord> {
     global_db: Option<Database>,
     store: MemoryStore<T>,
     scoring: Arc<dyn ScoringStrategy>,
+    authority_registry: Arc<SourceAuthorityRegistry>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
     reranker: Option<Arc<dyn RerankerBackend>>,
     #[cfg(feature = "ann")]
@@ -550,6 +552,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     /// Create a new builder for configuring the engine.
     pub fn builder() -> MemoryEngineBuilder<T> {
         MemoryEngineBuilder::new()
+    }
+
+    /// Return the application-facing source authority registry.
+    pub fn authority_registry(&self) -> &SourceAuthorityRegistry {
+        self.authority_registry.as_ref()
     }
 
     /// Store a new memory. Returns info about what action was taken (added or duplicate).
@@ -1247,6 +1254,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
     pub fn search(&self, query: &str) -> SearchBuilder<'_, T> {
         let mut builder = SearchBuilder::new(&self.db, query)
             .with_scoring(Arc::clone(&self.scoring))
+            .with_authority_registry(Arc::clone(&self.authority_registry))
             .with_vector_search_mode(self.config.vector_search_mode)
             .with_default_strict_grounding(self.config.strict_grounding_enabled)
             .with_default_query_alignment(self.config.query_alignment_enabled)
@@ -2238,7 +2246,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let results =
             self.search_with_config_and_summary_policy(query, config, stable_summary_policy)?;
         let mut evidence = self.collect_distinct_aggregated_matches(results, max_matches)?;
-        filter_secret_guidance_evidence(query, &mut evidence);
+        filter_secret_guidance_evidence(query, &mut evidence, self.authority_registry.as_ref());
 
         if query_requests_sensitive_secret_detail(query) {
             return Ok(ComposedAnswerResult {
@@ -2305,7 +2313,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             });
         }
 
-        let top = select_best_evidence(query, &evidence);
+        let top = select_best_evidence(query, &evidence, self.authority_registry.as_ref());
         if evidence_explicitly_lacks_requested_detail(query, &evidence) {
             return Ok(ComposedAnswerResult {
                 answer: "I don’t have the exact grounded detail needed to answer that.".to_string(),
@@ -2338,7 +2346,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
 
         let (answer, kind, basis, confidence, rationale) = if is_yes_no_query(query) {
-            let (answer, kind, confidence, rationale) = compose_yes_no_answer(query, &evidence);
+            let (answer, kind, confidence, rationale) =
+                compose_yes_no_answer(query, &evidence, self.authority_registry.as_ref());
             (
                 answer,
                 kind,
@@ -2347,12 +2356,18 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 rationale,
             )
         } else if matches!(route.intent, crate::search::QueryIntent::StableSummary) {
-            compose_stable_summary_answer(query, &evidence, stable_summary_policy)
+            compose_stable_summary_answer(
+                query,
+                &evidence,
+                stable_summary_policy,
+                self.authority_registry.as_ref(),
+            )
         } else if matches!(
             route.intent,
             crate::search::QueryIntent::CurrentState | crate::search::QueryIntent::HistoricalState
         ) {
-            let (answer, kind, confidence, rationale) = compose_stateful_answer(query, &evidence);
+            let (answer, kind, confidence, rationale) =
+                compose_stateful_answer(query, &evidence, self.authority_registry.as_ref());
             (
                 answer,
                 kind,
@@ -2611,7 +2626,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     continue;
                 };
                 let authority_domain = reflection_authority_domain(&key, &summary, &text);
-                let authority_rank = source_authority_rank(&meta, authority_domain);
+                let authority_rank = source_authority_rank(
+                    &meta,
+                    authority_domain,
+                    Some(self.authority_registry.as_ref()),
+                );
 
                 candidates.push(ReflectionCandidate {
                     memory_id,
@@ -3520,8 +3539,9 @@ fn compose_aggregation_answer(
 fn compose_yes_no_answer(
     query: &str,
     evidence: &[AggregatedMatch],
+    authority_registry: &SourceAuthorityRegistry,
 ) -> (String, &'static str, CompositionConfidence, &'static str) {
-    let best = select_yes_no_evidence(query, evidence);
+    let best = select_yes_no_evidence(query, evidence, authority_registry);
     let confidence = if has_conflicting_state_evidence(query, evidence) {
         CompositionConfidence::Medium
     } else {
@@ -3567,7 +3587,11 @@ fn text_contradicts_yes_no_query(query: &str, text: &str) -> bool {
             && (normalized_text.contains("expired") || normalized_text.contains("return to")))
 }
 
-fn select_best_evidence<'a>(query: &str, evidence: &'a [AggregatedMatch]) -> &'a AggregatedMatch {
+fn select_best_evidence<'a>(
+    query: &str,
+    evidence: &'a [AggregatedMatch],
+    authority_registry: &SourceAuthorityRegistry,
+) -> &'a AggregatedMatch {
     let best = &evidence[0];
     if evidence.len() < 2 || !query_prefers_trusted_guidance(query) {
         return best;
@@ -3576,8 +3600,8 @@ fn select_best_evidence<'a>(query: &str, evidence: &'a [AggregatedMatch]) -> &'a
     evidence
         .iter()
         .max_by(|left, right| {
-            evidence_selection_rank(query, left)
-                .cmp(&evidence_selection_rank(query, right))
+            evidence_selection_rank(query, left, authority_registry)
+                .cmp(&evidence_selection_rank(query, right, authority_registry))
                 .then_with(|| {
                     left.score
                         .partial_cmp(&right.score)
@@ -3587,8 +3611,12 @@ fn select_best_evidence<'a>(query: &str, evidence: &'a [AggregatedMatch]) -> &'a
         .unwrap_or(best)
 }
 
-fn select_yes_no_evidence<'a>(query: &str, evidence: &'a [AggregatedMatch]) -> &'a AggregatedMatch {
-    let best = select_best_evidence(query, evidence);
+fn select_yes_no_evidence<'a>(
+    query: &str,
+    evidence: &'a [AggregatedMatch],
+    authority_registry: &SourceAuthorityRegistry,
+) -> &'a AggregatedMatch {
+    let best = select_best_evidence(query, evidence, authority_registry);
     let grounded = evidence
         .iter()
         .max_by(|left, right| {
@@ -3634,8 +3662,9 @@ fn query_literal_grounding_score(query: &str, text: &str) -> usize {
 fn compose_stateful_answer(
     query: &str,
     evidence: &[AggregatedMatch],
+    authority_registry: &SourceAuthorityRegistry,
 ) -> (String, &'static str, CompositionConfidence, &'static str) {
-    let best = select_best_evidence(query, evidence);
+    let best = select_best_evidence(query, evidence, authority_registry);
     let confidence = if has_conflicting_state_evidence("", evidence) {
         CompositionConfidence::Medium
     } else {
@@ -3659,6 +3688,7 @@ fn compose_stable_summary_answer(
     query: &str,
     evidence: &[AggregatedMatch],
     stable_summary_policy: StableSummaryPolicy,
+    authority_registry: &SourceAuthorityRegistry,
 ) -> (
     String,
     &'static str,
@@ -3666,8 +3696,9 @@ fn compose_stable_summary_answer(
     CompositionConfidence,
     &'static str,
 ) {
-    let current_reflection = select_current_reflection_evidence(query, evidence);
-    let best_source = select_best_source_evidence(query, evidence);
+    let current_reflection =
+        select_current_reflection_evidence(query, evidence, authority_registry);
+    let best_source = select_best_source_evidence(query, evidence, authority_registry);
 
     if matches!(stable_summary_policy, StableSummaryPolicy::PreferSource) {
         if let Some(source) = best_source {
@@ -3727,7 +3758,8 @@ fn compose_stable_summary_answer(
         );
     }
 
-    let best = best_source.unwrap_or_else(|| select_best_evidence(query, evidence));
+    let best =
+        best_source.unwrap_or_else(|| select_best_evidence(query, evidence, authority_registry));
     (
         best.text.trim().to_string(),
         "stable-summary",
@@ -3744,13 +3776,14 @@ fn compose_stable_summary_answer(
 fn select_current_reflection_evidence<'a>(
     query: &str,
     evidence: &'a [AggregatedMatch],
+    authority_registry: &SourceAuthorityRegistry,
 ) -> Option<&'a AggregatedMatch> {
     evidence
         .iter()
         .filter(|candidate| is_current_reflection_match(candidate))
         .max_by(|left, right| {
-            evidence_selection_rank(query, left)
-                .cmp(&evidence_selection_rank(query, right))
+            evidence_selection_rank(query, left, authority_registry)
+                .cmp(&evidence_selection_rank(query, right, authority_registry))
                 .then_with(|| {
                     left.score
                         .partial_cmp(&right.score)
@@ -3762,6 +3795,7 @@ fn select_current_reflection_evidence<'a>(
 fn select_best_source_evidence<'a>(
     query: &str,
     evidence: &'a [AggregatedMatch],
+    authority_registry: &SourceAuthorityRegistry,
 ) -> Option<&'a AggregatedMatch> {
     let sources = evidence
         .iter()
@@ -3771,8 +3805,8 @@ fn select_best_source_evidence<'a>(
         return None;
     }
     sources.into_iter().max_by(|left, right| {
-        evidence_selection_rank(query, left)
-            .cmp(&evidence_selection_rank(query, right))
+        evidence_selection_rank(query, left, authority_registry)
+            .cmp(&evidence_selection_rank(query, right, authority_registry))
             .then_with(|| {
                 left.score
                     .partial_cmp(&right.score)
@@ -3834,11 +3868,16 @@ fn query_prefers_trusted_guidance(query: &str) -> bool {
         || query_requests_private_infra_guidance(query)
 }
 
-fn evidence_selection_rank(query: &str, candidate: &AggregatedMatch) -> u16 {
+fn evidence_selection_rank(
+    query: &str,
+    candidate: &AggregatedMatch,
+    authority_registry: &SourceAuthorityRegistry,
+) -> u16 {
     let meta = candidate_memory_meta(candidate);
     let authority_rank = u16::from(source_authority_rank(
         &meta,
         infer_authority_domain(query),
+        Some(authority_registry),
     ));
     let trust_rank = match source_trust_level(&meta) {
         crate::scoring::SourceTrustLevel::Trusted => 400_u16,
@@ -3915,7 +3954,11 @@ fn has_conflicting_state_evidence(query: &str, evidence: &[AggregatedMatch]) -> 
     query.is_empty() || is_yes_no_query(query)
 }
 
-fn filter_secret_guidance_evidence(query: &str, evidence: &mut Vec<AggregatedMatch>) {
+fn filter_secret_guidance_evidence(
+    query: &str,
+    evidence: &mut Vec<AggregatedMatch>,
+    authority_registry: &SourceAuthorityRegistry,
+) {
     if evidence.len() < 2 {
         return;
     }
@@ -3927,7 +3970,7 @@ fn filter_secret_guidance_evidence(query: &str, evidence: &mut Vec<AggregatedMat
 
     let has_safe_trusted_evidence = evidence.iter().any(|candidate| {
         is_sensitive_guidance_class(secret_class_from_metadata(&candidate.metadata))
-            && trusted_guidance_rank(query, candidate) > 0
+            && trusted_guidance_rank(query, candidate, authority_registry) > 0
     });
 
     if !has_safe_trusted_evidence {
@@ -3939,7 +3982,7 @@ fn filter_secret_guidance_evidence(query: &str, evidence: &mut Vec<AggregatedMat
         .filter(|candidate| {
             is_sensitive_guidance_class(secret_class_from_metadata(&candidate.metadata))
         })
-        .map(|candidate| trusted_guidance_rank(query, candidate))
+        .map(|candidate| trusted_guidance_rank(query, candidate, authority_registry))
         .max()
         .unwrap_or(0);
 
@@ -3947,7 +3990,8 @@ fn filter_secret_guidance_evidence(query: &str, evidence: &mut Vec<AggregatedMat
         if !is_sensitive_guidance_class(secret_class_from_metadata(&candidate.metadata)) {
             return true;
         }
-        trusted_guidance_rank(query, candidate) == best_trusted_rank && best_trusted_rank > 0
+        trusted_guidance_rank(query, candidate, authority_registry) == best_trusted_rank
+            && best_trusted_rank > 0
     });
 }
 
@@ -3977,13 +4021,20 @@ fn candidate_memory_meta(candidate: &AggregatedMatch) -> MemoryMeta {
     }
 }
 
-fn trusted_guidance_rank(query: &str, candidate: &AggregatedMatch) -> u8 {
+fn trusted_guidance_rank(
+    query: &str,
+    candidate: &AggregatedMatch,
+    authority_registry: &SourceAuthorityRegistry,
+) -> u8 {
     let meta = candidate_memory_meta(candidate);
 
     match source_trust_level(&meta) {
         crate::scoring::SourceTrustLevel::Trusted | crate::scoring::SourceTrustLevel::Normal => {
-            source_provenance_rank(&meta)
-                .saturating_add(source_authority_rank(&meta, infer_authority_domain(query)))
+            source_provenance_rank(&meta).saturating_add(source_authority_rank(
+                &meta,
+                infer_authority_domain(query),
+                Some(authority_registry),
+            ))
         }
         crate::scoring::SourceTrustLevel::Low => 0,
         crate::scoring::SourceTrustLevel::Untrusted => 0,
@@ -4155,6 +4206,7 @@ pub struct MemoryEngineBuilder<T: MemoryRecord> {
     database_path: Option<String>,
     global_database_path: Option<String>,
     scoring: Option<Arc<dyn ScoringStrategy>>,
+    authority_registry: Arc<SourceAuthorityRegistry>,
     embedding: Option<Arc<dyn EmbeddingBackend>>,
     reranker: Option<Arc<dyn RerankerBackend>>,
     config: EngineConfig,
@@ -4167,6 +4219,7 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             database_path: None,
             global_database_path: None,
             scoring: None,
+            authority_registry: Arc::new(SourceAuthorityRegistry::default()),
             embedding: None,
             reranker: None,
             config: EngineConfig::default(),
@@ -4197,6 +4250,44 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
     /// and cognitive memory type).
     pub fn scoring(mut self, strategy: impl ScoringStrategy + 'static) -> Self {
         self.scoring = Some(Arc::new(strategy));
+        self
+    }
+
+    /// Set the application-facing source authority registry.
+    pub fn authority_registry(mut self, registry: SourceAuthorityRegistry) -> Self {
+        self.authority_registry = Arc::new(registry);
+        self
+    }
+
+    /// Set the application-facing source authority registry from an existing `Arc`.
+    pub fn authority_registry_arc(mut self, registry: Arc<SourceAuthorityRegistry>) -> Self {
+        self.authority_registry = registry;
+        self
+    }
+
+    /// Add or replace one authority policy entry for the engine.
+    pub fn authority_policy(mut self, policy: SourceAuthorityPolicy) -> Self {
+        Arc::make_mut(&mut self.authority_registry).add_policy(policy);
+        self
+    }
+
+    /// Mark a source chain as authoritative for a given domain.
+    pub fn authoritative_source_chain(
+        mut self,
+        domain: SourceAuthorityDomain,
+        chain: impl Into<String>,
+    ) -> Self {
+        Arc::make_mut(&mut self.authority_registry).set_authoritative(domain, chain);
+        self
+    }
+
+    /// Mark a source chain as primary for a given domain.
+    pub fn primary_source_chain(
+        mut self,
+        domain: SourceAuthorityDomain,
+        chain: impl Into<String>,
+    ) -> Self {
+        Arc::make_mut(&mut self.authority_registry).set_primary(domain, chain);
         self
     }
 
@@ -4287,15 +4378,18 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
             None => None,
         };
 
-        let scoring = self
-            .scoring
-            .unwrap_or_else(|| Arc::new(default_composite_scorer()));
+        let scoring = self.scoring.unwrap_or_else(|| {
+            Arc::new(default_composite_scorer(Arc::clone(
+                &self.authority_registry,
+            )))
+        });
 
         Ok(MemoryEngine {
             db,
             global_db,
             store: MemoryStore::new(),
             scoring,
+            authority_registry: self.authority_registry,
             embedding: self.embedding,
             reranker: self.reranker,
             #[cfg(feature = "ann")]
@@ -4305,13 +4399,15 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
     }
 }
 
-fn default_composite_scorer() -> CompositeScorer {
+fn default_composite_scorer(authority_registry: Arc<SourceAuthorityRegistry>) -> CompositeScorer {
     CompositeScorer::new(vec![
         Box::new(RecencyScorer::default_half_life()),
         Box::new(ImportanceScorer::default()),
         Box::new(MemoryTypeScorer::default()),
         Box::new(SourceTrustScorer::default()),
-        Box::new(crate::scoring::SourceAuthorityScorer::default()),
+        Box::new(
+            crate::scoring::SourceAuthorityScorer::default().with_registry(authority_registry),
+        ),
         Box::new(SourceProvenanceScorer::default()),
         Box::new(ProceduralSafetyScorer::default()),
         Box::new(ReviewSafetyScorer::default()),
@@ -6675,6 +6771,7 @@ mod tests {
 
     #[test]
     fn trusted_sensitive_guidance_prefers_higher_provenance_sources() {
+        let authority_registry = SourceAuthorityRegistry::default();
         let mut evidence = vec![
             AggregatedMatch {
                 memory_id: 1,
@@ -6717,6 +6814,7 @@ mod tests {
         filter_secret_guidance_evidence(
             "Which private endpoint should the FeMind tunnel use now?",
             &mut evidence,
+            &authority_registry,
         );
 
         assert_eq!(evidence.len(), 1);
@@ -6725,6 +6823,7 @@ mod tests {
 
     #[test]
     fn trusted_sensitive_guidance_prefers_fully_verified_chain_over_partial_and_relayed() {
+        let authority_registry = SourceAuthorityRegistry::default();
         let mut evidence = vec![
             AggregatedMatch {
                 memory_id: 1,
@@ -6767,6 +6866,7 @@ mod tests {
         filter_secret_guidance_evidence(
             "Which internal network range should the GPU relay use now?",
             &mut evidence,
+            &authority_registry,
         );
 
         assert_eq!(evidence.len(), 1);
@@ -6775,6 +6875,7 @@ mod tests {
 
     #[test]
     fn trusted_procedural_guidance_prefers_higher_provenance_source() {
+        let authority_registry = SourceAuthorityRegistry::default();
         let evidence = vec![
             AggregatedMatch {
                 memory_id: 1,
@@ -6803,6 +6904,7 @@ mod tests {
         let best = select_best_evidence(
             "What is the supported Windows startup path for femind-embed-service?",
             &evidence,
+            &authority_registry,
         );
 
         assert_eq!(best.memory_id, 1);
@@ -6810,6 +6912,7 @@ mod tests {
 
     #[test]
     fn trusted_procedural_guidance_prefers_authoritative_runtime_chain() {
+        let authority_registry = SourceAuthorityRegistry::default();
         let query = "What is the supported runtime path for femind-embed-service on the GPU host?";
         let evidence = vec![
             AggregatedMatch {
@@ -6852,6 +6955,7 @@ mod tests {
             source_authority_rank(
                 &deployment_meta,
                 Some(crate::scoring::SourceAuthorityDomain::RuntimeOps),
+                Some(&authority_registry),
             ),
             0
         );
@@ -6859,17 +6963,85 @@ mod tests {
             source_authority_rank(
                 &runtime_meta,
                 Some(crate::scoring::SourceAuthorityDomain::RuntimeOps),
+                Some(&authority_registry),
             ),
             100
         );
         assert!(query_prefers_trusted_guidance(query));
         assert!(
-            evidence_selection_rank(query, &evidence[1])
-                > evidence_selection_rank(query, &evidence[0])
+            evidence_selection_rank(query, &evidence[1], &authority_registry)
+                > evidence_selection_rank(query, &evidence[0], &authority_registry)
         );
 
-        let best = select_best_evidence(query, &evidence);
+        let best = select_best_evidence(query, &evidence, &authority_registry);
 
+        assert_eq!(best.memory_id, 2);
+    }
+
+    #[test]
+    fn builder_exposes_authority_registry_policies() {
+        let engine = MemoryEngine::<TestMem>::builder()
+            .authoritative_source_chain(SourceAuthorityDomain::RuntimeOps, "runtime-ops")
+            .primary_source_chain(SourceAuthorityDomain::Deployment, "deployment-docs")
+            .build()
+            .expect("build");
+
+        assert_eq!(
+            engine
+                .authority_registry()
+                .level_for_chain(SourceAuthorityDomain::RuntimeOps, "runtime-ops"),
+            crate::scoring::SourceAuthorityLevel::Authoritative
+        );
+        assert_eq!(
+            engine
+                .authority_registry()
+                .level_for_chain(SourceAuthorityDomain::Deployment, "deployment-docs"),
+            crate::scoring::SourceAuthorityLevel::Primary
+        );
+    }
+
+    #[test]
+    fn registry_backed_authority_prefers_chain_without_record_metadata() {
+        let authority_registry =
+            SourceAuthorityRegistry::new().with_policy(SourceAuthorityPolicy::new(
+                SourceAuthorityDomain::RuntimeOps,
+                "runtime-ops",
+                crate::scoring::SourceAuthorityLevel::Authoritative,
+            ));
+        let query = "What is the supported runtime path for femind-embed-service on the GPU host?";
+        let evidence = vec![
+            AggregatedMatch {
+                memory_id: 1,
+                text: "Bootstrapping note: keep femind-embed-service inside WSL systemd while staging the host.".to_string(),
+                category: None,
+                score: 2.58,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("source_chain".to_string(), "deployment-docs".to_string()),
+                ]),
+            },
+            AggregatedMatch {
+                memory_id: 2,
+                text: "Runtime note: run femind-embed-service as the native Windows scheduled task on the GPU host.".to_string(),
+                category: None,
+                score: 2.44,
+                metadata: std::collections::HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "maintainer".to_string()),
+                    ("source_verification".to_string(), "declared".to_string()),
+                    ("source_chain".to_string(), "runtime-ops".to_string()),
+                ]),
+            },
+        ];
+
+        assert!(
+            evidence_selection_rank(query, &evidence[1], &authority_registry)
+                > evidence_selection_rank(query, &evidence[0], &authority_registry)
+        );
+
+        let best = select_best_evidence(query, &evidence, &authority_registry);
         assert_eq!(best.memory_id, 2);
     }
 
@@ -6927,6 +7099,7 @@ mod tests {
 
     #[test]
     fn yes_no_composer_prefers_query_grounded_literal_evidence() {
+        let authority_registry = SourceAuthorityRegistry::default();
         let evidence = vec![
             AggregatedMatch {
                 memory_id: 1,
@@ -6947,6 +7120,7 @@ mod tests {
         let best = select_yes_no_evidence(
             "Should the expired migration bridge host 10.44.0.99 still be used?",
             &evidence,
+            &authority_registry,
         );
 
         assert_eq!(best.memory_id, 2);

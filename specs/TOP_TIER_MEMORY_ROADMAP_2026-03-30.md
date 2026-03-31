@@ -188,6 +188,9 @@ Current status after the 2026-03-30 trust/safety pass:
   - records can declare `source_authority_domain`
   - records can declare `source_authority_level`
   - records can declare `source_chain`
+  - applications can declare authoritative chains centrally through
+    `SourceAuthorityRegistry`, so records can often participate with only
+    `source_chain`
   - routed procedural and stable-knowledge conflicts can prefer the
     authoritative chain for the inferred query domain instead of only following
     generic provenance strength

@@ -8,10 +8,10 @@ use crate::engine::VectorSearchMode;
 use crate::error::Result;
 use crate::memory::GraphMemory;
 use crate::scoring::{
-    SourceTrustLevel, infer_authority_domain, query_requests_procedural_guidance, query_scope,
-    review_denied, review_policy_class, review_policy_class_matches_query, review_required,
-    review_scope, review_scope_matches_query, source_authority_rank, source_chain_for_domain,
-    source_provenance_rank, source_trust_level,
+    SourceAuthorityRegistry, SourceTrustLevel, infer_authority_domain,
+    query_requests_procedural_guidance, query_scope, review_denied, review_policy_class,
+    review_policy_class_matches_query, review_required, review_scope, review_scope_matches_query,
+    source_authority_rank, source_chain_for_domain, source_provenance_rank, source_trust_level,
 };
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
@@ -283,6 +283,7 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     strict_grounding_overridden: bool,
     query_alignment_overridden: bool,
     rerank_limit_overridden: bool,
+    authority_registry: Arc<SourceAuthorityRegistry>,
     #[cfg(feature = "ann")]
     ann_index: Option<Arc<crate::search::AnnIndex>>,
     _phantom: PhantomData<T>,
@@ -318,6 +319,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             strict_grounding_overridden: false,
             query_alignment_overridden: false,
             rerank_limit_overridden: false,
+            authority_registry: Arc::new(SourceAuthorityRegistry::default()),
             #[cfg(feature = "ann")]
             ann_index: None,
             _phantom: PhantomData,
@@ -339,6 +341,15 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
     /// Attach a reranker backend for second-stage candidate refinement.
     pub fn with_reranker(mut self, reranker: Arc<dyn RerankerBackend>) -> Self {
         self.reranker = Some(reranker);
+        self
+    }
+
+    /// Attach the engine's application-facing source authority registry.
+    pub fn with_authority_registry(
+        mut self,
+        authority_registry: Arc<SourceAuthorityRegistry>,
+    ) -> Self {
+        self.authority_registry = authority_registry;
         self
     }
 
@@ -996,7 +1007,12 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             });
         }
 
-        apply_procedural_safety_isolation(self.db, &self.query, &mut results);
+        apply_procedural_safety_isolation(
+            self.db,
+            &self.query,
+            &mut results,
+            self.authority_registry.as_ref(),
+        );
         apply_reflection_preference(self.db, &mut results, reflection_preference);
 
         // Re-sort by final score (descending)
@@ -1208,7 +1224,12 @@ fn deduplicate_by_vector_similarity(
     });
 }
 
-fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut Vec<SearchResult>) {
+fn apply_procedural_safety_isolation(
+    db: &Database,
+    query: &str,
+    results: &mut Vec<SearchResult>,
+    authority_registry: &SourceAuthorityRegistry,
+) {
     if results.len() < 2 || !query_requests_procedural_guidance(query) {
         return;
     }
@@ -1318,7 +1339,7 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
         });
     }
 
-    apply_trusted_procedural_conflict_resolution(db, query, results);
+    apply_trusted_procedural_conflict_resolution(db, query, results, authority_registry);
 }
 
 fn apply_reflection_preference(
@@ -1499,6 +1520,7 @@ fn apply_trusted_procedural_conflict_resolution(
     db: &Database,
     query: &str,
     results: &mut Vec<SearchResult>,
+    authority_registry: &SourceAuthorityRegistry,
 ) {
     if results.len() < 2 || !query_requests_procedural_guidance(query) {
         return;
@@ -1572,12 +1594,12 @@ fn apply_trusted_procedural_conflict_resolution(
             continue;
         }
 
-        let rank = procedural_conflict_rank(query, &meta, result.score);
+        let rank = procedural_conflict_rank(query, &meta, result.score, authority_registry);
         procedural.push(ProceduralConflictCandidate {
             memory_id: result.memory_id,
             rank,
-            authority_rank: source_authority_rank(&meta, query_domain),
-            authority_chain: source_chain_for_domain(&meta, query_domain),
+            authority_rank: source_authority_rank(&meta, query_domain, Some(authority_registry)),
+            authority_chain: source_chain_for_domain(&meta, query_domain, Some(authority_registry)),
         });
     }
 
@@ -1632,13 +1654,7 @@ fn apply_authoritative_source_chain_resolution(candidates: &mut Vec<ProceduralCo
     }
 
     let mut ranked = chain_scores.into_iter().collect::<Vec<_>>();
-    ranked.sort_by(|left, right| {
-        right
-            .1
-            .0
-            .cmp(&left.1.0)
-            .then(right.1.1.cmp(&left.1.1))
-    });
+    ranked.sort_by(|left, right| right.1.0.cmp(&left.1.0).then(right.1.1.cmp(&left.1.1)));
 
     let (best_chain, (best_authority, _)) = &ranked[0];
     let second_authority = ranked.get(1).map(|(_, score)| score.0).unwrap_or(0);
@@ -1649,7 +1665,12 @@ fn apply_authoritative_source_chain_resolution(candidates: &mut Vec<ProceduralCo
     candidates.retain(|candidate| candidate.authority_chain.as_deref() == Some(best_chain));
 }
 
-fn procedural_conflict_rank(query: &str, meta: &MemoryMeta, score: f32) -> i32 {
+fn procedural_conflict_rank(
+    query: &str,
+    meta: &MemoryMeta,
+    score: f32,
+    authority_registry: &SourceAuthorityRegistry,
+) -> i32 {
     let normalized_query = query.to_lowercase();
     let normalized_text = meta.searchable_text.to_lowercase();
     let query_scope = query_scope(query);
@@ -1658,7 +1679,11 @@ fn procedural_conflict_rank(query: &str, meta: &MemoryMeta, score: f32) -> i32 {
         SourceTrustLevel::Normal => 300,
         SourceTrustLevel::Low => 80,
         SourceTrustLevel::Untrusted => 0,
-    } + source_authority_rank(meta, infer_authority_domain(query)) as i32
+    } + source_authority_rank(
+        meta,
+        infer_authority_domain(query),
+        Some(authority_registry),
+    ) as i32
         + source_provenance_rank(meta) as i32
         + (score * 100.0) as i32;
 
@@ -4032,6 +4057,7 @@ mod tests {
             &db,
             "What command should restart the tunnel?",
             &mut results,
+            &SourceAuthorityRegistry::default(),
         );
 
         assert_eq!(results.len(), 1);
@@ -4109,6 +4135,7 @@ mod tests {
             &db,
             "Should the production service be exposed directly?",
             &mut results,
+            &SourceAuthorityRegistry::default(),
         );
 
         assert_eq!(results.len(), 1);
@@ -4188,6 +4215,7 @@ mod tests {
             &db,
             "What host should be used for the production service?",
             &mut results,
+            &SourceAuthorityRegistry::default(),
         );
 
         assert_eq!(results.len(), 1);
@@ -4266,6 +4294,7 @@ mod tests {
             &db,
             "How should the production service normally run?",
             &mut routine_results,
+            &SourceAuthorityRegistry::default(),
         );
 
         assert_eq!(routine_results.len(), 1);
@@ -4286,6 +4315,7 @@ mod tests {
             &db,
             "What temporary procedure is approved during breakglass recovery?",
             &mut breakglass_results,
+            &SourceAuthorityRegistry::default(),
         );
 
         assert_eq!(breakglass_results.len(), 1);

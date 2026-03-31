@@ -33,9 +33,12 @@ pub use secret_policy::{
     query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, secret_class_from_metadata,
 };
-pub use source_authority::SourceAuthorityScorer;
+pub use source_authority::{
+    SourceAuthorityDomain, SourceAuthorityLevel, SourceAuthorityPolicy, SourceAuthorityRegistry,
+    SourceAuthorityScorer,
+};
 pub(crate) use source_authority::{
-    SourceAuthorityDomain, infer_authority_domain, source_authority_rank, source_chain_for_domain,
+    infer_authority_domain, source_authority_rank, source_chain_for_domain,
 };
 pub use source_provenance::SourceProvenanceScorer;
 pub(crate) use source_provenance::source_provenance_rank;

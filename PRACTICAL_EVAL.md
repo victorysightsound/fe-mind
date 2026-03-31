@@ -154,6 +154,9 @@ Each scenario should include:
   - `source_authority_domain`
   - `source_authority_level`
   - `source_chain`
+- application-facing authority policy can also be supplied once at engine
+  build time through `SourceAuthorityRegistry`, so records that only declare
+  `source_chain` can still participate in authority arbitration
 - high-impact review policy examples now include:
   - auth bypass exceptions
   - destructive reset windows
@@ -425,6 +428,8 @@ Current validated baseline:
   - deterministic reflection can prefer the authoritative chain for a
     knowledge key even when competing trusted chains have broader generic
     support
+- targeted engine tests now also prove the application-facing authority
+  registry works even when records only carry `source_chain`
 
 This exact-mode practical run is the standard local regression check before
 trying wider live usage samples or ANN comparisons.
