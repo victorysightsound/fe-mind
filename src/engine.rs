@@ -78,6 +78,8 @@ pub struct ComposedAnswerResult {
     pub answer: String,
     /// Composition strategy used to build the answer.
     pub kind: &'static str,
+    /// Whether the answer came from reflected knowledge, raw source evidence, or both.
+    pub basis: CompositionEvidenceBasis,
     /// Confidence level for the composed answer.
     pub confidence: CompositionConfidence,
     /// Whether the composer intentionally abstained.
@@ -90,6 +92,30 @@ pub struct ComposedAnswerResult {
     pub distinct_match_count: usize,
     /// Evidence bundle used during composition.
     pub evidence: Vec<AggregatedMatch>,
+}
+
+/// Evidence basis used by deterministic composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CompositionEvidenceBasis {
+    Source,
+    Reflected,
+    Blended,
+}
+
+impl CompositionEvidenceBasis {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Reflected => "reflected",
+            Self::Blended => "blended",
+        }
+    }
+}
+
+impl std::fmt::Display for CompositionEvidenceBasis {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Human-review item raised for a high-impact memory.
@@ -2028,6 +2054,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 return Ok(ComposedAnswerResult {
                     answer: "I don’t have enough grounded evidence to answer.".to_string(),
                     kind: "aggregation",
+                    basis: CompositionEvidenceBasis::Source,
                     confidence: CompositionConfidence::Low,
                     abstained: true,
                     rationale: "no-supporting-evidence",
@@ -2042,6 +2069,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             return Ok(ComposedAnswerResult {
                 answer,
                 kind: "aggregation",
+                basis: CompositionEvidenceBasis::Source,
                 confidence,
                 abstained: false,
                 rationale,
@@ -2059,6 +2087,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             return Ok(ComposedAnswerResult {
                 answer: "I won't surface secret or credential material from memory.".to_string(),
                 kind: "abstain",
+                basis: CompositionEvidenceBasis::Source,
                 confidence: CompositionConfidence::Low,
                 abstained: true,
                 rationale: "sensitive-secret-detail",
@@ -2095,6 +2124,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     return Ok(ComposedAnswerResult {
                         answer: answer.to_string(),
                         kind: "abstain",
+                        basis: CompositionEvidenceBasis::Source,
                         confidence: CompositionConfidence::Low,
                         abstained: true,
                         rationale,
@@ -2108,6 +2138,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             return Ok(ComposedAnswerResult {
                 answer: "I don’t have enough grounded evidence to answer.".to_string(),
                 kind: "abstain",
+                basis: CompositionEvidenceBasis::Source,
                 confidence: CompositionConfidence::Low,
                 abstained: true,
                 rationale: "no-supporting-evidence",
@@ -2122,6 +2153,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             return Ok(ComposedAnswerResult {
                 answer: "I don’t have the exact grounded detail needed to answer that.".to_string(),
                 kind: "abstain",
+                basis: CompositionEvidenceBasis::Source,
                 confidence: CompositionConfidence::Low,
                 abstained: true,
                 rationale: "unsupported-detail",
@@ -2138,6 +2170,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             return Ok(ComposedAnswerResult {
                 answer: "I don’t have enough grounded evidence to answer that exactly.".to_string(),
                 kind: "abstain",
+                basis: CompositionEvidenceBasis::Source,
                 confidence: CompositionConfidence::Low,
                 abstained: true,
                 rationale: "insufficient-grounding",
@@ -2147,17 +2180,34 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             });
         }
 
-        let (answer, kind, confidence, rationale) = if is_yes_no_query(query) {
-            compose_yes_no_answer(query, &evidence)
+        let (answer, kind, basis, confidence, rationale) = if is_yes_no_query(query) {
+            let (answer, kind, confidence, rationale) = compose_yes_no_answer(query, &evidence);
+            (
+                answer,
+                kind,
+                CompositionEvidenceBasis::Source,
+                confidence,
+                rationale,
+            )
+        } else if matches!(route.intent, crate::search::QueryIntent::StableSummary) {
+            compose_stable_summary_answer(query, &evidence)
         } else if matches!(
             route.intent,
             crate::search::QueryIntent::CurrentState | crate::search::QueryIntent::HistoricalState
         ) {
-            compose_stateful_answer(query, &evidence)
+            let (answer, kind, confidence, rationale) = compose_stateful_answer(query, &evidence);
+            (
+                answer,
+                kind,
+                CompositionEvidenceBasis::Source,
+                confidence,
+                rationale,
+            )
         } else if requires_strict_grounding {
             (
                 top.text.trim().to_string(),
                 "direct",
+                CompositionEvidenceBasis::Source,
                 CompositionConfidence::High,
                 "grounded-detail",
             )
@@ -2165,6 +2215,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             (
                 top.text.trim().to_string(),
                 "direct",
+                CompositionEvidenceBasis::Source,
                 CompositionConfidence::Medium,
                 "top-evidence",
             )
@@ -2175,6 +2226,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         Ok(ComposedAnswerResult {
             answer,
             kind,
+            basis,
             confidence,
             abstained: false,
             rationale,
@@ -3287,6 +3339,145 @@ fn compose_stateful_answer(
     )
 }
 
+fn compose_stable_summary_answer(
+    query: &str,
+    evidence: &[AggregatedMatch],
+) -> (
+    String,
+    &'static str,
+    CompositionEvidenceBasis,
+    CompositionConfidence,
+    &'static str,
+) {
+    if let Some(reflection) = select_current_reflection_evidence(query, evidence) {
+        let summary = reflection_summary_text(reflection)
+            .unwrap_or_else(|| reflection.text.trim().to_string());
+        let reflection_confidence = reflection_confidence(reflection);
+
+        if query_requests_evidence_citation(query) {
+            if let Some(source) = select_best_source_evidence(query, evidence) {
+                return (
+                    format!("{summary} Supported by: {}", source.text.trim()),
+                    "stable-summary",
+                    CompositionEvidenceBasis::Blended,
+                    if reflection_confidence == CompositionConfidence::Low {
+                        CompositionConfidence::Medium
+                    } else {
+                        reflection_confidence
+                    },
+                    "reflected-summary-with-support",
+                );
+            }
+        }
+
+        return (
+            summary,
+            "stable-summary",
+            CompositionEvidenceBasis::Reflected,
+            reflection_confidence,
+            "reflected-summary",
+        );
+    }
+
+    let best = select_best_evidence(query, evidence);
+    (
+        best.text.trim().to_string(),
+        "stable-summary",
+        CompositionEvidenceBasis::Source,
+        if has_conflicting_state_evidence(query, evidence) {
+            CompositionConfidence::Medium
+        } else {
+            CompositionConfidence::High
+        },
+        "source-summary-fallback",
+    )
+}
+
+fn select_current_reflection_evidence<'a>(
+    query: &str,
+    evidence: &'a [AggregatedMatch],
+) -> Option<&'a AggregatedMatch> {
+    evidence
+        .iter()
+        .filter(|candidate| is_current_reflection_match(candidate))
+        .max_by(|left, right| {
+            evidence_selection_rank(query, left)
+                .cmp(&evidence_selection_rank(query, right))
+                .then_with(|| {
+                    left.score
+                        .partial_cmp(&right.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        })
+}
+
+fn select_best_source_evidence<'a>(
+    query: &str,
+    evidence: &'a [AggregatedMatch],
+) -> Option<&'a AggregatedMatch> {
+    let sources = evidence
+        .iter()
+        .filter(|candidate| !is_reflection_match(candidate))
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
+        return None;
+    }
+    sources.into_iter().max_by(|left, right| {
+        evidence_selection_rank(query, left)
+            .cmp(&evidence_selection_rank(query, right))
+            .then_with(|| {
+                left.score
+                    .partial_cmp(&right.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    })
+}
+
+fn is_reflection_match(candidate: &AggregatedMatch) -> bool {
+    candidate
+        .metadata
+        .get("derived_kind")
+        .is_some_and(|value| value.eq_ignore_ascii_case("reflection"))
+}
+
+fn is_current_reflection_match(candidate: &AggregatedMatch) -> bool {
+    is_reflection_match(candidate)
+        && candidate
+            .metadata
+            .get("reflection_status")
+            .is_none_or(|value| value.eq_ignore_ascii_case("current"))
+}
+
+fn reflection_summary_text(candidate: &AggregatedMatch) -> Option<String> {
+    candidate
+        .metadata
+        .get("knowledge_summary")
+        .cloned()
+        .or_else(|| {
+            let trimmed = strip_reflection_label(candidate.text.trim()).trim().to_string();
+            (!trimmed.is_empty()).then_some(trimmed)
+        })
+}
+
+fn reflection_confidence(candidate: &AggregatedMatch) -> CompositionConfidence {
+    candidate
+        .metadata
+        .get("reflection_confidence")
+        .and_then(|value| parse_composition_confidence(value))
+        .unwrap_or(CompositionConfidence::Medium)
+}
+
+fn query_requests_evidence_citation(query: &str) -> bool {
+    let normalized = query.to_lowercase();
+    normalized.contains("based on")
+        || normalized.contains("according to")
+        || normalized.contains("what supports")
+        || normalized.contains("what evidence")
+        || normalized.contains("which evidence")
+        || normalized.contains("why is")
+        || normalized.contains("why are")
+}
+
 fn query_prefers_trusted_guidance(query: &str) -> bool {
     crate::scoring::query_requests_procedural_guidance(query)
         || query_requests_secret_location_or_reference(query)
@@ -4281,6 +4472,144 @@ mod tests {
         assert!(!answer.abstained);
         assert_eq!(answer.rationale, "grounded-detail");
         assert!(answer.answer.contains("com.user.femind-embed-tunnel.plist"));
+    }
+
+    #[test]
+    fn compose_answer_prefers_reflected_summary_for_stable_summary_queries() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+        engine
+            .store(&rich_mem(
+                "Supported Windows startup path: use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "system"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store support");
+        engine
+            .store(&rich_mem(
+                "The current supported startup path uses the Windows Scheduled Task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store corroborating support");
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: format!("Current startup path: {}", object.summary),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist reflection");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "What is the current supported startup path for femind-embed-service?",
+                &AssemblyConfig::default(),
+                5,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "stable-summary");
+        assert_eq!(answer.basis, CompositionEvidenceBasis::Reflected);
+        assert_eq!(answer.rationale, "reflected-summary");
+        assert_eq!(
+            answer.answer,
+            "Use the Windows Scheduled Task at logon to launch femind-embed-service."
+        );
+    }
+
+    #[test]
+    fn compose_answer_blends_reflection_with_support_when_query_requests_evidence() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+        engine
+            .store(&rich_mem(
+                "Supported Windows startup path: use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "system"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store support");
+        engine
+            .store(&rich_mem(
+                "The current supported startup path uses the Windows Scheduled Task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store corroborating support");
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: format!("Current startup path: {}", object.summary),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist reflection");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "Based on current evidence, what is the supported startup path for femind-embed-service?",
+                &AssemblyConfig::default(),
+                5,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "stable-summary");
+        assert_eq!(answer.basis, CompositionEvidenceBasis::Blended);
+        assert_eq!(answer.rationale, "reflected-summary-with-support");
+        assert!(answer.answer.contains("Supported by:"));
+        assert!(answer.answer.contains("Windows Scheduled Task"));
     }
 
     #[test]

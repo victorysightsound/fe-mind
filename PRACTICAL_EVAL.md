@@ -244,6 +244,8 @@ The summary now also records:
   matches, and the composed evidence text used for rollup-style validation
 - per-check composed-answer reports showing the deterministic answer text and
   composition kind (`direct`, `stateful`, `yes-no`, or `aggregation`)
+- per-check composed-answer reports now also include the evidence basis:
+  `source`, `reflected`, or `blended`
 - per-check composed-answer confidence, abstention state, and rationale so
   exact-detail and provenance failures can be diagnosed without guessing
 
@@ -300,8 +302,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `45/45`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `45/45`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `46/46`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `46/46`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
@@ -374,14 +376,20 @@ Current validated baseline:
   supported/preferred/recommended/current durable-summary questions can
   automatically prefer current reflected rows without forcing callers to opt
   into a separate helper
+- stable-summary composition can now deliberately answer from:
+  - reflected knowledge
+  - raw source evidence
+  - a blend of reflected summary plus supporting source evidence
+- practical retrieval checks can now assert that with
+  `expected_composed_basis`
 - practical retrieval checks can now fail explicitly when the routed intent or
   routed reflection preference is wrong, even if the answer still happens to
   pass by accident
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `45/45`
-- latest reranker-aware `remote-fallback` ANN run passes `45/45`
+- latest reranker-aware `remote-fallback` exact run passes `46/46`
+- latest reranker-aware `remote-fallback` ANN run passes `46/46`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

@@ -185,8 +185,8 @@ Current status after the 2026-03-30 trust/safety pass:
   suppress generic defaults or weaker workaround notes when the query is
   explicit
 - the current remote-GPU engine-first baseline is:
-  - practical `45/45` exact
-  - practical `45/45` ann
+  - practical `46/46` exact
+  - practical `46/46` ann
   - live-library `58/58` exact
   - memloft-slice `90/90` exact
 - the practical suite now also validates deterministic reflection over repeated
@@ -211,6 +211,9 @@ Current status after the 2026-03-30 trust/safety pass:
   shape clearly asks for the supported, preferred, or recommended durable
   summary of a fact family, so reflection can participate in ordinary engine
   behavior instead of staying only an application opt-in
+- stable-summary composition now has an explicit evidence-basis policy:
+  it can answer from reflected knowledge, raw source evidence, or a deliberate
+  blend of both when the query is provenance-sensitive
 
 ### 6. Keep Evaluation Engine-Centric
 

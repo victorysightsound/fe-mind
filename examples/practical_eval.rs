@@ -140,6 +140,8 @@ mod app {
         #[serde(default)]
         expected_reflection_preference: Option<String>,
         #[serde(default)]
+        expected_composed_basis: Option<String>,
+        #[serde(default)]
         required_fragments: Vec<String>,
         #[serde(default)]
         forbidden_fragments: Vec<String>,
@@ -743,6 +745,7 @@ mod app {
         expected_match: bool,
         intent_ok: bool,
         reflection_preference_ok: bool,
+        composed_basis_ok: bool,
         required_fragments_ok: bool,
         forbidden_fragments_ok: bool,
         required_sources_ok: bool,
@@ -757,6 +760,10 @@ mod app {
         expected_reflection_preference: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         observed_reflection_preference: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_composed_basis: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_composed_basis: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         min_observed_hits: Option<usize>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -779,6 +786,7 @@ mod app {
     #[derive(Debug, Serialize)]
     struct ComposedAnswerReport {
         kind: String,
+        basis: String,
         answer: String,
         confidence: String,
         abstained: bool,
@@ -1883,6 +1891,7 @@ mod app {
                 aggregation: Some(details),
                 composed_answer: Some(ComposedAnswerReport {
                     kind: composed_kind,
+                    basis: composition.basis.as_str().to_string(),
                     answer: composed_answer,
                     confidence: composed_confidence,
                     abstained: composed_abstained,
@@ -1912,6 +1921,7 @@ mod app {
             aggregation: None,
             composed_answer: (!composed_answer.trim().is_empty()).then_some(ComposedAnswerReport {
                 kind: composed_kind,
+                basis: composition.basis.as_str().to_string(),
                 answer: composed_answer,
                 confidence: composed_confidence,
                 abstained: composed_abstained,
@@ -2074,11 +2084,19 @@ mod app {
             expected_reflection_preference.as_ref().is_none_or(|expected| {
                 normalize(expected) == normalize(&observed_reflection_preference)
             });
+        let observed_composed_basis = composed_answer.map(|answer| answer.basis.clone());
+        let expected_composed_basis = check.expected_composed_basis.clone();
+        let composed_basis_ok = expected_composed_basis.as_ref().is_none_or(|expected| {
+            observed_composed_basis
+                .as_ref()
+                .is_some_and(|observed| normalize(expected) == normalize(observed))
+        });
 
         let criteria = RetrievalCriteriaReport {
             expected_match,
             intent_ok,
             reflection_preference_ok,
+            composed_basis_ok,
             required_fragments_ok,
             forbidden_fragments_ok,
             required_sources_ok,
@@ -2089,6 +2107,8 @@ mod app {
             observed_intent: Some(observed_intent),
             expected_reflection_preference,
             observed_reflection_preference: Some(observed_reflection_preference),
+            expected_composed_basis,
+            observed_composed_basis,
             min_observed_hits: check.min_observed_hits,
             missing_required_fragments,
             present_forbidden_fragments,
@@ -2098,6 +2118,7 @@ mod app {
         let passed = criteria.expected_match
             && criteria.intent_ok
             && criteria.reflection_preference_ok
+            && criteria.composed_basis_ok
             && criteria.required_fragments_ok
             && criteria.forbidden_fragments_ok
             && criteria.required_sources_ok

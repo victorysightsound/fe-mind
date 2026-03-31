@@ -1620,6 +1620,51 @@ actually recognizing the query shape.
 
 ---
 
+## Decision 047: Make Stable-Summary Composition Choose Reflected, Source, or Blended Evidence
+
+**Date:** 2026-03-31
+
+**Decision:** Extend deterministic composition so stable-summary queries do not
+just retrieve reflected knowledge, but deliberately choose an evidence basis:
+`reflected`, `source`, or `blended`.
+
+**Context:** Decision 046 made stable-summary routing explicit, but composition
+still behaved like generic direct/stateful answering after retrieval. That
+meant FeMind could surface the right reflected row while still hiding an
+important distinction: whether the final answer came from the reflected summary
+itself, from raw source evidence, or from a deliberate combination of both for
+provenance-sensitive questions.
+
+**Rationale:**
+- top-tier memory quality needs more than good retrieval; it needs explicit
+  control over how higher-order knowledge is surfaced to applications
+- reflected summaries should be first-class answer material for durable-summary
+  questions
+- provenance-sensitive stable-summary questions should be able to blend the
+  reflected summary with direct supporting evidence instead of forcing a false
+  choice between the two
+- the practical suite should assert this behavior directly, not infer it from
+  answer text after the fact
+
+**Consequences:**
+- `ComposedAnswerResult` now records `basis`:
+  - `source`
+  - `reflected`
+  - `blended`
+- stable-summary composition now:
+  - prefers current reflected summaries when they exist
+  - falls back to source evidence if no current reflected row is available
+  - blends reflection with supporting source evidence for evidence-seeking
+    stable-summary questions
+- practical retrieval checks can now assert `expected_composed_basis`
+- reflection practical coverage now includes:
+  - a reflected-summary answer path
+  - a blended reflected-plus-source answer path
+- Remote-GPU validation is green after the change:
+  practical `46/46` exact and practical `46/46` ANN
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

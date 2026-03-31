@@ -64,7 +64,8 @@ pub mod traits;
 /// Prelude module — common imports for consumers.
 pub mod prelude {
     pub use crate::engine::{
-        KnowledgeObject, KnowledgeObjectKind, MemoryEngine, PersistedKnowledgeObject,
+        CompositionEvidenceBasis, KnowledgeObject, KnowledgeObjectKind, MemoryEngine,
+        PersistedKnowledgeObject,
         PersistedKnowledgeSummary, ReflectionConfig, ReflectionLifecycleStatus,
         ReflectionRefreshPlanItem, ReflectionRefreshPolicy, ReflectionRefreshReason, ReviewItem,
         VectorSearchMode,

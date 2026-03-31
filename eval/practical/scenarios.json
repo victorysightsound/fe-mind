@@ -1300,9 +1300,26 @@
         "expected_answer": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
         "expected_intent": "stable-summary",
         "expected_reflection_preference": "prefer-current",
+        "expected_composed_basis": "reflected",
         "required_fragments": [
           "Windows Scheduled Task",
           "logon"
+        ],
+        "required_sources": [
+          "reflection"
+        ],
+        "min_observed_hits": 1,
+        "top_k": 5
+      },
+      {
+        "query": "Based on current evidence, what is the supported startup path for femind-embed-service?",
+        "expected_answer": "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+        "expected_intent": "stable-summary",
+        "expected_reflection_preference": "prefer-current",
+        "expected_composed_basis": "blended",
+        "required_fragments": [
+          "Windows Scheduled Task",
+          "Supported by:"
         ],
         "required_sources": [
           "reflection"
@@ -1390,6 +1407,7 @@
         "expected_answer": "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
         "expected_intent": "stable-summary",
         "expected_reflection_preference": "prefer-current",
+        "expected_composed_basis": "reflected",
         "required_fragments": [
           "engine-first",
           "benchmark checkpoints"

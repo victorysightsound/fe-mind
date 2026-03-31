@@ -27,8 +27,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `45/45`
-- retrieval-only practical eval in `ann` mode currently passes `45/45`
+- retrieval-only practical eval in `exact` mode currently passes `46/46`
+- retrieval-only practical eval in `ann` mode currently passes `46/46`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
@@ -62,7 +62,7 @@ The practical live-validation path is now established and repeatable:
   MiniLM reranking with local fallback when the Windows GPU service is
   available
 - this pass revalidated the engine-first suites on remote GPU fallback at
-  `45/45` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
+  `46/46` practical (`exact` and `ann`), `58/58` live-library, and `90/90`
   memloft-slice
 - FeMind is currently using an engine-first validation loop: `eval/practical`,
   `eval/live-library`, and `eval/memloft-slice` are the active tuning path, and
@@ -122,6 +122,15 @@ The practical live-validation path is now established and repeatable:
 - composed answers now also record confidence, abstention, and rationale so
   maintainers can see when FeMind answered confidently, when it abstained, and
   why
+- composed answers now also record their evidence basis:
+  - `source`
+  - `reflected`
+  - `blended`
+- stable-summary composition can now deliberately:
+  - answer from reflected knowledge
+  - fall back to raw source evidence
+  - blend reflected summaries with supporting source evidence for
+    provenance-sensitive questions
 - routed retrieval now includes an explicit temporal policy:
   current-state queries mildly favor newer evidence, historical-state queries
   mildly favor older evidence, and exact-detail / abstention routes stay
