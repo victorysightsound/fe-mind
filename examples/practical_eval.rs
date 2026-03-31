@@ -138,6 +138,8 @@ mod app {
         #[serde(default)]
         expected_intent: Option<String>,
         #[serde(default)]
+        expected_graph_depth: Option<u32>,
+        #[serde(default)]
         expected_stable_summary_policy: Option<String>,
         #[serde(default)]
         expected_reflection_preference: Option<String>,
@@ -752,6 +754,7 @@ mod app {
     struct RetrievalCriteriaReport {
         expected_match: bool,
         intent_ok: bool,
+        graph_depth_ok: bool,
         stable_summary_policy_ok: bool,
         reflection_preference_ok: bool,
         composed_basis_ok: bool,
@@ -765,6 +768,10 @@ mod app {
         expected_intent: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         observed_intent: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_graph_depth: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_graph_depth: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         expected_stable_summary_policy: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -2142,6 +2149,10 @@ mod app {
         let intent_ok = expected_intent
             .as_ref()
             .is_none_or(|expected| normalize(expected) == normalize(&observed_intent));
+        let observed_graph_depth = route.graph_depth;
+        let expected_graph_depth = check.expected_graph_depth;
+        let graph_depth_ok =
+            expected_graph_depth.is_none_or(|expected| expected == observed_graph_depth);
         let observed_stable_summary_policy = route.stable_summary_policy_name().to_string();
         let expected_stable_summary_policy = check.expected_stable_summary_policy.clone();
         let stable_summary_policy_ok =
@@ -2169,6 +2180,7 @@ mod app {
         let criteria = RetrievalCriteriaReport {
             expected_match,
             intent_ok,
+            graph_depth_ok,
             stable_summary_policy_ok,
             reflection_preference_ok,
             composed_basis_ok,
@@ -2180,6 +2192,8 @@ mod app {
             observed_hit_count,
             expected_intent,
             observed_intent: Some(observed_intent),
+            expected_graph_depth,
+            observed_graph_depth: Some(observed_graph_depth),
             expected_stable_summary_policy,
             observed_stable_summary_policy: Some(observed_stable_summary_policy),
             expected_reflection_preference,
@@ -2194,6 +2208,7 @@ mod app {
         };
         let passed = criteria.expected_match
             && criteria.intent_ok
+            && criteria.graph_depth_ok
             && criteria.stable_summary_policy_ok
             && criteria.reflection_preference_ok
             && criteria.composed_basis_ok

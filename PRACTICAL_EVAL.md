@@ -412,11 +412,13 @@ Current validated baseline:
 - practical retrieval checks can now fail explicitly when the routed intent or
   routed reflection preference is wrong, even if the answer still happens to
   pass by accident
+- practical retrieval checks can now also assert routed graph depth through
+  `expected_graph_depth`
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `50/50`
-- latest reranker-aware `remote-fallback` ANN run passes `50/50`
+- latest reranker-aware `remote-fallback` exact run passes `51/51`
+- latest reranker-aware `remote-fallback` ANN run passes `51/51`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`
@@ -428,6 +430,10 @@ Current validated baseline:
   - deterministic reflection can prefer the authoritative chain for a
     knowledge key even when competing trusted chains have broader generic
     support
+- mixed-authority multi-hop coverage now also proves:
+  - graph-linked client questions can route with `graph_depth = 2`
+  - the authoritative runtime chain can still win after graph expansion pulls
+    both runtime and deployment guidance into the evidence set
 - targeted engine tests now also prove the application-facing authority
   registry works even when records only carry `source_chain`
 

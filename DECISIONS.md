@@ -1857,6 +1857,47 @@ silently replacing it.
 - broad Remote-GPU regression validation must remain green after the change:
   practical exact, practical ANN, live-library exact, and memloft-slice exact
 
+## Decision 052: Expand Practical Coverage for Mixed-Authority Multi-Hop Retrieval
+
+**Decision:** Extend the engine-first practical suite so it can assert routed
+graph depth directly and cover a mixed-authority multi-hop case where graph
+expansion surfaces both runtime and deployment guidance, but the authoritative
+runtime chain must still win the answer.
+
+**Context:** FeMind already had separate coverage for:
+- graph-linked retrieval
+- source-chain authority arbitration
+
+But that left a real-world gap. Production memory questions often do both at
+once: follow linked notes across multiple hops and then choose the right
+authoritative chain inside the expanded evidence set. Without that regression,
+it would be too easy to keep both features green independently while missing
+their interaction.
+
+The first version of the new scenario exposed exactly that kind of testing
+mistake. FeMind returned the correct top answer from the authoritative runtime
+chain, but the scenario incorrectly failed because graph-expanded weaker
+deployment evidence was still visible lower in the observed hit list. The right
+contract is not "hide every weaker connected note." The right contract is:
+- route through graph expansion
+- surface the correct top answer
+- keep the authoritative runtime chain above linked deployment guidance
+
+**Consequences:**
+- practical retrieval checks can now assert routed graph depth through
+  `expected_graph_depth`
+- `graph-client-connectivity` now proves routed `graph_depth = 2`
+- the new `graph-authoritative-runtime-path` scenario now proves:
+  - graph-linked client questions can trigger routed graph expansion
+  - the authoritative runtime chain still wins after both runtime and
+    deployment guidance are pulled into the graph-expanded evidence set
+- the scenario contract now focuses on top-answer correctness plus routed graph
+  depth instead of requiring every weaker connected note to disappear from the
+  wider evidence list
+- Remote-GPU validation is green after the change:
+  practical `51/51` exact, practical `51/51` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

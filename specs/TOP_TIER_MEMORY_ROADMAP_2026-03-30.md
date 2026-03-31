@@ -195,10 +195,14 @@ Current status after the 2026-03-30 trust/safety pass:
     authoritative chain for the inferred query domain instead of only following
     generic provenance strength
 - the current remote-GPU engine-first baseline is:
-  - practical `50/50` exact
-  - practical `50/50` ann
+  - practical `51/51` exact
+  - practical `51/51` ann
   - live-library `58/58` exact
   - memloft-slice `90/90` exact
+- the practical suite now also proves mixed-authority multi-hop behavior:
+  - routed graph expansion can be asserted directly
+  - graph-expanded evidence can still prefer the authoritative runtime chain
+    over linked deployment guidance
 - the practical suite now also validates deterministic reflection over repeated
   trusted evidence, which is the current low-risk path toward higher-order
   stable knowledge synthesis without reviving benchmark-driven iteration

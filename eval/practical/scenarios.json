@@ -294,12 +294,108 @@
       {
         "query": "How does Librona reach the stable GPU embedding service now?",
         "expected_answer": "It reaches the service through an SSH tunnel to Windows localhost on calvaryav.",
+        "expected_graph_depth": 2,
         "required_fragments": [
           "SSH tunnel",
           "Windows localhost",
           "calvaryav"
         ],
         "min_observed_hits": 2
+      }
+    ]
+  },
+  {
+    "id": "graph-authoritative-runtime-path",
+    "title": "Graph-linked authority should prefer the runtime chain over deployment guidance",
+    "category": "multi-hop-graph",
+    "goal": "When a client connectivity question walks linked notes that include both deployment and runtime guidance, FeMind should route through graph expansion and prefer the authoritative runtime chain.",
+    "records": [
+      {
+        "key": "librona-runtime-client",
+        "timestamp": "2026-03-31T08:00:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "Librona now follows the supported FeMind runtime path on calvaryav instead of older bootstrap assumptions."
+      },
+      {
+        "key": "runtime-link",
+        "timestamp": "2026-03-31T08:02:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The current client path depends on the active host runtime note and the audited Mac tunnel note."
+      },
+      {
+        "key": "runtime-path",
+        "timestamp": "2026-03-31T08:05:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "source_authority_domain": "runtime",
+          "source_authority_level": "authoritative",
+          "source_chain": "runtime-ops"
+        },
+        "text": "Supported runtime path: run femind-embed-service as a native Windows scheduled task on the GPU host."
+      },
+      {
+        "key": "deployment-path",
+        "timestamp": "2026-03-31T08:06:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_authority_domain": "deployment",
+          "source_authority_level": "authoritative",
+          "source_chain": "deployment-docs"
+        },
+        "text": "Supported deployment path: keep femind-embed-service running inside WSL systemd on the GPU host for bootstrap."
+      },
+      {
+        "key": "mac-runtime-tunnel",
+        "timestamp": "2026-03-31T08:07:00Z",
+        "source": "integration-note",
+        "memory_type": "procedural",
+        "text": "Mac clients still reach the Windows host through an SSH tunnel to Windows localhost on calvaryav."
+      }
+    ],
+    "relations": [
+      {
+        "from": "librona-runtime-client",
+        "to": "runtime-link",
+        "relation": "related_to"
+      },
+      {
+        "from": "runtime-link",
+        "to": "runtime-path",
+        "relation": "depends_on"
+      },
+      {
+        "from": "runtime-link",
+        "to": "deployment-path",
+        "relation": "depends_on"
+      },
+      {
+        "from": "runtime-link",
+        "to": "mac-runtime-tunnel",
+        "relation": "depends_on"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How does Librona reach the supported runtime path on calvaryav now?",
+        "expected_answer": "Run femind-embed-service as a native Windows scheduled task on the GPU host.",
+        "expected_intent": "stable-summary",
+        "expected_graph_depth": 2,
+        "top_k": 1,
+        "required_fragments": [
+          "native Windows scheduled task",
+          "GPU host"
+        ],
+        "min_observed_hits": 1
       }
     ]
   },

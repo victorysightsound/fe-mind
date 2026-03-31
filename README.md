@@ -27,8 +27,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `50/50`
-- retrieval-only practical eval in `ann` mode currently passes `50/50`
+- retrieval-only practical eval in `exact` mode currently passes `51/51`
+- retrieval-only practical eval in `ann` mode currently passes `51/51`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just
@@ -48,6 +48,9 @@ The practical live-validation path is now established and repeatable:
 - practical eval now also covers source-chain authority conflicts for:
   - runtime-vs-deployment procedural guidance
   - reflected runtime guidance backed by authoritative chains
+- practical eval now also covers mixed-authority multi-hop retrieval:
+  - graph-linked client/runtime questions that must route through graph
+    expansion and still prefer the authoritative runtime chain
 - FeMind now also supports an application-facing source authority registry, so
   apps can declare authoritative chains per domain once and let records
   participate with `source_chain` metadata instead of repeating full authority
