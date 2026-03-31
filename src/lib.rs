@@ -65,7 +65,9 @@ pub mod traits;
 pub mod prelude {
     pub use crate::engine::{
         KnowledgeObject, KnowledgeObjectKind, MemoryEngine, PersistedKnowledgeObject,
-        ReflectionConfig, ReviewItem, VectorSearchMode,
+        PersistedKnowledgeSummary, ReflectionConfig, ReflectionLifecycleStatus,
+        ReflectionRefreshPlanItem, ReflectionRefreshPolicy, ReflectionRefreshReason, ReviewItem,
+        VectorSearchMode,
     };
     pub use crate::error::{FemindError, Result};
     pub use crate::memory::store::StoreResult;
@@ -74,8 +76,8 @@ pub mod prelude {
         SecretClass,
     };
     pub use crate::search::{
-        QueryIntent, QueryRoute, SearchBuilder, SearchDepth, SearchMode, SearchResult,
-        StateConflictPolicy, TemporalPolicy,
+        QueryIntent, QueryRoute, ReflectionSearchPreference, SearchBuilder, SearchDepth,
+        SearchMode, SearchResult, StateConflictPolicy, TemporalPolicy,
     };
     pub use crate::traits::{MemoryMeta, MemoryRecord, MemoryType};
 }

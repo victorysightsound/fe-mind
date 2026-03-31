@@ -1528,6 +1528,57 @@ higher-order memory.
 
 ---
 
+## Decision 045: Add Application-Facing Stable-Knowledge APIs and Refresh Planning
+
+**Date:** 2026-03-31
+
+**Decision:** Promote reflection from an internal synthesis mechanism to an
+application-facing feature. FeMind should expose explicit stable-knowledge
+search helpers, persisted reflected-knowledge inspection APIs, and a refresh
+planning contract so applications can deliberately retrieve and recompute
+reflected knowledge.
+
+**Context:** Decisions 042-044 established deterministic reflection,
+consumer-safe persistence, and lifecycle semantics for persisted reflected
+rows. That still left one gap: applications had no first-class way to say
+"treat reflected knowledge as the preferred stable summary layer" or "show me
+which reflected rows need recomputation now." Without those APIs, reflected
+knowledge remained technically present but operationally awkward.
+
+**Rationale:**
+- stable-summary style queries should be able to opt into reflected knowledge
+  directly instead of hoping ordinary retrieval ranks it correctly
+- applications need explicit inspection and refresh planning if reflected
+  knowledge is going to become part of a real product surface
+- refresh policy should stay consumer-controlled, consistent with FeMind’s
+  library-first design, rather than being hidden behind an internal scheduler
+
+**Consequences:**
+- the engine now exposes:
+  - `search_stable_knowledge(...)`
+  - `search_stable_knowledge_only(...)`
+  - `persisted_reflected_knowledge()`
+  - `reflected_knowledge_for_key(...)`
+  - `reflection_refresh_plan(...)`
+  - `refresh_reflected_knowledge_objects_with_policy(...)`
+- search now supports `ReflectionSearchPreference`, including:
+  - `PreferCurrent`
+  - `OnlyCurrent`
+- stable-knowledge search over-fetches and prefers current reflected rows so
+  reflection can actually surface as the intended summary layer in ordinary
+  query flows
+- reflection refresh is now explicit policy:
+  `ReflectionRefreshPolicy` can trigger recomputation for missing persisted
+  rows, stale rows, changed summaries, or stronger support
+- targeted engine tests cover:
+  - current reflected row lookup by key
+  - stale reflection refresh planning
+  - stable-knowledge search preferring current reflected rows
+- Remote-GPU validation is green after the change:
+  practical `45/45` exact and practical `45/45` ANN
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

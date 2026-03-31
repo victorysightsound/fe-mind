@@ -358,6 +358,16 @@ Current validated baseline:
   - the practical suite now queries persisted reflection rows directly through
     retrieval checks using source-aware criteria instead of validating only the
     runtime reflection object list
+- applications can now use explicit stable-knowledge helpers instead of
+  treating reflection as an internal-only mechanism:
+  - `search_stable_knowledge(...)`
+  - `search_stable_knowledge_only(...)`
+  - `persisted_reflected_knowledge()`
+  - `reflected_knowledge_for_key(...)`
+  - `reflection_refresh_plan(...)`
+- reflection refresh is now driven by `ReflectionRefreshPolicy`, so apps can
+  recompute persisted knowledge when it is stale, materially changed, or backed
+  by stronger support instead of relying on an opaque background cadence
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner

@@ -130,6 +130,30 @@ impl std::fmt::Display for QueryIntent {
     }
 }
 
+/// Optional preference for persisted reflection rows during retrieval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ReflectionSearchPreference {
+    Neutral,
+    PreferCurrent,
+    OnlyCurrent,
+}
+
+impl ReflectionSearchPreference {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Neutral => "neutral",
+            Self::PreferCurrent => "prefer-current",
+            Self::OnlyCurrent => "only-current",
+        }
+    }
+}
+
+impl std::fmt::Display for ReflectionSearchPreference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Effective routed search plan for a query.
 #[derive(Debug, Clone)]
 pub struct QueryRoute {
@@ -208,6 +232,7 @@ pub struct SearchBuilder<'a, T: MemoryRecord> {
     embedding: Option<Arc<dyn EmbeddingBackend>>,
     reranker: Option<Arc<dyn RerankerBackend>>,
     rerank_limit: usize,
+    reflection_preference: ReflectionSearchPreference,
     vector_search_mode: VectorSearchMode,
     strict_grounding_enabled: bool,
     query_alignment_enabled: bool,
@@ -241,6 +266,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             embedding: None,
             reranker: None,
             rerank_limit: 20,
+            reflection_preference: ReflectionSearchPreference::Neutral,
             vector_search_mode: VectorSearchMode::default(),
             strict_grounding_enabled: true,
             query_alignment_enabled: true,
@@ -280,6 +306,22 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         self.rerank_limit = limit;
         self.rerank_limit_overridden = true;
         self
+    }
+
+    /// Prefer or isolate persisted reflected knowledge rows during retrieval.
+    pub fn with_reflection_preference(mut self, preference: ReflectionSearchPreference) -> Self {
+        self.reflection_preference = preference;
+        self
+    }
+
+    /// Prefer current persisted reflection rows for stable-summary style queries.
+    pub fn prefer_reflections(self) -> Self {
+        self.with_reflection_preference(ReflectionSearchPreference::PreferCurrent)
+    }
+
+    /// Restrict retrieval to current persisted reflection rows only.
+    pub fn reflections_only(self) -> Self {
+        self.with_reflection_preference(ReflectionSearchPreference::OnlyCurrent)
     }
 
     /// Attach the engine's vector search mode.
@@ -560,6 +602,14 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let type_filter = self.memory_type.map(|t| t.as_str());
         let min_tier = self.depth_to_min_tier(route.depth);
         let precise_procedural_detail = query_requests_precise_procedural_detail(&self.query);
+        let fetch_limit = if matches!(
+            self.reflection_preference,
+            ReflectionSearchPreference::PreferCurrent | ReflectionSearchPreference::OnlyCurrent
+        ) {
+            self.limit * 3
+        } else {
+            self.limit
+        };
         let fts_results = if precise_procedural_detail {
             FtsSearch::search_or_mode(
                 self.db,
@@ -573,7 +623,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             FtsSearch::search_with_tiers(
                 self.db,
                 &self.query,
-                self.limit,
+                fetch_limit,
                 category_filter,
                 type_filter,
                 min_tier,
@@ -597,6 +647,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             results.retain(|r| r.score >= threshold);
         }
 
+        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
         results.truncate(self.limit);
         Ok(results)
     }
@@ -628,6 +679,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             rerank_for_query_alignment(self.db, &self.query, &mut results);
         }
         results.retain(|r| r.score >= min_score);
+        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
         Ok(results)
     }
 
@@ -664,6 +716,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
         }
+        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
         results.truncate(self.limit);
         Ok(results)
     }
@@ -726,6 +779,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         if let Some(threshold) = self.min_score {
             results.retain(|r| r.score >= threshold);
         }
+        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
         results.truncate(self.limit);
         Ok(results)
     }
@@ -865,6 +919,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         }
 
         apply_procedural_safety_isolation(self.db, &self.query, &mut results);
+        apply_reflection_preference(self.db, &mut results, self.reflection_preference);
 
         // Re-sort by final score (descending)
         results.sort_by(|a, b| {
@@ -872,6 +927,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+        sort_results_with_reflection_preference(self.db, &mut results, self.reflection_preference);
 
         results
     }
@@ -1185,6 +1241,142 @@ fn apply_procedural_safety_isolation(db: &Database, query: &str, results: &mut V
     }
 
     apply_trusted_procedural_conflict_resolution(db, query, results);
+}
+
+fn apply_reflection_preference(
+    db: &Database,
+    results: &mut Vec<SearchResult>,
+    preference: ReflectionSearchPreference,
+) {
+    if results.is_empty() || matches!(preference, ReflectionSearchPreference::Neutral) {
+        return;
+    }
+
+    let mut states = std::collections::HashMap::new();
+    for result in results.iter() {
+        let state = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT metadata_json FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .map_err(crate::error::FemindError::Database)
+            })
+            .ok()
+            .flatten()
+            .and_then(|json| {
+                serde_json::from_str::<std::collections::HashMap<String, String>>(&json).ok()
+            })
+            .map(|metadata| reflection_row_state(&metadata))
+            .unwrap_or_default();
+        states.insert(result.memory_id, state);
+    }
+
+    match preference {
+        ReflectionSearchPreference::Neutral => {}
+        ReflectionSearchPreference::OnlyCurrent => {
+            results.retain(|result| {
+                states
+                    .get(&result.memory_id)
+                    .is_some_and(|state| state.is_current_reflection)
+            });
+        }
+        ReflectionSearchPreference::PreferCurrent => {
+            for result in results.iter_mut() {
+                let state = states.get(&result.memory_id).copied().unwrap_or_default();
+                if state.is_current_reflection {
+                    result.score *= 1.5;
+                } else if state.is_superseded_reflection {
+                    result.score *= 0.5;
+                }
+            }
+        }
+    }
+}
+
+fn sort_results_with_reflection_preference(
+    db: &Database,
+    results: &mut [SearchResult],
+    preference: ReflectionSearchPreference,
+) {
+    if results.is_empty() || matches!(preference, ReflectionSearchPreference::Neutral) {
+        return;
+    }
+
+    let mut states = std::collections::HashMap::new();
+    for result in results.iter() {
+        let state = db
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT metadata_json FROM memories WHERE id = ?1",
+                    [result.memory_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .map_err(crate::error::FemindError::Database)
+            })
+            .ok()
+            .flatten()
+            .and_then(|json| {
+                serde_json::from_str::<std::collections::HashMap<String, String>>(&json).ok()
+            })
+            .map(|metadata| reflection_row_state(&metadata))
+            .unwrap_or_default();
+        states.insert(result.memory_id, state);
+    }
+
+    results.sort_by(|left, right| {
+        let left_bucket = states
+            .get(&left.memory_id)
+            .copied()
+            .unwrap_or_default()
+            .preference_bucket();
+        let right_bucket = states
+            .get(&right.memory_id)
+            .copied()
+            .unwrap_or_default()
+            .preference_bucket();
+        right_bucket
+            .cmp(&left_bucket)
+            .then_with(|| right.score.total_cmp(&left.score))
+            .then_with(|| left.memory_id.cmp(&right.memory_id))
+    });
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ReflectionRowState {
+    is_current_reflection: bool,
+    is_superseded_reflection: bool,
+}
+
+impl ReflectionRowState {
+    fn preference_bucket(self) -> u8 {
+        if self.is_current_reflection {
+            2
+        } else if self.is_superseded_reflection {
+            0
+        } else {
+            1
+        }
+    }
+}
+
+fn reflection_row_state(metadata: &std::collections::HashMap<String, String>) -> ReflectionRowState {
+    if !metadata
+        .get("derived_kind")
+        .is_some_and(|value| value.eq_ignore_ascii_case("reflection"))
+    {
+        return ReflectionRowState::default();
+    }
+
+    let status = metadata
+        .get("reflection_status")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_else(|| "current".to_string());
+    ReflectionRowState {
+        is_current_reflection: status == "current",
+        is_superseded_reflection: status == "superseded",
+    }
 }
 
 fn apply_trusted_procedural_conflict_resolution(

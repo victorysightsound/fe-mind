@@ -98,6 +98,19 @@ The practical live-validation path is now established and repeatable:
     source memories
   - the practical suite now queries persisted reflection rows directly instead
     of validating only runtime reflection output
+- applications can now query and manage reflected knowledge explicitly through:
+  - `search_stable_knowledge(...)`
+  - `search_stable_knowledge_only(...)`
+  - `persisted_reflected_knowledge()`
+  - `reflected_knowledge_for_key(...)`
+  - `reflection_refresh_plan(...)`
+  - `refresh_reflected_knowledge_objects_with_policy(...)`
+- stable-knowledge search now over-fetches and prefers current reflected rows
+  deliberately, so “stable summary” style queries do not get trapped in the
+  ordinary keyword pool
+- reflection refresh planning is now application-facing:
+  stale, changed, or newly reinforced derived knowledge can be recomputed using
+  an explicit `ReflectionRefreshPolicy` instead of ad hoc timer logic
 - composed answers now also record confidence, abstention, and rationale so
   maintainers can see when FeMind answered confidently, when it abstained, and
   why

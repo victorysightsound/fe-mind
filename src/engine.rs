@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use sha2::Digest;
 
 use crate::context::{ContextAssembly, ContextBudget, ContextItem, PRIORITY_LEARNING};
@@ -217,6 +217,108 @@ pub struct PersistedKnowledgeObject {
     pub store_result: StoreResult,
     /// Memory row ID for the persisted or reused record.
     pub memory_id: i64,
+}
+
+/// Persisted reflection row metadata surfaced through application-facing APIs.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PersistedKnowledgeSummary {
+    pub memory_id: i64,
+    pub key: String,
+    pub summary: String,
+    pub kind: KnowledgeObjectKind,
+    pub status: ReflectionLifecycleStatus,
+    pub confidence: CompositionConfidence,
+    pub support_count: usize,
+    pub trusted_support_count: usize,
+    pub source_ids: Vec<i64>,
+    pub generated_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub valid_until: Option<DateTime<Utc>>,
+}
+
+/// Lifecycle state for a persisted reflected knowledge row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ReflectionLifecycleStatus {
+    Current,
+    Superseded,
+}
+
+impl ReflectionLifecycleStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Superseded => "superseded",
+        }
+    }
+
+    fn from_metadata_value(value: Option<&str>) -> Self {
+        match value {
+            Some(value) if value.eq_ignore_ascii_case("superseded") => Self::Superseded,
+            _ => Self::Current,
+        }
+    }
+}
+
+impl std::fmt::Display for ReflectionLifecycleStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Policy for deciding when persisted reflections should be recomputed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReflectionRefreshPolicy {
+    pub max_age: Option<Duration>,
+    pub min_support_growth: usize,
+    pub min_trusted_support_growth: usize,
+    pub refresh_on_summary_change: bool,
+}
+
+impl Default for ReflectionRefreshPolicy {
+    fn default() -> Self {
+        Self {
+            max_age: Some(Duration::hours(24)),
+            min_support_growth: 1,
+            min_trusted_support_growth: 1,
+            refresh_on_summary_change: true,
+        }
+    }
+}
+
+/// Reason that a reflected knowledge object should be refreshed or promoted.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ReflectionRefreshReason {
+    MissingPersisted,
+    StaleByAge,
+    SummaryChanged,
+    SupportGrowth,
+    TrustedSupportGrowth,
+}
+
+impl ReflectionRefreshReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::MissingPersisted => "missing-persisted",
+            Self::StaleByAge => "stale-by-age",
+            Self::SummaryChanged => "summary-changed",
+            Self::SupportGrowth => "support-growth",
+            Self::TrustedSupportGrowth => "trusted-support-growth",
+        }
+    }
+}
+
+impl std::fmt::Display for ReflectionRefreshReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Planned refresh action for a reflected knowledge object.
+#[derive(Debug, Clone)]
+pub struct ReflectionRefreshPlanItem {
+    pub object: KnowledgeObject,
+    pub current: Option<PersistedKnowledgeSummary>,
+    pub reasons: Vec<ReflectionRefreshReason>,
 }
 
 /// Confidence label for deterministic composed answers.
@@ -1081,6 +1183,97 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         builder
     }
 
+    /// Begin a search that prefers current persisted reflection rows.
+    pub fn search_stable_knowledge(&self, query: &str) -> SearchBuilder<'_, T> {
+        self.search(query).prefer_reflections()
+    }
+
+    /// Begin a search restricted to current persisted reflection rows.
+    pub fn search_stable_knowledge_only(&self, query: &str) -> SearchBuilder<'_, T> {
+        self.search(query).reflections_only()
+    }
+
+    /// Load persisted reflection summaries, newest-first.
+    pub fn persisted_reflected_knowledge(&self) -> Result<Vec<PersistedKnowledgeSummary>> {
+        self.load_persisted_reflected_knowledge()
+    }
+
+    /// Load the current persisted reflection for a specific knowledge key.
+    pub fn reflected_knowledge_for_key(
+        &self,
+        key: &str,
+    ) -> Result<Option<PersistedKnowledgeSummary>> {
+        let normalized_key = normalize_reflection_value(key);
+        let mut rows = self.load_persisted_reflected_knowledge()?;
+        rows.retain(|row| {
+            normalize_reflection_value(&row.key) == normalized_key
+                && row.status == ReflectionLifecycleStatus::Current
+        });
+        rows.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        Ok(rows.into_iter().next())
+    }
+
+    /// Build an application-facing refresh plan for persisted reflections.
+    pub fn reflection_refresh_plan(
+        &self,
+        config: &ReflectionConfig,
+        policy: &ReflectionRefreshPolicy,
+    ) -> Result<Vec<ReflectionRefreshPlanItem>> {
+        let reflected = self.reflect_knowledge_objects(config)?;
+        let persisted = self.persisted_reflected_knowledge()?;
+        let current_by_key = persisted
+            .into_iter()
+            .filter(|row| row.status == ReflectionLifecycleStatus::Current)
+            .map(|row| (normalize_reflection_value(&row.key), row))
+            .collect::<std::collections::HashMap<_, _>>();
+        let now = Utc::now();
+
+        let mut plan = reflected
+            .into_iter()
+            .map(|object| {
+                let current = current_by_key
+                    .get(&normalize_reflection_value(&object.key))
+                    .cloned();
+                let reasons = reflection_refresh_reasons(&object, current.as_ref(), policy, now);
+                ReflectionRefreshPlanItem {
+                    object,
+                    current,
+                    reasons,
+                }
+            })
+            .collect::<Vec<_>>();
+        plan.sort_by(|left, right| left.object.key.cmp(&right.object.key));
+        Ok(plan)
+    }
+
+    /// Refresh persisted reflections according to a promotion policy.
+    pub fn refresh_reflected_knowledge_objects_with_policy<F>(
+        &self,
+        config: &ReflectionConfig,
+        policy: &ReflectionRefreshPolicy,
+        mut record_builder: F,
+    ) -> Result<Vec<PersistedKnowledgeObject>>
+    where
+        F: FnMut(&KnowledgeObject) -> Option<T>,
+    {
+        let plan = self.reflection_refresh_plan(config, policy)?;
+        let mut persisted = Vec::new();
+
+        for item in plan {
+            if item.reasons.is_empty() {
+                continue;
+            }
+            if let Some(result) = self.persist_reflected_knowledge_object_with(
+                item.object,
+                &mut record_builder,
+            )? {
+                persisted.push(result);
+            }
+        }
+
+        Ok(persisted)
+    }
+
     /// Access the embedding backend (if configured).
     pub fn embedding_backend(&self) -> Option<&dyn EmbeddingBackend> {
         self.embedding.as_deref()
@@ -1805,20 +1998,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let mut persisted = Vec::new();
 
         for object in objects {
-            let Some(record) = record_builder(&object) else {
-                continue;
-            };
-
-            let store_result = self.store(&record)?;
-            let memory_id = match store_result {
-                StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
-            };
-            self.apply_reflection_persistence(memory_id, &object)?;
-            persisted.push(PersistedKnowledgeObject {
-                object,
-                store_result,
-                memory_id,
-            });
+            if let Some(result) =
+                self.persist_reflected_knowledge_object_with(object, &mut record_builder)?
+            {
+                persisted.push(result);
+            }
         }
 
         Ok(persisted)
@@ -2382,6 +2566,117 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         })
     }
 
+    fn persist_reflected_knowledge_object_with<F>(
+        &self,
+        object: KnowledgeObject,
+        record_builder: &mut F,
+    ) -> Result<Option<PersistedKnowledgeObject>>
+    where
+        F: FnMut(&KnowledgeObject) -> Option<T>,
+    {
+        let Some(record) = record_builder(&object) else {
+            return Ok(None);
+        };
+
+        let store_result = self.store(&record)?;
+        let memory_id = match store_result {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+        self.apply_reflection_persistence(memory_id, &object)?;
+        Ok(Some(PersistedKnowledgeObject {
+            object,
+            store_result,
+            memory_id,
+        }))
+    }
+
+    fn load_persisted_reflected_knowledge(&self) -> Result<Vec<PersistedKnowledgeSummary>> {
+        self.db.with_reader(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, created_at, valid_until, source_ids, metadata_json
+                 FROM memories
+                 WHERE metadata_json IS NOT NULL
+                 ORDER BY created_at DESC, id DESC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })?;
+
+            let mut reflected = Vec::new();
+            for row in rows {
+                let (memory_id, created_at_raw, valid_until_raw, source_ids_raw, metadata_json) =
+                    row?;
+                let Some(metadata_json) = metadata_json else {
+                    continue;
+                };
+                let Ok(metadata) =
+                    serde_json::from_str::<std::collections::HashMap<String, String>>(&metadata_json)
+                else {
+                    continue;
+                };
+                if !metadata
+                    .get("derived_kind")
+                    .is_some_and(|value| value.eq_ignore_ascii_case("reflection"))
+                {
+                    continue;
+                }
+                let Some(key) = metadata.get("knowledge_key").cloned() else {
+                    continue;
+                };
+                let Some(summary) = metadata.get("knowledge_summary").cloned() else {
+                    continue;
+                };
+                let Some(kind) = metadata
+                    .get("knowledge_kind")
+                    .and_then(|value| parse_knowledge_kind(value))
+                else {
+                    continue;
+                };
+
+                reflected.push(PersistedKnowledgeSummary {
+                    memory_id,
+                    key,
+                    summary,
+                    kind,
+                    status: ReflectionLifecycleStatus::from_metadata_value(
+                        metadata.get("reflection_status").map(String::as_str),
+                    ),
+                    confidence: metadata
+                        .get("reflection_confidence")
+                        .and_then(|value| parse_composition_confidence(value))
+                        .unwrap_or(CompositionConfidence::Low),
+                    support_count: metadata
+                        .get("reflection_support_count")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0),
+                    trusted_support_count: metadata
+                        .get("reflection_trusted_support_count")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0),
+                    source_ids: source_ids_raw
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str::<Vec<i64>>(json).ok())
+                        .unwrap_or_default(),
+                    generated_at: metadata
+                        .get("reflection_generated_at")
+                        .and_then(|value| parse_temporal(value)),
+                    created_at: parse_temporal(&created_at_raw).unwrap_or_else(Utc::now),
+                    valid_until: valid_until_raw
+                        .as_deref()
+                        .and_then(parse_temporal),
+                });
+            }
+
+            Ok(reflected)
+        })
+    }
+
     #[cfg(feature = "ann")]
     fn invalidate_ann_index(&self) {
         self.ann_index.invalidate();
@@ -2737,6 +3032,15 @@ fn parse_knowledge_kind(value: &str) -> Option<KnowledgeObjectKind> {
     }
 }
 
+fn parse_composition_confidence(value: &str) -> Option<CompositionConfidence> {
+    match normalize_reflection_value(value).as_str() {
+        "high" => Some(CompositionConfidence::High),
+        "medium" => Some(CompositionConfidence::Medium),
+        "low" => Some(CompositionConfidence::Low),
+        _ => None,
+    }
+}
+
 fn normalize_reflection_value(value: &str) -> String {
     value
         .trim()
@@ -2753,6 +3057,59 @@ fn normalize_reflection_value(value: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn parse_temporal(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|parsed| parsed.with_timezone(&Utc))
+        .ok()
+}
+
+fn reflection_refresh_reasons(
+    object: &KnowledgeObject,
+    current: Option<&PersistedKnowledgeSummary>,
+    policy: &ReflectionRefreshPolicy,
+    now: DateTime<Utc>,
+) -> Vec<ReflectionRefreshReason> {
+    let Some(current) = current else {
+        return vec![ReflectionRefreshReason::MissingPersisted];
+    };
+
+    let mut reasons = Vec::new();
+
+    if policy.refresh_on_summary_change
+        && normalize_reflection_value(&current.summary) != normalize_reflection_value(&object.summary)
+    {
+        reasons.push(ReflectionRefreshReason::SummaryChanged);
+    }
+
+    if object.support_count
+        >= current
+            .support_count
+            .saturating_add(policy.min_support_growth.max(1))
+    {
+        reasons.push(ReflectionRefreshReason::SupportGrowth);
+    }
+
+    if object.trusted_support_count
+        >= current
+            .trusted_support_count
+            .saturating_add(policy.min_trusted_support_growth.max(1))
+    {
+        reasons.push(ReflectionRefreshReason::TrustedSupportGrowth);
+    }
+
+    if let Some(max_age) = policy.max_age {
+        if let Some(generated_at) = current.generated_at {
+            if now.signed_duration_since(generated_at) >= max_age {
+                reasons.push(ReflectionRefreshReason::StaleByAge);
+            }
+        } else {
+            reasons.push(ReflectionRefreshReason::StaleByAge);
+        }
+    }
+
+    reasons
 }
 
 fn compose_aggregation_answer(
@@ -4811,6 +5168,288 @@ mod tests {
         let mut expected = persisted[0].object.source_ids.clone();
         expected.sort_unstable();
         assert_eq!(validated_ids, expected);
+    }
+
+    #[test]
+    fn reflected_knowledge_for_key_returns_current_persisted_summary() {
+        use chrono::Duration;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        let old_note = rich_mem(
+            "Legacy path: use WSL systemd to launch femind-embed-service.",
+            MemoryType::Procedural,
+            &[
+                ("source_trust", "trusted"),
+                ("source_kind", "maintainer"),
+                ("source_verification", "verified"),
+                ("knowledge_key", "femind-startup-path"),
+                (
+                    "knowledge_summary",
+                    "Use WSL systemd to launch femind-embed-service.",
+                ),
+                ("knowledge_kind", "stable-procedure"),
+            ],
+        );
+        engine.store(&old_note).expect("store old");
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Migration note: WSL systemd was the supported startup path during migration."
+                    .to_string(),
+                created_at: Utc::now() - Duration::days(2),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "normal".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "declared".to_string()),
+                    ("knowledge_key".to_string(), "femind-startup-path".to_string()),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Use WSL systemd to launch femind-embed-service.".to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store old support");
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist old reflection");
+
+        engine
+            .store(&rich_mem(
+                "Current supported startup path: use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "system"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store current");
+        engine
+            .store(&rich_mem(
+                "Project doc confirms the Windows Scheduled Task at logon is the supported startup path.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store current support");
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist current reflection");
+
+        let current = engine
+            .reflected_knowledge_for_key("femind-startup-path")
+            .expect("load current reflection")
+            .expect("current reflection exists");
+        assert_eq!(current.status, ReflectionLifecycleStatus::Current);
+        assert_eq!(
+            current.summary,
+            "Use the Windows Scheduled Task at logon to launch femind-embed-service."
+        );
+    }
+
+    #[test]
+    fn reflection_refresh_plan_marks_stale_persisted_rows() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        engine
+            .store(&rich_mem(
+                "Decision: prioritize engine-first real-world evaluation before benchmark checkpoints.",
+                MemoryType::Semantic,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-eval-strategy"),
+                    (
+                        "knowledge_summary",
+                        "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
+                    ),
+                    ("knowledge_kind", "stable-decision"),
+                ],
+            ))
+            .expect("store");
+        engine
+            .store(&rich_mem(
+                "Current strategy: prioritize engine-first real-world evaluation before benchmark checkpoints.",
+                MemoryType::Semantic,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-eval-strategy"),
+                    (
+                        "knowledge_summary",
+                        "Prioritize engine-first real-world evaluation before benchmark checkpoints.",
+                    ),
+                    ("knowledge_kind", "stable-decision"),
+                ],
+            ))
+            .expect("store current");
+
+        let persisted = engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+        let persisted_id = persisted[0].memory_id;
+        let stale_at = (Utc::now() - Duration::days(3)).to_rfc3339();
+
+        engine
+            .database()
+            .with_writer(|conn| {
+                let metadata_json = conn.query_row(
+                    "SELECT metadata_json FROM memories WHERE id = ?1",
+                    [persisted_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )?;
+                let mut metadata = metadata_json
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+                    .expect("metadata");
+                metadata.insert("reflection_generated_at".to_string(), stale_at.clone());
+                conn.execute(
+                    "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
+                    rusqlite::params![serde_json::to_string(&metadata).expect("serialize"), persisted_id],
+                )?;
+                Ok::<(), FemindError>(())
+            })
+            .expect("age reflection");
+
+        let plan = engine
+            .reflection_refresh_plan(
+                &ReflectionConfig::default(),
+                &ReflectionRefreshPolicy {
+                    max_age: Some(Duration::hours(1)),
+                    ..ReflectionRefreshPolicy::default()
+                },
+            )
+            .expect("plan");
+        assert_eq!(plan.len(), 1);
+        assert!(plan[0]
+            .reasons
+            .contains(&ReflectionRefreshReason::StaleByAge));
+    }
+
+    #[test]
+    fn search_stable_knowledge_prefers_current_reflection_rows() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        engine
+            .store(&rich_mem(
+                "Supported Windows startup path: use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "system"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store note");
+        engine
+            .store(&rich_mem(
+                "Current supported startup path uses the Windows Scheduled Task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store support");
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: format!("Current startup path: {}", object.summary),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        let preferred = engine
+            .search_stable_knowledge("What is the current supported startup path?")
+            .limit(1)
+            .execute()
+            .expect("search preferred");
+        let only = engine
+            .search_stable_knowledge_only("What is the current supported startup path?")
+            .limit(5)
+            .execute()
+            .expect("search only");
+
+        let preferred_text = engine
+            .database()
+            .with_reader(|conn| {
+                conn.query_row(
+                    "SELECT searchable_text FROM memories WHERE id = ?1",
+                    [preferred[0].memory_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(FemindError::Database)
+            })
+            .expect("load preferred");
+        assert!(preferred_text.starts_with("Current startup path:"));
+        assert_eq!(only.len(), 1);
     }
 
     #[test]

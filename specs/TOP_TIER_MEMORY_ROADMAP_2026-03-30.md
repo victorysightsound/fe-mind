@@ -202,6 +202,11 @@ Current status after the 2026-03-30 trust/safety pass:
     memories
   - the practical suite now queries persisted reflection rows directly, not
     only runtime reflection outputs
+- reflection is now application-facing too:
+  - stable-summary queries can deliberately prefer current reflected rows
+  - applications can inspect persisted reflected knowledge by key
+  - applications can compute an explicit reflection refresh plan instead of
+    treating recomputation as an internal-only concern
 
 ### 6. Keep Evaluation Engine-Centric
 
