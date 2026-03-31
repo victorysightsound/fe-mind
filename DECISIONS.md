@@ -1898,6 +1898,43 @@ contract is not "hide every weaker connected note." The right contract is:
   practical `51/51` exact, practical `51/51` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 053: Route Private-Infra Graph Questions as Exact Detail
+
+**Decision:** Treat approved or supported private-infrastructure guidance
+queries as exact-detail procedural retrieval even when the scope and target
+terms are separated, for example `private ... endpoint` or `internal ...
+subnet`.
+
+**Context:** The new mixed-authority graph regressions exposed a real routing
+gap. FeMind already knew how to:
+- expand graph-linked evidence
+- prefer verified or authoritative sensitive guidance over weaker alternatives
+- redact private endpoint and private network values in the final answer
+
+But the router was still classifying questions like:
+- `How does the FeMind tunnel reach the approved private relay endpoint now?`
+- `How does the GPU relay connect to the approved internal subnet now?`
+
+as `general` instead of `exact-detail`.
+
+That meant strict grounding never turned on, so the top result could stay a
+semantic bridge note even after graph expansion had pulled the verified
+procedural note into the candidate set.
+
+**Consequences:**
+- private endpoint / hostname / subnet / network-range guidance now counts as
+  procedural guidance directly
+- approved/supported private-infra targets now trigger the exact-detail route
+  and strict grounding path even if the query does not use the literal phrase
+  `private endpoint`
+- the practical suite now asserts `expected_intent = exact-detail` for the new
+  graph-linked private endpoint and private network cases
+- both new graph-linked safety regressions now pass for the right reason:
+  routing plus grounding, not scenario weakening
+- Remote-GPU validation is green after the change:
+  practical `54/54` exact, practical `54/54` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

@@ -1,3 +1,4 @@
+use crate::scoring::query_requests_private_infra_guidance;
 use crate::scoring::source_trust::{SourceTrustLevel, source_trust_level};
 use crate::traits::{MemoryMeta, MemoryType, ScoringStrategy};
 
@@ -74,12 +75,18 @@ pub(crate) fn query_requests_procedural_guidance(query: &str) -> bool {
             || normalized.contains("host")
             || normalized.contains("address")
             || normalized.contains("port")
-            || normalized.contains("bridge"));
+            || normalized.contains("bridge")
+            || normalized.contains("endpoint")
+            || normalized.contains("hostname")
+            || normalized.contains("subnet")
+            || normalized.contains("network range")
+            || normalized.contains("cidr"));
 
     tokens.windows(2).any(|pair| {
         matches!(
             pair,
             ["how", "do"]
+                | ["how", "does"]
                 | ["how", "should"]
                 | ["what", "command"]
                 | ["which", "command"]
@@ -93,10 +100,17 @@ pub(crate) fn query_requests_procedural_guidance(query: &str) -> bool {
                 | ["which", "procedure"]
                 | ["what", "path"]
                 | ["which", "path"]
+                | ["what", "endpoint"]
+                | ["which", "endpoint"]
+                | ["what", "hostname"]
+                | ["which", "hostname"]
+                | ["what", "subnet"]
+                | ["which", "subnet"]
                 | ["what", "steps"]
                 | ["which", "steps"]
         )
     }) || procedural_focus
+        || query_requests_private_infra_guidance(query)
         || normalized.contains("temporary procedure")
         || normalized.contains("startup path")
         || normalized.contains("restart")
@@ -178,6 +192,12 @@ mod tests {
         ));
         assert!(query_requests_procedural_guidance(
             "What temporary procedure is approved during breakglass recovery?"
+        ));
+        assert!(query_requests_procedural_guidance(
+            "How does the FeMind tunnel reach the approved private relay endpoint now?"
+        ));
+        assert!(query_requests_procedural_guidance(
+            "How does the GPU relay connect to the approved internal subnet now?"
         ));
     }
 }

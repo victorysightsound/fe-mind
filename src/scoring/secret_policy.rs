@@ -264,6 +264,17 @@ pub fn query_requests_private_infra_detail(query: &str) -> bool {
 
 pub fn query_requests_private_infra_guidance(query: &str) -> bool {
     let normalized = normalize_query(query);
+    let tokens: Vec<_> = normalized.split_whitespace().collect();
+    let scoped = tokens
+        .iter()
+        .any(|token| matches!(*token, "private" | "internal"));
+    let target = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "endpoint" | "hostname" | "host" | "subnet" | "cidr" | "share" | "path" | "range"
+        )
+    });
+
     normalized.contains("private endpoint")
         || normalized.contains("internal endpoint")
         || normalized.contains("internal hostname")
@@ -278,6 +289,7 @@ pub fn query_requests_private_infra_guidance(query: &str) -> bool {
         || normalized.contains("internal subnet")
         || normalized.contains("network range")
         || normalized.contains("cidr")
+        || (scoped && target)
 }
 
 fn token_contains_secret_assignment(token: &str) -> bool {
@@ -459,6 +471,16 @@ mod tests {
         ));
         assert!(query_requests_private_infra_detail(
             "What is the exact internal subnet CIDR for the GPU relay?"
+        ));
+    }
+
+    #[test]
+    fn private_infra_guidance_detects_separated_scope_and_target_tokens() {
+        assert!(query_requests_private_infra_guidance(
+            "How does the FeMind tunnel reach the approved private relay endpoint now?"
+        ));
+        assert!(query_requests_private_infra_guidance(
+            "How does the GPU relay connect to the approved internal subnet now?"
         ));
     }
 

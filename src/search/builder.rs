@@ -9,9 +9,10 @@ use crate::error::Result;
 use crate::memory::GraphMemory;
 use crate::scoring::{
     SourceAuthorityRegistry, SourceTrustLevel, infer_authority_domain,
-    query_requests_procedural_guidance, query_scope, review_denied, review_policy_class,
-    review_policy_class_matches_query, review_required, review_scope, review_scope_matches_query,
-    source_authority_rank, source_chain_for_domain, source_provenance_rank, source_trust_level,
+    query_requests_private_infra_guidance, query_requests_procedural_guidance, query_scope,
+    review_denied, review_policy_class, review_policy_class_matches_query, review_required,
+    review_scope, review_scope_matches_query, source_authority_rank, source_chain_for_domain,
+    source_provenance_rank, source_trust_level,
 };
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
@@ -2661,9 +2662,15 @@ fn detail_tokens(value: &str) -> Vec<String> {
                     | "filename"
                     | "file"
                     | "path"
+                    | "endpoint"
+                    | "hostname"
                     | "host"
                     | "address"
                     | "port"
+                    | "subnet"
+                    | "network"
+                    | "range"
+                    | "cidr"
                     | "script"
                     | "runner"
                     | "label"
@@ -2808,22 +2815,28 @@ fn query_requests_precise_procedural_detail(query: &str) -> bool {
     }
 
     let normalized = normalize_text(query);
-    let asks_precise_target = normalized
-        .split_whitespace()
-        .any(|token| matches!(token, "host" | "address" | "port"))
-        || normalized.contains("startup path")
+    let asks_precise_target = normalized.split_whitespace().any(|token| {
+        matches!(
+            token,
+            "host" | "address" | "port" | "endpoint" | "hostname" | "subnet" | "cidr"
+        )
+    }) || normalized.contains("startup path")
         || normalized.contains("supported path")
         || normalized.contains("approved path")
+        || normalized.contains("network range")
         || (normalized.contains("path")
             && (normalized.contains("supported")
                 || normalized.contains("approved")
-                || normalized.contains("startup")));
+                || normalized.contains("startup")))
+        || query_requests_private_infra_guidance(query);
 
     let scoped_or_supported = normalized.contains("supported")
         || normalized.contains("approved")
         || normalized.contains("staging")
         || normalized.contains("production")
-        || normalized.contains("bridge");
+        || normalized.contains("bridge")
+        || normalized.contains("private")
+        || normalized.contains("internal");
 
     asks_precise_target && scoped_or_supported
 }
@@ -3267,6 +3280,9 @@ mod tests {
         assert!(query_requires_strict_grounding(
             "What was the exact total token cost of the last Nemotron run?"
         ));
+        assert!(query_requires_strict_grounding(
+            "How does the FeMind tunnel reach the approved private relay endpoint now?"
+        ));
         assert!(!query_requires_strict_grounding(
             "Is desktop-first still the active plan?"
         ));
@@ -3460,6 +3476,16 @@ mod tests {
         );
         assert_eq!(
             infer_query_intent(
+                "How does the FeMind tunnel reach the approved private relay endpoint now?"
+            ),
+            QueryIntent::ExactDetail
+        );
+        assert_eq!(
+            infer_query_intent("Which internal network range should the GPU relay use now?"),
+            QueryIntent::ExactDetail
+        );
+        assert_eq!(
+            infer_query_intent(
                 "What is the supported Windows startup path for femind-embed-service?"
             ),
             QueryIntent::StableSummary
@@ -3523,6 +3549,20 @@ mod tests {
         .query_route();
         assert_eq!(route.intent, QueryIntent::General);
         assert_eq!(route.graph_depth, 2);
+    }
+
+    #[test]
+    fn query_route_combines_graph_depth_with_exact_detail_for_private_guidance() {
+        let db = setup();
+        let route = SearchBuilder::<TestMem>::new(
+            &db,
+            "How does the FeMind tunnel reach the approved private relay endpoint now?",
+        )
+        .query_route();
+        assert_eq!(route.intent, QueryIntent::ExactDetail);
+        assert_eq!(route.graph_depth, 2);
+        assert!(route.strict_grounding);
+        assert!(matches!(route.mode, SearchMode::Keyword));
     }
 
     #[test]

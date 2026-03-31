@@ -51,6 +51,8 @@ The practical live-validation path is now established and repeatable:
 - practical eval now also covers mixed-authority multi-hop retrieval:
   - graph-linked client/runtime questions that must route through graph
     expansion and still prefer the authoritative runtime chain
+  - graph-linked private endpoint and private subnet questions that must route
+    as exact-detail retrieval instead of falling back to generic graph hits
 - FeMind now also supports an application-facing source authority registry, so
   apps can declare authoritative chains per domain once and let records
   participate with `source_chain` metadata instead of repeating full authority

@@ -276,6 +276,10 @@ diagnostic label:
   states instead of only favoring older timestamps
 - exact-detail and abstention-focused routes stay temporally neutral unless a
   caller overrides the search settings directly
+- private endpoint, private subnet, and similar internal-infra guidance
+  questions now route as exact-detail procedural retrieval when the query asks
+  for the approved or supported operational target, even if the scope and
+  target words are separated (`private ... endpoint`, `internal ... subnet`)
 - `valid_at(...)` searches now respect stored `valid_from` / `valid_until`
   windows, so time-scoped retrieval is part of the real engine path
 - exact-detail composition now does a broader fallback evidence pass when

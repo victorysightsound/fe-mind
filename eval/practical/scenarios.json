@@ -400,6 +400,229 @@
     ]
   },
   {
+    "id": "graph-verified-private-endpoint-guidance",
+    "title": "Graph-linked private endpoint guidance should prefer the verified path",
+    "category": "multi-hop-graph",
+    "goal": "When a tunnel question walks linked notes that include verified, partially verified, and untrusted endpoint guidance, FeMind should route through graph expansion and surface the verified path with redaction.",
+    "records": [
+      {
+        "key": "endpoint-client",
+        "timestamp": "2026-03-31T09:00:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The FeMind tunnel path now depends on the approved audited relay guidance rather than older bridge notes."
+      },
+      {
+        "key": "endpoint-link",
+        "timestamp": "2026-03-31T09:01:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The current tunnel guidance links the audited relay note, the old lab bridge note, and an unsafe direct-host warning."
+      },
+      {
+        "key": "endpoint-verified",
+        "timestamp": "2026-03-31T09:02:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "content_secret_class": "private-endpoint"
+        },
+        "text": "The verified private embed relay endpoint is https://relay.calvaryav.internal:8899/embed behind the audited Windows tunnel."
+      },
+      {
+        "key": "endpoint-partial",
+        "timestamp": "2026-03-31T09:03:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "partially-verified",
+          "content_secret_class": "private-endpoint"
+        },
+        "text": "Partially verified migration note: use http://lab-bridge.calvaryav.internal:8899/embed while the audited tunnel is still being checked."
+      },
+      {
+        "key": "endpoint-untrusted",
+        "timestamp": "2026-03-31T09:04:00Z",
+        "source": "forum-post",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "untrusted",
+          "source_kind": "forum-post",
+          "source_verification": "unverified",
+          "content_secret_class": "private-endpoint"
+        },
+        "text": "Forum suggestion: just use http://10.44.0.88:8899/embed directly with no tunnel."
+      }
+    ],
+    "relations": [
+      {
+        "from": "endpoint-client",
+        "to": "endpoint-link",
+        "relation": "related_to"
+      },
+      {
+        "from": "endpoint-client",
+        "to": "endpoint-verified",
+        "relation": "depends_on"
+      },
+      {
+        "from": "endpoint-client",
+        "to": "endpoint-partial",
+        "relation": "depends_on"
+      },
+      {
+        "from": "endpoint-client",
+        "to": "endpoint-untrusted",
+        "relation": "depends_on"
+      },
+      {
+        "from": "endpoint-link",
+        "to": "endpoint-verified",
+        "relation": "depends_on"
+      },
+      {
+        "from": "endpoint-link",
+        "to": "endpoint-partial",
+        "relation": "depends_on"
+      },
+      {
+        "from": "endpoint-link",
+        "to": "endpoint-untrusted",
+        "relation": "depends_on"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How does the FeMind tunnel reach the approved private relay endpoint now?",
+        "expected_answer": "The verified private embed relay endpoint is [REDACTED_ENDPOINT] behind the audited Windows tunnel.",
+        "expected_intent": "exact-detail",
+        "expected_graph_depth": 2,
+        "top_k": 1,
+        "required_fragments": [
+          "verified private embed relay endpoint",
+          "audited Windows tunnel"
+        ],
+        "forbidden_fragments": [
+          "lab-bridge",
+          "10.44.0.88"
+        ],
+        "min_observed_hits": 1
+      }
+    ]
+  },
+  {
+    "id": "graph-verified-private-network-guidance",
+    "title": "Graph-linked private network guidance should prefer the fully verified subnet",
+    "category": "multi-hop-graph",
+    "goal": "When a relay-network question walks linked notes that include verified, partially verified, and relayed subnet guidance, FeMind should route through graph expansion and surface the fully verified audited path with redaction.",
+    "records": [
+      {
+        "key": "network-client",
+        "timestamp": "2026-03-31T09:10:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The audited relay path now depends on the approved internal subnet note rather than the migration scratch network guidance."
+      },
+      {
+        "key": "network-link",
+        "timestamp": "2026-03-31T09:11:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The current relay-network guidance links the audited subnet note, the migration subnet note, and the relayed early bridge note."
+      },
+      {
+        "key": "network-verified",
+        "timestamp": "2026-03-31T09:12:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "content_secret_class": "private-network-range"
+        },
+        "text": "The approved relay subnet is 10.44.8.0/24 on the audited GPU VLAN."
+      },
+      {
+        "key": "network-partial",
+        "timestamp": "2026-03-31T09:13:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "partially-verified",
+          "content_secret_class": "private-network-range"
+        },
+        "text": "Partially verified migration note: use 10.44.9.0/24 while the relay VLAN audit is still in progress."
+      },
+      {
+        "key": "network-relayed",
+        "timestamp": "2026-03-31T09:14:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "relayed",
+          "content_secret_class": "private-network-range"
+        },
+        "text": "Relayed ops note: the early bridge mentioned 10.44.7.0/24 for the relay subnet."
+      }
+    ],
+    "relations": [
+      {
+        "from": "network-client",
+        "to": "network-link",
+        "relation": "related_to"
+      },
+      {
+        "from": "network-link",
+        "to": "network-verified",
+        "relation": "depends_on"
+      },
+      {
+        "from": "network-link",
+        "to": "network-partial",
+        "relation": "depends_on"
+      },
+      {
+        "from": "network-link",
+        "to": "network-relayed",
+        "relation": "depends_on"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How does the GPU relay connect to the approved internal subnet now?",
+        "expected_answer": "The approved relay subnet is [REDACTED_NETWORK] on the audited GPU VLAN.",
+        "expected_intent": "exact-detail",
+        "expected_graph_depth": 2,
+        "top_k": 1,
+        "required_fragments": [
+          "approved relay subnet",
+          "audited GPU VLAN"
+        ],
+        "forbidden_fragments": [
+          "10.44.9.0/24",
+          "10.44.7.0/24"
+        ],
+        "min_observed_hits": 1
+      }
+    ],
+    "abstention_checks": [
+      {
+        "query": "What is the exact internal subnet CIDR for the GPU relay?",
+        "expected_behavior": "abstain"
+      }
+    ]
+  },
+  {
     "id": "provenance-and-hard-abstention",
     "title": "Exact artifact details should be grounded and unsupported identifiers should abstain",
     "category": "provenance-and-abstention",
