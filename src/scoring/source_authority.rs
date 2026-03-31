@@ -166,6 +166,75 @@ impl SourceAuthorityKindPolicy {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceAuthorityDomainPolicy {
+    pub domain: SourceAuthorityDomain,
+    pub authoritative_chains: Vec<String>,
+    pub primary_chains: Vec<String>,
+    pub delegated_chains: Vec<String>,
+    pub reference_chains: Vec<String>,
+    pub authoritative_kinds: Vec<String>,
+    pub primary_kinds: Vec<String>,
+    pub delegated_kinds: Vec<String>,
+    pub reference_kinds: Vec<String>,
+}
+
+impl SourceAuthorityDomainPolicy {
+    pub fn new(domain: SourceAuthorityDomain) -> Self {
+        Self {
+            domain,
+            authoritative_chains: Vec::new(),
+            primary_chains: Vec::new(),
+            delegated_chains: Vec::new(),
+            reference_chains: Vec::new(),
+            authoritative_kinds: Vec::new(),
+            primary_kinds: Vec::new(),
+            delegated_kinds: Vec::new(),
+            reference_kinds: Vec::new(),
+        }
+    }
+
+    pub fn with_authoritative_chain(mut self, chain: impl Into<String>) -> Self {
+        self.authoritative_chains.push(normalize_tag(&chain.into()));
+        self
+    }
+
+    pub fn with_primary_chain(mut self, chain: impl Into<String>) -> Self {
+        self.primary_chains.push(normalize_tag(&chain.into()));
+        self
+    }
+
+    pub fn with_delegated_chain(mut self, chain: impl Into<String>) -> Self {
+        self.delegated_chains.push(normalize_tag(&chain.into()));
+        self
+    }
+
+    pub fn with_reference_chain(mut self, chain: impl Into<String>) -> Self {
+        self.reference_chains.push(normalize_tag(&chain.into()));
+        self
+    }
+
+    pub fn with_authoritative_kind(mut self, kind: impl Into<String>) -> Self {
+        self.authoritative_kinds.push(normalize_tag(&kind.into()));
+        self
+    }
+
+    pub fn with_primary_kind(mut self, kind: impl Into<String>) -> Self {
+        self.primary_kinds.push(normalize_tag(&kind.into()));
+        self
+    }
+
+    pub fn with_delegated_kind(mut self, kind: impl Into<String>) -> Self {
+        self.delegated_kinds.push(normalize_tag(&kind.into()));
+        self
+    }
+
+    pub fn with_reference_kind(mut self, kind: impl Into<String>) -> Self {
+        self.reference_kinds.push(normalize_tag(&kind.into()));
+        self
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceAuthorityRegistry {
     policies: Vec<SourceAuthorityPolicy>,
@@ -192,6 +261,11 @@ impl SourceAuthorityRegistry {
 
     pub fn with_kind_policy(mut self, policy: SourceAuthorityKindPolicy) -> Self {
         self.add_kind_policy(policy);
+        self
+    }
+
+    pub fn with_domain_policy(mut self, policy: SourceAuthorityDomainPolicy) -> Self {
+        self.add_domain_policy(policy);
         self
     }
 
@@ -227,6 +301,68 @@ impl SourceAuthorityRegistry {
             kind: normalized_kind,
             ..policy
         });
+    }
+
+    pub fn add_domain_policy(&mut self, policy: SourceAuthorityDomainPolicy) {
+        let domain = policy.domain;
+
+        for chain in policy.authoritative_chains {
+            self.add_policy(SourceAuthorityPolicy::new(
+                domain,
+                chain,
+                SourceAuthorityLevel::Authoritative,
+            ));
+        }
+        for chain in policy.primary_chains {
+            self.add_policy(SourceAuthorityPolicy::new(
+                domain,
+                chain,
+                SourceAuthorityLevel::Primary,
+            ));
+        }
+        for chain in policy.delegated_chains {
+            self.add_policy(SourceAuthorityPolicy::new(
+                domain,
+                chain,
+                SourceAuthorityLevel::Delegated,
+            ));
+        }
+        for chain in policy.reference_chains {
+            self.add_policy(SourceAuthorityPolicy::new(
+                domain,
+                chain,
+                SourceAuthorityLevel::Reference,
+            ));
+        }
+
+        for kind in policy.authoritative_kinds {
+            self.add_kind_policy(SourceAuthorityKindPolicy::new(
+                domain,
+                kind,
+                SourceAuthorityLevel::Authoritative,
+            ));
+        }
+        for kind in policy.primary_kinds {
+            self.add_kind_policy(SourceAuthorityKindPolicy::new(
+                domain,
+                kind,
+                SourceAuthorityLevel::Primary,
+            ));
+        }
+        for kind in policy.delegated_kinds {
+            self.add_kind_policy(SourceAuthorityKindPolicy::new(
+                domain,
+                kind,
+                SourceAuthorityLevel::Delegated,
+            ));
+        }
+        for kind in policy.reference_kinds {
+            self.add_kind_policy(SourceAuthorityKindPolicy::new(
+                domain,
+                kind,
+                SourceAuthorityLevel::Reference,
+            ));
+        }
     }
 
     pub fn set_chain(
@@ -777,6 +913,34 @@ mod tests {
                 Some(&registry),
             ),
             SourceAuthorityLevel::Authoritative
+        );
+    }
+
+    #[test]
+    fn domain_policy_expands_to_kind_and_chain_entries() {
+        let registry = SourceAuthorityRegistry::new().with_domain_policy(
+            SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                .with_authoritative_kind("maintainer")
+                .with_primary_kind("project-doc")
+                .with_authoritative_chain("runtime-ops")
+                .with_primary_chain("runtime-bootstrap"),
+        );
+
+        assert_eq!(
+            registry.level_for_kind(SourceAuthorityDomain::RuntimeOps, "maintainer"),
+            SourceAuthorityLevel::Authoritative
+        );
+        assert_eq!(
+            registry.level_for_kind(SourceAuthorityDomain::RuntimeOps, "project-doc"),
+            SourceAuthorityLevel::Primary
+        );
+        assert_eq!(
+            registry.level_for_chain(SourceAuthorityDomain::RuntimeOps, "runtime-ops"),
+            SourceAuthorityLevel::Authoritative
+        );
+        assert_eq!(
+            registry.level_for_chain(SourceAuthorityDomain::RuntimeOps, "runtime-bootstrap"),
+            SourceAuthorityLevel::Primary
         );
     }
 }

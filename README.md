@@ -204,12 +204,14 @@ The practical live-validation path is now established and repeatable:
   - `authority_registry(...)`
   - `authority_registry_arc(...)`
   - `authority_policy(...)`
+  - `authority_domain_policy(...)`
   - `authority_kind_policy(...)`
   - `authoritative_source_chain(...)`
   - `primary_source_chain(...)`
   - `authoritative_source_kind(...)`
   - `primary_source_kind(...)`
 - authority can now be supplied centrally by either:
+  - grouped domain policy objects
   - `source_chain` policy
   - `source_kind` policy
   so apps do not have to encode full authority metadata onto every record

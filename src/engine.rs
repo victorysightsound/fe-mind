@@ -14,14 +14,14 @@ use crate::reranking::RerankerRuntime;
 use crate::scoring::{
     CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
     ReviewApprovalTemplate, ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity,
-    ReviewStatus, SecretClass, SourceAuthorityDomain, SourceAuthorityKindPolicy,
-    SourceAuthorityPolicy, SourceAuthorityRegistry, SourceProvenanceScorer, SourceTrustScorer,
-    detect_review_flag, effective_review_status, evidence_contains_secret_material,
-    infer_authority_domain, query_requests_private_infra_guidance,
-    query_requests_secret_location_or_reference, query_requests_sensitive_secret_detail,
-    redact_secret_material, review_expires_at, review_policy_class_matches_query,
-    review_scope_matches_query, secret_class_from_metadata, source_authority_rank,
-    source_provenance_rank, source_trust_level,
+    ReviewStatus, SecretClass, SourceAuthorityDomain, SourceAuthorityDomainPolicy,
+    SourceAuthorityKindPolicy, SourceAuthorityPolicy, SourceAuthorityRegistry,
+    SourceProvenanceScorer, SourceTrustScorer, detect_review_flag, effective_review_status,
+    evidence_contains_secret_material, infer_authority_domain,
+    query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
+    query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
+    review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
+    source_authority_rank, source_provenance_rank, source_trust_level,
 };
 use crate::search::StableSummaryPolicy;
 use crate::search::builder::SearchBuilder;
@@ -4275,6 +4275,12 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
     /// Add or replace one source-kind authority policy entry for the engine.
     pub fn authority_kind_policy(mut self, policy: SourceAuthorityKindPolicy) -> Self {
         Arc::make_mut(&mut self.authority_registry).add_kind_policy(policy);
+        self
+    }
+
+    /// Add one authority-domain policy object for the engine.
+    pub fn authority_domain_policy(mut self, policy: SourceAuthorityDomainPolicy) -> Self {
+        Arc::make_mut(&mut self.authority_registry).add_domain_policy(policy);
         self
     }
 

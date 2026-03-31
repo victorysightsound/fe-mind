@@ -720,6 +720,100 @@
     ]
   },
   {
+    "id": "registry-domain-runtime-authority",
+    "title": "Authority domain registry should apply broad runtime defaults without per-record chains",
+    "category": "authority-registry",
+    "goal": "Let apps declare domain-wide runtime defaults once so FeMind can prefer the supported runtime guidance even when records carry no source-chain metadata.",
+    "authority_domain_policies": [
+      {
+        "domain": "runtime",
+        "authoritative_kinds": [
+          "maintainer"
+        ]
+      },
+      {
+        "domain": "deployment",
+        "authoritative_kinds": [
+          "project-doc"
+        ]
+      }
+    ],
+    "records": [
+      {
+        "key": "domain-client",
+        "timestamp": "2026-03-31T09:20:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The client path should use whichever runtime note is actually supported on calvaryav now."
+      },
+      {
+        "key": "domain-link",
+        "timestamp": "2026-03-31T09:21:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The runtime question links the active runtime note and the older deployment bootstrap note."
+      },
+      {
+        "key": "domain-runtime",
+        "timestamp": "2026-03-31T09:22:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared"
+        },
+        "text": "Supported runtime path: run femind-embed-service as a native Windows scheduled task on the GPU host."
+      },
+      {
+        "key": "domain-deployment",
+        "timestamp": "2026-03-31T09:23:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified"
+        },
+        "text": "Supported deployment bootstrap path: keep femind-embed-service running inside WSL systemd on the GPU host before the Windows session starts."
+      }
+    ],
+    "relations": [
+      {
+        "from": "domain-client",
+        "to": "domain-link",
+        "relation": "related_to"
+      },
+      {
+        "from": "domain-link",
+        "to": "domain-runtime",
+        "relation": "depends_on"
+      },
+      {
+        "from": "domain-link",
+        "to": "domain-deployment",
+        "relation": "depends_on"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How does Librona reach the supported runtime path on calvaryav now?",
+        "expected_answer": "Run femind-embed-service as a native Windows scheduled task on the GPU host.",
+        "expected_intent": "stable-summary",
+        "expected_graph_depth": 2,
+        "top_k": 1,
+        "required_fragments": [
+          "native Windows scheduled task",
+          "GPU host"
+        ],
+        "forbidden_fragments": [
+          "WSL systemd"
+        ],
+        "min_observed_hits": 1
+      }
+    ]
+  },
+  {
     "id": "graph-verified-private-network-guidance",
     "title": "Graph-linked private network guidance should prefer the fully verified subnet",
     "category": "multi-hop-graph",

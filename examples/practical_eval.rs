@@ -40,7 +40,10 @@ mod app {
     use femind::reranking::RemoteRerankerBackend;
     use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
     use femind::scoring::redact_secret_material;
-    use femind::scoring::{SourceAuthorityDomain, SourceAuthorityKindPolicy, SourceAuthorityLevel};
+    use femind::scoring::{
+        SourceAuthorityDomain, SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy,
+        SourceAuthorityLevel,
+    };
     use femind::search::{QueryIntent, QueryRoute, SearchMode, StableSummaryPolicy};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
     use serde::{Deserialize, Serialize};
@@ -137,6 +140,27 @@ mod app {
         domain: String,
         kind: String,
         level: String,
+    }
+
+    #[derive(Debug, Deserialize, Default)]
+    struct ScenarioAuthorityDomainPolicyConfig {
+        domain: String,
+        #[serde(default)]
+        authoritative_chains: Vec<String>,
+        #[serde(default)]
+        primary_chains: Vec<String>,
+        #[serde(default)]
+        delegated_chains: Vec<String>,
+        #[serde(default)]
+        reference_chains: Vec<String>,
+        #[serde(default)]
+        authoritative_kinds: Vec<String>,
+        #[serde(default)]
+        primary_kinds: Vec<String>,
+        #[serde(default)]
+        delegated_kinds: Vec<String>,
+        #[serde(default)]
+        reference_kinds: Vec<String>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -237,6 +261,8 @@ mod app {
         category: String,
         goal: String,
         records: Vec<ScenarioRecord>,
+        #[serde(default)]
+        authority_domain_policies: Vec<ScenarioAuthorityDomainPolicyConfig>,
         #[serde(default)]
         authority_kind_policies: Vec<ScenarioAuthorityKindPolicyConfig>,
         #[serde(default)]
@@ -1193,6 +1219,9 @@ mod app {
         }
         if let Some(backend) = reranker_backend {
             builder = builder.reranker_backend_arc(backend);
+        }
+        for policy in &scenario.authority_domain_policies {
+            builder = builder.authority_domain_policy(parse_authority_domain_policy(policy)?);
         }
         for policy in &scenario.authority_kind_policies {
             builder = builder.authority_kind_policy(SourceAuthorityKindPolicy::new(
@@ -2712,6 +2741,40 @@ mod app {
             "unknown" => Ok(SourceAuthorityLevel::Unknown),
             other => Err(format!("unknown authority level '{other}'").into()),
         }
+    }
+
+    fn parse_authority_domain_policy(
+        policy: &ScenarioAuthorityDomainPolicyConfig,
+    ) -> Result<SourceAuthorityDomainPolicy, Box<dyn std::error::Error>> {
+        let mut domain_policy =
+            SourceAuthorityDomainPolicy::new(parse_authority_domain(&policy.domain)?);
+
+        for chain in &policy.authoritative_chains {
+            domain_policy = domain_policy.with_authoritative_chain(chain);
+        }
+        for chain in &policy.primary_chains {
+            domain_policy = domain_policy.with_primary_chain(chain);
+        }
+        for chain in &policy.delegated_chains {
+            domain_policy = domain_policy.with_delegated_chain(chain);
+        }
+        for chain in &policy.reference_chains {
+            domain_policy = domain_policy.with_reference_chain(chain);
+        }
+        for kind in &policy.authoritative_kinds {
+            domain_policy = domain_policy.with_authoritative_kind(kind);
+        }
+        for kind in &policy.primary_kinds {
+            domain_policy = domain_policy.with_primary_kind(kind);
+        }
+        for kind in &policy.delegated_kinds {
+            domain_policy = domain_policy.with_delegated_kind(kind);
+        }
+        for kind in &policy.reference_kinds {
+            domain_policy = domain_policy.with_reference_kind(kind);
+        }
+
+        Ok(domain_policy)
     }
 
     fn load_scenarios(path: &Path) -> Result<Vec<Scenario>, Box<dyn std::error::Error>> {

@@ -447,6 +447,9 @@ Current validated baseline:
     both runtime and deployment guidance into the evidence set
   - app-facing authority policy can also promote the runtime answer from
     `source_kind` defaults alone, without per-record `source_chain` metadata
+- practical scenarios can now also supply grouped app-facing authority defaults
+  through `authority_domain_policies`, so one scenario can declare a whole
+  domain's chain/kind policy surface without repeating individual builder calls
 - targeted engine tests now also prove the application-facing authority
   registry works when records carry:
   - `source_chain`

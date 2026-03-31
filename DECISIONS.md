@@ -2003,6 +2003,35 @@ current partially-verified guidance and older relayed notes.
   practical `56/56` exact, practical `56/56` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 056: Add Authority-Domain Policy Objects for App Defaults
+
+**Decision:** Add a grouped `SourceAuthorityDomainPolicy` object so apps can
+declare broader authority defaults for one domain at a time instead of stacking
+individual kind and chain entries manually.
+
+**Context:** FeMind already supported centralized authority by:
+- `source_chain`
+- `source_kind`
+
+That solved the raw capability gap, but the application-facing policy surface
+was still too low-level:
+- apps had to repeat multiple builder calls for one domain
+- scenario configs had no way to express a whole domain policy block cleanly
+- the engine needed a durable way to represent "runtime defaults" or
+  "networking defaults" as one coherent unit
+
+**Consequences:**
+- `SourceAuthorityRegistry` now accepts `SourceAuthorityDomainPolicy`
+- the engine builder now exposes `authority_domain_policy(...)`
+- practical scenarios can now declare grouped domain defaults with
+  `authority_domain_policies`
+- the practical suite now includes `registry-domain-runtime-authority`, which
+  proves a whole runtime-domain policy block can promote the current supported
+  runtime answer without per-record `source_chain` metadata
+- Remote-GPU validation is green after the change:
+  practical `57/57` exact, practical `57/57` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions
