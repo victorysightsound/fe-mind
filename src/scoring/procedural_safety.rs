@@ -111,6 +111,10 @@ pub(crate) fn query_requests_procedural_guidance(query: &str) -> bool {
         )
     }) || procedural_focus
         || query_requests_private_infra_guidance(query)
+        || normalized.contains("runtime path")
+        || normalized.contains("recovery path")
+        || normalized.contains("should be used")
+        || normalized.contains("should use")
         || normalized.contains("temporary procedure")
         || normalized.contains("startup path")
         || normalized.contains("restart")
@@ -198,6 +202,9 @@ mod tests {
         ));
         assert!(query_requests_procedural_guidance(
             "How does the GPU relay connect to the approved internal subnet now?"
+        ));
+        assert!(query_requests_procedural_guidance(
+            "What runtime path should calvaryav use during normal production now?"
         ));
     }
 }

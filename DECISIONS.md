@@ -2098,6 +2098,42 @@ incident response.
   practical `62/62` exact, practical `62/62` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 059: Add Negative Operational-Memory Regressions
+
+**Decision:** Extend the engine-first suite with stale and contradicted
+operational-guidance coverage, and harden retrieval/composition so current
+answers do not get trapped on older literal matches.
+
+**Context:** After mixed-domain safety coverage, the next real operational risk
+was not a missing domain policy. It was negative memory quality:
+- an older trusted secret-location note still surfacing after a newer verified
+  path replaced it
+- an older approved breakglass path lingering after a newer revocation and
+  replacement
+- an older maintenance bypass continuing to look usable after it had been
+  retired
+
+Those are the kinds of failures that become dangerous in production because the
+wrong memory can still look highly relevant even when the current answer is no
+longer the literal string the query mentions.
+
+**Consequences:**
+- the practical suite now includes:
+  - `stale-secret-location-rotation`
+  - `revoked-breakglass-recovery-path`
+  - `retired-maintenance-bypass-path`
+- exact-detail routes now preserve current/historical bias when the query asks
+  for a precise current or earlier detail
+- current/historical retrieval can now inject linked supersession neighbors
+  when only one side of the state pair was initially retrieved
+- procedural guidance detection now covers normal `runtime path` / `should be
+  used` questions so conflict resolution can run on real maintainer phrasing
+- yes/no composition now prefers newer revocation evidence for current
+  applicability questions instead of over-valuing the older literal match
+- Remote-GPU validation is green after the change:
+  practical `68/68` exact, practical `68/68` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

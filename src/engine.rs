@@ -3619,6 +3619,28 @@ fn select_yes_no_evidence<'a>(
     authority_registry: &SourceAuthorityRegistry,
 ) -> &'a AggregatedMatch {
     let best = select_best_evidence(query, evidence, authority_registry);
+    let prefers_current_applicability = query.to_lowercase().contains("still be used")
+        || crate::search::builder::query_requests_current_state(query)
+        || crate::search::builder::query_requests_operational_constraint(query);
+
+    if prefers_current_applicability {
+        if let Some(contradicting) = evidence
+            .iter()
+            .filter(|candidate| text_contradicts_yes_no_query(query, &candidate.text))
+            .max_by(|left, right| {
+                evidence_selection_rank(query, left, authority_registry)
+                    .cmp(&evidence_selection_rank(query, right, authority_registry))
+                    .then_with(|| {
+                        left.score
+                            .partial_cmp(&right.score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+            })
+        {
+            return contradicting;
+        }
+    }
+
     let grounded = evidence
         .iter()
         .max_by(|left, right| {
@@ -3898,13 +3920,31 @@ fn evidence_selection_rank(
     } else {
         0
     };
+    let negative_state_penalty = if !is_yes_no_query(query)
+        && (crate::search::builder::query_requests_current_state(query)
+            || crate::search::builder::query_requests_operational_constraint(query))
+        && text_implies_negative_state(&candidate.text)
+        && !text_indicates_current_replacement(&candidate.text)
+    {
+        220_u16
+    } else {
+        0_u16
+    };
 
-    trust_rank + authority_rank + provenance_rank + scope_rank + policy_rank
+    trust_rank
+        + authority_rank
+        + provenance_rank
+        + scope_rank
+        + policy_rank
+        - negative_state_penalty
 }
 
 fn text_implies_negative_state(text: &str) -> bool {
     let normalized = text.to_lowercase();
     normalized.contains("superseded")
+        || normalized.contains("retired")
+        || normalized.contains("revoked")
+        || normalized.contains("deprecated")
         || normalized.contains("no longer")
         || normalized.contains("not active")
         || normalized.contains("not directly")
@@ -3920,6 +3960,21 @@ fn text_implies_negative_state(text: &str) -> bool {
         || normalized.contains("should not")
         || normalized.contains("cannot")
         || normalized.contains("can not")
+}
+
+fn text_indicates_current_replacement(text: &str) -> bool {
+    let normalized = text.to_lowercase();
+    normalized.contains("current ")
+        || normalized.contains("currently ")
+        || normalized.contains("right now")
+        || normalized.contains("use ")
+        || normalized.contains("uses ")
+        || normalized.contains("keep ")
+        || normalized.contains("keeps ")
+        || normalized.contains("restore ")
+        || normalized.contains("restores ")
+        || normalized.contains("rather than")
+        || normalized.contains("instead")
 }
 
 fn is_yes_no_query(query: &str) -> bool {
@@ -7146,6 +7201,18 @@ mod tests {
     }
 
     #[test]
+    fn revoked_and_retired_guidance_count_as_negative_state() {
+        assert!(text_contradicts_yes_no_query(
+            "Should the earlier 127.0.0.1:8898 local-cpu breakglass path still be used?",
+            "That earlier local-cpu breakglass path is revoked. Current authenticated breakglass recovery keeps femind-embed-service on 127.0.0.1:8899 and restores the audited GPU relay.",
+        ));
+        assert!(text_contradicts_yes_no_query(
+            "Should the retired auth-bypass maintenance shortcut still be used?",
+            "That auth-bypass maintenance shortcut is retired. Current maintenance recovery uses the signed reset bundle over the audited tunnel without disabling auth.",
+        ));
+    }
+
+    #[test]
     fn yes_no_composer_prefers_query_grounded_literal_evidence() {
         let authority_registry = SourceAuthorityRegistry::default();
         let evidence = vec![
@@ -7167,6 +7234,35 @@ mod tests {
 
         let best = select_yes_no_evidence(
             "Should the expired migration bridge host 10.44.0.99 still be used?",
+            &evidence,
+            &authority_registry,
+        );
+
+        assert_eq!(best.memory_id, 2);
+    }
+
+    #[test]
+    fn yes_no_selector_prefers_revocation_for_current_applicability_queries() {
+        let authority_registry = SourceAuthorityRegistry::default();
+        let evidence = vec![
+            AggregatedMatch {
+                memory_id: 1,
+                text: "Earlier authenticated breakglass recovery ran femind-embed-service on 127.0.0.1:8898 with local-cpu until the GPU relay returned.".to_string(),
+                category: None,
+                score: 0.62,
+                metadata: std::collections::HashMap::new(),
+            },
+            AggregatedMatch {
+                memory_id: 2,
+                text: "That earlier local-cpu breakglass path is revoked. Current authenticated breakglass recovery keeps femind-embed-service on 127.0.0.1:8899 and restores the audited GPU relay.".to_string(),
+                category: None,
+                score: 0.71,
+                metadata: std::collections::HashMap::new(),
+            },
+        ];
+
+        let best = select_yes_no_evidence(
+            "Should the earlier 127.0.0.1:8898 local-cpu breakglass path still be used?",
             &evidence,
             &authority_registry,
         );

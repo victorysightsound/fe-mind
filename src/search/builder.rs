@@ -460,6 +460,10 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let intent = self
             .query_intent
             .unwrap_or_else(|| infer_query_intent(&self.query));
+        let current_state_signal =
+            query_requests_current_state(&self.query) || query_requests_operational_constraint(&self.query);
+        let historical_state_signal =
+            query_requests_historical_state(&self.query) && !current_state_signal;
         if !self.routing_enabled {
             return QueryRoute {
                 intent,
@@ -486,7 +490,8 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                 },
                 QueryIntent::AbstentionRisk => SearchMode::Keyword,
                 QueryIntent::ExactDetail
-                    if query_requests_precise_procedural_detail(&self.query) =>
+                    if query_requests_precise_procedural_detail(&self.query)
+                        && !(current_state_signal || historical_state_signal) =>
                 {
                     SearchMode::Keyword
                 }
@@ -538,9 +543,11 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let temporal_policy = match intent {
             QueryIntent::CurrentState | QueryIntent::StableSummary => TemporalPolicy::PreferNewer,
             QueryIntent::HistoricalState => TemporalPolicy::PreferOlder,
+            QueryIntent::ExactDetail if current_state_signal => TemporalPolicy::PreferNewer,
+            QueryIntent::ExactDetail if historical_state_signal => TemporalPolicy::PreferOlder,
             QueryIntent::General
-            | QueryIntent::ExactDetail
             | QueryIntent::Aggregation
+            | QueryIntent::ExactDetail
             | QueryIntent::AbstentionRisk => TemporalPolicy::Neutral,
         };
 
@@ -549,9 +556,13 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
                 StateConflictPolicy::PreferCurrent
             }
             QueryIntent::HistoricalState => StateConflictPolicy::PreferHistorical,
+            QueryIntent::ExactDetail if current_state_signal => StateConflictPolicy::PreferCurrent,
+            QueryIntent::ExactDetail if historical_state_signal => {
+                StateConflictPolicy::PreferHistorical
+            }
             QueryIntent::General
-            | QueryIntent::ExactDetail
             | QueryIntent::Aggregation
+            | QueryIntent::ExactDetail
             | QueryIntent::AbstentionRisk => StateConflictPolicy::Neutral,
         };
 
@@ -568,6 +579,9 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
             self.rerank_limit
         } else {
             match intent {
+                QueryIntent::ExactDetail if current_state_signal || historical_state_signal => {
+                    self.rerank_limit.max(24)
+                }
                 QueryIntent::ExactDetail => self.rerank_limit.clamp(8, 16),
                 QueryIntent::CurrentState
                 | QueryIntent::StableSummary
@@ -580,7 +594,19 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let note = match intent {
             QueryIntent::General => "default hybrid-style retrieval",
             QueryIntent::ExactDetail if query_requests_precise_procedural_detail(&self.query) => {
-                "precise procedural detail query; use keyword-first grounded retrieval"
+                if current_state_signal {
+                    "precise current-state procedural detail query; keep grounding while preserving current-state bias"
+                } else if historical_state_signal {
+                    "precise historical procedural detail query; keep grounding while preserving historical bias"
+                } else {
+                    "precise procedural detail query; use keyword-first grounded retrieval"
+                }
+            }
+            QueryIntent::ExactDetail if current_state_signal => {
+                "exact-detail current-state query; keep grounding while favoring current evidence"
+            }
+            QueryIntent::ExactDetail if historical_state_signal => {
+                "exact-detail historical query; keep grounding while favoring earlier evidence"
             }
             QueryIntent::ExactDetail => "exact-detail query; keep grounding and compact reranking",
             QueryIntent::CurrentState => {
@@ -718,6 +744,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let fts_results = self.maybe_rerank_results(fts_results, route.rerank_limit)?;
 
         let mut results = self.apply_filters(fts_results, route.reflection_preference);
+        expand_linked_state_neighbors(self.db, &mut results, route.state_conflict_policy);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
@@ -755,6 +782,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let fts_results = self.maybe_rerank_results(fts_results, route.rerank_limit)?;
 
         let mut results = self.apply_filters(fts_results, route.reflection_preference);
+        expand_linked_state_neighbors(self.db, &mut results, route.state_conflict_policy);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
@@ -790,6 +818,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let vector_results = self.maybe_rerank_results(vector_results, route.rerank_limit)?;
 
         let mut results = self.apply_filters(vector_results, route.reflection_preference);
+        expand_linked_state_neighbors(self.db, &mut results, route.state_conflict_policy);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
@@ -845,6 +874,7 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let merged = self.maybe_rerank_results(merged, route.rerank_limit)?;
 
         let mut results = self.apply_filters(merged, route.reflection_preference);
+        expand_linked_state_neighbors(self.db, &mut results, route.state_conflict_policy);
         apply_temporal_route_bias(self.db, &mut results, route.temporal_policy);
         apply_state_conflict_route_bias(self.db, &mut results, route.state_conflict_policy);
         apply_linked_state_conflict_bias(self.db, &mut results, route.state_conflict_policy);
@@ -1798,6 +1828,53 @@ fn procedural_conflict_rank(
     }
 
     rank
+}
+
+fn expand_linked_state_neighbors(
+    db: &Database,
+    results: &mut Vec<SearchResult>,
+    policy: StateConflictPolicy,
+) {
+    use std::collections::HashSet;
+
+    if results.is_empty() || matches!(policy, StateConflictPolicy::Neutral) {
+        return;
+    }
+
+    let mut seen_ids = results
+        .iter()
+        .map(|result| result.memory_id)
+        .collect::<HashSet<_>>();
+    let mut injected = Vec::new();
+
+    for result in results.iter() {
+        let linked_ids = match policy {
+            StateConflictPolicy::PreferCurrent => {
+                GraphMemory::superseded_successors(db, result.memory_id)
+            }
+            StateConflictPolicy::PreferHistorical => {
+                GraphMemory::superseded_predecessors(db, result.memory_id)
+            }
+            StateConflictPolicy::Neutral => Ok(Vec::new()),
+        };
+
+        let Ok(linked_ids) = linked_ids else { continue };
+        for linked_id in linked_ids {
+            if seen_ids.insert(linked_id) {
+                let score = match policy {
+                    StateConflictPolicy::PreferCurrent => result.score * 0.99,
+                    StateConflictPolicy::PreferHistorical => result.score * 0.97,
+                    StateConflictPolicy::Neutral => result.score,
+                };
+                injected.push(SearchResult {
+                    memory_id: linked_id,
+                    score,
+                });
+            }
+        }
+    }
+
+    results.extend(injected);
 }
 
 fn apply_temporal_route_bias(
@@ -2881,7 +2958,7 @@ fn query_requests_aggregation(query: &str) -> bool {
         || (tokens.contains(&"all") && tokens.contains(&"sessions"))
 }
 
-fn query_requests_operational_constraint(query: &str) -> bool {
+pub(crate) fn query_requests_operational_constraint(query: &str) -> bool {
     let normalized = normalize_text(query);
     let tokens: Vec<_> = normalized.split_whitespace().collect();
     let yes_no_lead = matches!(
@@ -2906,11 +2983,16 @@ fn query_requests_operational_constraint(query: &str) -> bool {
                 | "host"
                 | "address"
                 | "bridge"
+                | "path"
+                | "runtime"
+                | "relay"
         )
     }) || normalized.contains("0.0.0.0")
         || normalized.contains("127.0.0.1");
 
-    yes_no_lead && constraint_signal && query_requests_procedural_guidance(query)
+    yes_no_lead
+        && (constraint_signal || normalized.contains("still be used"))
+        && query_requests_procedural_guidance(query)
 }
 
 fn query_requests_graph_lookup(query: &str) -> bool {
@@ -2966,11 +3048,13 @@ fn query_requests_abstention_risk(query: &str) -> bool {
         || normalized.contains("anything about")
 }
 
-fn query_requests_current_state(query: &str) -> bool {
+pub(crate) fn query_requests_current_state(query: &str) -> bool {
     let normalized = normalize_text(query);
+    let tokens: Vec<_> = normalized.split_whitespace().collect();
     normalized.contains("current")
         || normalized.contains("currently")
         || normalized.contains("right now")
+        || tokens.contains(&"now")
         || normalized.contains("latest")
         || normalized.contains("today")
         || normalized.contains("active")
@@ -3498,6 +3582,26 @@ mod tests {
             ),
             QueryIntent::StableSummary
         );
+        assert_eq!(
+            infer_query_intent(
+                "Should the earlier 127.0.0.1:8898 local-cpu breakglass path still be used?"
+            ),
+            QueryIntent::CurrentState
+        );
+    }
+
+    #[test]
+    fn exact_detail_current_state_route_keeps_grounding_and_current_bias() {
+        let route = SearchBuilder::<TestMem>::new(
+            &Database::open_in_memory().expect("db"),
+            "What temporary runtime path is approved now during authenticated breakglass recovery?",
+        )
+        .query_route();
+
+        assert_eq!(route.intent, QueryIntent::ExactDetail);
+        assert_eq!(route.temporal_policy, TemporalPolicy::PreferNewer);
+        assert_eq!(route.state_conflict_policy, StateConflictPolicy::PreferCurrent);
+        assert!(!matches!(route.mode, SearchMode::Keyword));
     }
 
     #[test]

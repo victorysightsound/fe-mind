@@ -176,9 +176,16 @@ The practical live-validation path is now established and repeatable:
   current-state routes demote superseded memories and can walk forward to the
   replacement fact, while historical-state routes can walk backward to prior
   states through supersession links
+- exact-detail routes now preserve current/historical bias when the query asks
+  for a precise detail about the current or earlier state, instead of dropping
+  back to a temporally neutral exact-detail path
 - linked conflict sets now get pairwise demotion inside the retrieved result
   set, so current/historical routes can prefer the right state even when both
   competing records remain textually relevant enough to surface together
+- linked supersession can now inject the newer or older side of a state pair
+  into the candidate set when only one side was initially retrieved, so
+  current-state and historical-state answers do not get trapped on the first
+  matching record
 - `SearchBuilder::valid_at(...)` is now enforced against stored `valid_from` /
   `valid_until` windows instead of being a no-op
 - exact-detail composition now performs a broader evidence fallback when strict

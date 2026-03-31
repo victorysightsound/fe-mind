@@ -2578,5 +2578,239 @@
         ]
       }
     ]
+  },
+  {
+    "id": "stale-secret-location-rotation",
+    "title": "Current secret-location guidance should replace older trusted storage paths",
+    "category": "negative-operational-memory",
+    "goal": "Demote older trusted token-location guidance once a newer verified storage path supersedes it.",
+    "records": [
+      {
+        "key": "old-token-location",
+        "timestamp": "2026-03-26T09:00:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "verified",
+          "content_secret_class": "credential-location"
+        },
+        "text": "Earlier native-Windows bring-up guidance loaded FEMIND_REMOTE_EMBED_TOKEN from ~/tmp/femind-remote-token.env before the tunnel helper stabilized."
+      },
+      {
+        "key": "new-token-location",
+        "timestamp": "2026-03-31T09:00:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "verified",
+          "content_secret_class": "credential-location"
+        },
+        "text": "Current runtime guidance loads FEMIND_REMOTE_EMBED_TOKEN from ~/.config/recallbench/femind-remote.env before starting the Windows GPU tunnel."
+      },
+      {
+        "timestamp": "2026-03-31T09:05:00Z",
+        "source": "maintainer-note",
+        "memory_type": "semantic",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "verified"
+        },
+        "text": "The earlier ~/tmp/femind-remote-token.env path is obsolete now that the audited env-file path is stable."
+      }
+    ],
+    "relations": [
+      {
+        "from": "old-token-location",
+        "to": "new-token-location",
+        "relation": "superseded_by"
+      },
+      {
+        "from": "old-token-location",
+        "to": "new-token-location",
+        "relation": "conflicts_with"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "Where should the current FeMind remote embed token be loaded from now?",
+        "expected_answer": "It should be loaded from ~/.config/recallbench/femind-remote.env.",
+        "top_k": 1,
+        "required_fragments": [
+          "~/.config/recallbench/femind-remote.env"
+        ],
+        "forbidden_fragments": [
+          "~/tmp/femind-remote-token.env"
+        ]
+      },
+      {
+        "query": "Where was the FeMind remote embed token loaded from before the current env-file path?",
+        "expected_answer": "It was loaded from ~/tmp/femind-remote-token.env.",
+        "required_fragments": [
+          "~/tmp/femind-remote-token.env"
+        ],
+        "forbidden_fragments": [
+          "~/.config/recallbench/femind-remote.env"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "revoked-breakglass-recovery-path",
+    "title": "Revoked breakglass guidance should not survive as current recovery advice",
+    "category": "negative-operational-memory",
+    "goal": "An older approved breakglass path should lose to a newer trusted revocation and replacement path.",
+    "records": [
+      {
+        "key": "old-breakglass-path",
+        "timestamp": "2026-03-29T08:00:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "review_required": "true",
+          "review_status": "allowed",
+          "review_severity": "critical",
+          "review_reason": "temporary relay outage",
+          "review_tags": "network-exposure,breakglass",
+          "review_scope": "production",
+          "review_policy_class": "breakglass-exception",
+          "review_reviewer": "ops-maintainer"
+        },
+        "text": "Earlier authenticated breakglass recovery ran femind-embed-service on 127.0.0.1:8898 with local-cpu until the GPU relay returned."
+      },
+      {
+        "key": "new-breakglass-path",
+        "timestamp": "2026-03-31T11:00:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "verified"
+        },
+        "text": "That earlier local-cpu breakglass path is revoked. Current authenticated breakglass recovery keeps femind-embed-service on 127.0.0.1:8899 and restores the audited GPU relay."
+      }
+    ],
+    "relations": [
+      {
+        "from": "old-breakglass-path",
+        "to": "new-breakglass-path",
+        "relation": "superseded_by"
+      },
+      {
+        "from": "old-breakglass-path",
+        "to": "new-breakglass-path",
+        "relation": "conflicts_with"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What temporary runtime path is approved now during authenticated breakglass recovery?",
+        "expected_answer": "Keep femind-embed-service on 127.0.0.1:8899 and restore the audited GPU relay.",
+        "required_fragments": [
+          "127.0.0.1:8899",
+          "audited GPU relay"
+        ],
+        "forbidden_fragments": [
+          "127.0.0.1:8898 with local-cpu until the GPU relay returned."
+        ]
+      },
+      {
+        "query": "Should the earlier 127.0.0.1:8898 local-cpu breakglass path still be used?",
+        "expected_answer": "No.",
+        "top_k": 1,
+        "required_fragments": [
+          "revoked",
+          "127.0.0.1:8899"
+        ],
+        "forbidden_fragments": [
+          "127.0.0.1:8898 with local-cpu until the GPU relay returned"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "retired-maintenance-bypass-path",
+    "title": "Retired maintenance bypass guidance should yield to the audited path",
+    "category": "negative-operational-memory",
+    "goal": "Older trusted maintenance shortcuts should be demoted once a newer audited path retires them.",
+    "records": [
+      {
+        "key": "old-maintenance-bypass",
+        "timestamp": "2026-03-28T07:30:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "verified",
+          "review_required": "true",
+          "review_status": "allowed",
+          "review_severity": "critical",
+          "review_reason": "temporary reset shortcut",
+          "review_tags": "auth-bypass,data-reset",
+          "review_scope": "maintenance",
+          "review_policy_class": "data-reset-exception",
+          "review_reviewer": "ops-maintainer"
+        },
+        "text": "Earlier maintenance recovery temporarily disabled auth and ran reset-maintenance-state --force over local ssh."
+      },
+      {
+        "key": "new-maintenance-path",
+        "timestamp": "2026-03-31T11:30:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "verified"
+        },
+        "text": "That auth-bypass maintenance shortcut is retired. Current maintenance recovery uses the signed reset bundle over the audited tunnel without disabling auth."
+      }
+    ],
+    "relations": [
+      {
+        "from": "old-maintenance-bypass",
+        "to": "new-maintenance-path",
+        "relation": "superseded_by"
+      },
+      {
+        "from": "old-maintenance-bypass",
+        "to": "new-maintenance-path",
+        "relation": "conflicts_with"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What path should be used now for maintenance recovery?",
+        "expected_answer": "Use the signed reset bundle over the audited tunnel without disabling auth.",
+        "required_fragments": [
+          "signed reset bundle",
+          "audited tunnel",
+          "without disabling auth"
+        ],
+        "forbidden_fragments": [
+          "reset-maintenance-state --force over local ssh"
+        ]
+      },
+      {
+        "query": "Should the retired auth-bypass maintenance shortcut still be used?",
+        "expected_answer": "No.",
+        "required_fragments": [
+          "retired",
+          "without disabling auth"
+        ],
+        "forbidden_fragments": [
+          "reset-maintenance-state --force over local ssh"
+        ]
+      }
+    ]
   }
 ]

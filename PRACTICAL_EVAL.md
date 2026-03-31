@@ -428,8 +428,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `51/51`
-- latest reranker-aware `remote-fallback` ANN run passes `51/51`
+- latest reranker-aware `remote-fallback` exact run passes `68/68`
+- latest reranker-aware `remote-fallback` ANN run passes `68/68`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`
@@ -458,6 +458,11 @@ Current validated baseline:
   - runtime cues do not suppress approved breakglass routing during explicit
     outage recovery
   - the same maintenance exception stays out of normal runtime answers
+- negative operational-memory coverage now also proves:
+  - a newer verified secret-location path can displace an older trusted one
+  - a revoked breakglass recovery path can beat the older literal path it
+    replaces
+  - a retired maintenance bypass can lose to the current audited recovery path
 - targeted engine tests now also prove the application-facing authority
   registry works when records carry:
   - `source_chain`
