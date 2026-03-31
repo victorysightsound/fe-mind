@@ -2032,6 +2032,40 @@ was still too low-level:
   practical `57/57` exact, practical `57/57` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 057: Score Query Authority Across Multiple Relevant Domains
+
+**Decision:** When a query contains cues from more than one authority domain,
+FeMind should score candidates against all relevant domains instead of
+collapsing authority arbitration to the first matched keyword family.
+
+**Context:** Decision 056 gave applications a grouped domain-policy surface,
+but query-time arbitration still had a structural blind spot:
+- `infer_authority_domain(...)` returned only one domain
+- mixed runtime + networking queries like `supported runtime path` plus
+  `private endpoint` could zero out the runtime authority lane
+- the practical suite needed a real regression for linked mixed-domain cases,
+  not just domain-isolated authority scenarios
+
+**Consequences:**
+- query-time authority scoring now considers all relevant inferred domains
+  for:
+  - composite authority scoring
+  - procedural conflict resolution
+  - evidence selection
+  - trusted sensitive-guidance filtering
+- the practical suite now includes
+  `registry-domain-cross-runtime-networking`
+- that scenario proves a linked query can mention both:
+  - runtime path language
+  - private-endpoint networking language
+  and still surface the authoritative runtime answer
+- new unit coverage now locks:
+  - multi-domain inference
+  - strongest-domain rank selection
+- Remote-GPU validation is green after the change:
+  practical `58/58` exact, practical `58/58` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

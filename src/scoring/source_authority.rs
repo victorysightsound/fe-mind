@@ -52,11 +52,12 @@ impl Default for SourceAuthorityScorer {
 
 impl ScoringStrategy for SourceAuthorityScorer {
     fn score_multiplier(&self, record: &MemoryMeta, query: &str, _base_score: f32) -> f32 {
-        let Some(domain) = infer_authority_domain(query) else {
+        let domains = infer_authority_domains(query);
+        if domains.is_empty() {
             return 1.0;
-        };
+        }
 
-        match source_authority_level_for_domain(record, Some(domain), Some(&self.registry)) {
+        match source_authority_level_for_domains(record, &domains, Some(&self.registry)) {
             SourceAuthorityLevel::Authoritative => self.authoritative_weight,
             SourceAuthorityLevel::Primary => self.primary_weight,
             SourceAuthorityLevel::Delegated => self.delegated_weight,
@@ -447,7 +448,12 @@ impl SourceAuthorityRegistry {
 }
 
 pub(crate) fn infer_authority_domain(text: &str) -> Option<SourceAuthorityDomain> {
+    infer_authority_domains(text).into_iter().next()
+}
+
+pub(crate) fn infer_authority_domains(text: &str) -> Vec<SourceAuthorityDomain> {
     let normalized = normalize_match_text(text);
+    let mut domains = Vec::new();
 
     if contains_any(
         &normalized,
@@ -466,7 +472,7 @@ pub(crate) fn infer_authority_domain(text: &str) -> Option<SourceAuthorityDomain
             "auth token",
         ],
     ) {
-        return Some(SourceAuthorityDomain::Security);
+        domains.push(SourceAuthorityDomain::Security);
     }
 
     if contains_any(
@@ -487,7 +493,7 @@ pub(crate) fn infer_authority_domain(text: &str) -> Option<SourceAuthorityDomain
             "bridge",
         ],
     ) {
-        return Some(SourceAuthorityDomain::Networking);
+        domains.push(SourceAuthorityDomain::Networking);
     }
 
     if contains_any(
@@ -503,7 +509,7 @@ pub(crate) fn infer_authority_domain(text: &str) -> Option<SourceAuthorityDomain
             "failover",
         ],
     ) {
-        return Some(SourceAuthorityDomain::Maintenance);
+        domains.push(SourceAuthorityDomain::Maintenance);
     }
 
     if contains_any(
@@ -520,7 +526,7 @@ pub(crate) fn infer_authority_domain(text: &str) -> Option<SourceAuthorityDomain
             "linker",
         ],
     ) {
-        return Some(SourceAuthorityDomain::BuildToolchain);
+        domains.push(SourceAuthorityDomain::BuildToolchain);
     }
 
     if contains_any(
@@ -538,7 +544,7 @@ pub(crate) fn infer_authority_domain(text: &str) -> Option<SourceAuthorityDomain
             "where should",
         ],
     ) {
-        return Some(SourceAuthorityDomain::RuntimeOps);
+        domains.push(SourceAuthorityDomain::RuntimeOps);
     }
 
     if contains_any(
@@ -555,10 +561,10 @@ pub(crate) fn infer_authority_domain(text: &str) -> Option<SourceAuthorityDomain
             "service host path",
         ],
     ) {
-        return Some(SourceAuthorityDomain::Deployment);
+        domains.push(SourceAuthorityDomain::Deployment);
     }
 
-    None
+    domains
 }
 
 pub(crate) fn source_authority_rank(
@@ -567,6 +573,20 @@ pub(crate) fn source_authority_rank(
     registry: Option<&SourceAuthorityRegistry>,
 ) -> u8 {
     match source_authority_level_for_domain(record, domain, registry) {
+        SourceAuthorityLevel::Authoritative => 100,
+        SourceAuthorityLevel::Primary => 80,
+        SourceAuthorityLevel::Delegated => 55,
+        SourceAuthorityLevel::Reference => 30,
+        SourceAuthorityLevel::Unknown => 0,
+    }
+}
+
+pub(crate) fn source_authority_rank_for_domains(
+    record: &MemoryMeta,
+    domains: &[SourceAuthorityDomain],
+    registry: Option<&SourceAuthorityRegistry>,
+) -> u8 {
+    match source_authority_level_for_domains(record, domains, registry) {
         SourceAuthorityLevel::Authoritative => 100,
         SourceAuthorityLevel::Primary => 80,
         SourceAuthorityLevel::Delegated => 55,
@@ -585,6 +605,20 @@ pub(crate) fn source_chain_for_domain(
     }
 
     record_source_chain(record)
+}
+
+pub(crate) fn source_chain_for_domains(
+    record: &MemoryMeta,
+    domains: &[SourceAuthorityDomain],
+    registry: Option<&SourceAuthorityRegistry>,
+) -> Option<String> {
+    for domain in domains {
+        if let Some(chain) = source_chain_for_domain(record, Some(*domain), registry) {
+            return Some(chain);
+        }
+    }
+
+    None
 }
 
 pub(crate) fn source_authority_level_for_domain(
@@ -612,6 +646,19 @@ pub(crate) fn source_authority_level_for_domain(
         .unwrap_or(SourceAuthorityLevel::Unknown);
 
     metadata_level.max(registry_level).max(registry_kind_level)
+}
+
+pub(crate) fn source_authority_level_for_domains(
+    record: &MemoryMeta,
+    domains: &[SourceAuthorityDomain],
+    registry: Option<&SourceAuthorityRegistry>,
+) -> SourceAuthorityLevel {
+    domains
+        .iter()
+        .copied()
+        .map(|domain| source_authority_level_for_domain(record, Some(domain), registry))
+        .max()
+        .unwrap_or(SourceAuthorityLevel::Unknown)
 }
 
 fn source_authority_domains(record: &MemoryMeta) -> Vec<SourceAuthorityDomain> {
@@ -796,6 +843,16 @@ mod tests {
     }
 
     #[test]
+    fn infers_multiple_domains_for_cross_domain_queries() {
+        let domains = infer_authority_domains(
+            "Which runtime path should the service use through the private endpoint on the GPU host now?",
+        );
+
+        assert!(domains.contains(&SourceAuthorityDomain::Networking));
+        assert!(domains.contains(&SourceAuthorityDomain::RuntimeOps));
+    }
+
+    #[test]
     fn source_authority_rank_requires_domain_match() {
         let record = meta(
             Some("runtime"),
@@ -941,6 +998,35 @@ mod tests {
         assert_eq!(
             registry.level_for_chain(SourceAuthorityDomain::RuntimeOps, "runtime-bootstrap"),
             SourceAuthorityLevel::Primary
+        );
+    }
+
+    #[test]
+    fn multi_domain_rank_uses_strongest_matching_domain() {
+        let record = meta(None, None, None, Some("maintainer"));
+        let registry = SourceAuthorityRegistry::new()
+            .with_kind_policy(SourceAuthorityKindPolicy::new(
+                SourceAuthorityDomain::RuntimeOps,
+                "maintainer",
+                SourceAuthorityLevel::Authoritative,
+            ))
+            .with_kind_policy(SourceAuthorityKindPolicy::new(
+                SourceAuthorityDomain::Networking,
+                "maintainer",
+                SourceAuthorityLevel::Reference,
+            ));
+
+        let domains = infer_authority_domains(
+            "Which runtime path should the service use through the private endpoint on the GPU host now?",
+        );
+
+        assert_eq!(
+            source_authority_rank_for_domains(&record, &domains, Some(&registry)),
+            100
+        );
+        assert_eq!(
+            source_chain_for_domains(&record, &domains, Some(&registry)),
+            None
         );
     }
 }

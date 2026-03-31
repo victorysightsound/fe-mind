@@ -814,6 +814,102 @@
     ]
   },
   {
+    "id": "registry-domain-cross-runtime-networking",
+    "title": "Cross-domain queries should let runtime authority compete with networking cues",
+    "category": "authority-registry",
+    "goal": "When one linked query mentions both runtime path and private endpoint networking language, FeMind should still let the authoritative runtime answer compete instead of collapsing the whole query to the first matched domain.",
+    "authority_domain_policies": [
+      {
+        "domain": "runtime",
+        "authoritative_kinds": [
+          "maintainer"
+        ]
+      },
+      {
+        "domain": "networking",
+        "authoritative_kinds": [
+          "system"
+        ]
+      }
+    ],
+    "records": [
+      {
+        "key": "cross-domain-client",
+        "timestamp": "2026-03-31T09:24:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The runtime relay path now depends on the supported host path, even though the client still reaches it through the private endpoint tunnel."
+      },
+      {
+        "key": "cross-domain-link",
+        "timestamp": "2026-03-31T09:25:00Z",
+        "source": "integration-note",
+        "memory_type": "semantic",
+        "text": "The current relay question links the supported runtime host path and the verified private endpoint note."
+      },
+      {
+        "key": "cross-domain-runtime",
+        "timestamp": "2026-03-31T09:26:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared"
+        },
+        "text": "Supported runtime path: run femind-embed-service as a native Windows scheduled task on the GPU host."
+      },
+      {
+        "key": "cross-domain-network",
+        "timestamp": "2026-03-31T09:27:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "content_secret_class": "private-endpoint"
+        },
+        "text": "Verified relay endpoint: https://gpu-relay.internal:8899/embed on the private tunnel."
+      }
+    ],
+    "relations": [
+      {
+        "from": "cross-domain-client",
+        "to": "cross-domain-link",
+        "relation": "related_to"
+      },
+      {
+        "from": "cross-domain-link",
+        "to": "cross-domain-runtime",
+        "relation": "depends_on"
+      },
+      {
+        "from": "cross-domain-link",
+        "to": "cross-domain-network",
+        "relation": "depends_on"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "How does the private endpoint relay reach the supported runtime path on calvaryav now?",
+        "expected_answer": "Run femind-embed-service as a native Windows scheduled task on the GPU host.",
+        "expected_intent": "stable-summary",
+        "expected_graph_depth": 2,
+        "top_k": 1,
+        "required_fragments": [
+          "native Windows scheduled task",
+          "GPU host"
+        ],
+        "forbidden_fragments": [
+          "gpu-relay.internal",
+          "private tunnel"
+        ],
+        "min_observed_hits": 1
+      }
+    ]
+  },
+  {
     "id": "graph-verified-private-network-guidance",
     "title": "Graph-linked private network guidance should prefer the fully verified subnet",
     "category": "multi-hop-graph",

@@ -450,6 +450,9 @@ Current validated baseline:
 - practical scenarios can now also supply grouped app-facing authority defaults
   through `authority_domain_policies`, so one scenario can declare a whole
   domain's chain/kind policy surface without repeating individual builder calls
+- authority-registry coverage now also includes mixed-domain graph queries, so
+  runtime answers can still compete when the same query also contains
+  networking cues like `private endpoint` or `tunnel`
 - targeted engine tests now also prove the application-facing authority
   registry works when records carry:
   - `source_chain`

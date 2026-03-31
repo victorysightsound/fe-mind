@@ -8,11 +8,11 @@ use crate::engine::VectorSearchMode;
 use crate::error::Result;
 use crate::memory::GraphMemory;
 use crate::scoring::{
-    SourceAuthorityRegistry, SourceTrustLevel, infer_authority_domain,
+    SourceAuthorityRegistry, SourceTrustLevel, infer_authority_domains,
     query_requests_private_infra_guidance, query_requests_procedural_guidance, query_scope,
     review_denied, review_policy_class, review_policy_class_matches_query, review_required,
-    review_scope, review_scope_matches_query, source_authority_rank, source_chain_for_domain,
-    source_provenance_rank, source_trust_level,
+    review_scope, review_scope_matches_query, source_authority_rank_for_domains,
+    source_chain_for_domains, source_provenance_rank, source_trust_level,
 };
 use crate::search::fts5::{FtsResult, FtsSearch};
 use crate::search::hybrid::rrf_merge;
@@ -1539,7 +1539,7 @@ fn apply_trusted_procedural_conflict_resolution(
         return;
     }
 
-    let query_domain = infer_authority_domain(query);
+    let query_domains = infer_authority_domains(query);
     let mut procedural = Vec::new();
     for result in results.iter() {
         let Some((memory_type, text, metadata)) = db
@@ -1599,8 +1599,16 @@ fn apply_trusted_procedural_conflict_resolution(
         procedural.push(ProceduralConflictCandidate {
             memory_id: result.memory_id,
             rank,
-            authority_rank: source_authority_rank(&meta, query_domain, Some(authority_registry)),
-            authority_chain: source_chain_for_domain(&meta, query_domain, Some(authority_registry)),
+            authority_rank: source_authority_rank_for_domains(
+                &meta,
+                &query_domains,
+                Some(authority_registry),
+            ),
+            authority_chain: source_chain_for_domains(
+                &meta,
+                &query_domains,
+                Some(authority_registry),
+            ),
         });
     }
 
@@ -1680,9 +1688,9 @@ fn procedural_conflict_rank(
         SourceTrustLevel::Normal => 300,
         SourceTrustLevel::Low => 80,
         SourceTrustLevel::Untrusted => 0,
-    } + source_authority_rank(
+    } + source_authority_rank_for_domains(
         meta,
-        infer_authority_domain(query),
+        &infer_authority_domains(query),
         Some(authority_registry),
     ) as i32
         + source_provenance_rank(meta) as i32

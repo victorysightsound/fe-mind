@@ -17,11 +17,12 @@ use crate::scoring::{
     ReviewStatus, SecretClass, SourceAuthorityDomain, SourceAuthorityDomainPolicy,
     SourceAuthorityKindPolicy, SourceAuthorityPolicy, SourceAuthorityRegistry,
     SourceProvenanceScorer, SourceTrustScorer, detect_review_flag, effective_review_status,
-    evidence_contains_secret_material, infer_authority_domain,
+    evidence_contains_secret_material, infer_authority_domain, infer_authority_domains,
     query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
     review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
-    source_authority_rank, source_provenance_rank, source_trust_level,
+    source_authority_rank, source_authority_rank_for_domains, source_provenance_rank,
+    source_trust_level,
 };
 use crate::search::StableSummaryPolicy;
 use crate::search::builder::SearchBuilder;
@@ -3875,9 +3876,9 @@ fn evidence_selection_rank(
     authority_registry: &SourceAuthorityRegistry,
 ) -> u16 {
     let meta = candidate_memory_meta(candidate);
-    let authority_rank = u16::from(source_authority_rank(
+    let authority_rank = u16::from(source_authority_rank_for_domains(
         &meta,
-        infer_authority_domain(query),
+        &infer_authority_domains(query),
         Some(authority_registry),
     ));
     let trust_rank = match source_trust_level(&meta) {
@@ -4031,9 +4032,9 @@ fn trusted_guidance_rank(
 
     match source_trust_level(&meta) {
         crate::scoring::SourceTrustLevel::Trusted | crate::scoring::SourceTrustLevel::Normal => {
-            source_provenance_rank(&meta).saturating_add(source_authority_rank(
+            source_provenance_rank(&meta).saturating_add(source_authority_rank_for_domains(
                 &meta,
-                infer_authority_domain(query),
+                &infer_authority_domains(query),
                 Some(authority_registry),
             ))
         }

@@ -217,6 +217,8 @@ The practical live-validation path is now established and repeatable:
   so apps do not have to encode full authority metadata onto every record
 - when both record metadata and the application authority registry apply,
   FeMind uses the stronger authority level for that query domain
+- when a query spans multiple authority domains, FeMind now scores against all
+  relevant domains instead of collapsing to the first matched domain keyword
 - query routing now infers an authority domain for high-stakes procedural and
   stable-knowledge conflicts, so authoritative chains can win over stronger
   generic provenance when the domain is explicit
