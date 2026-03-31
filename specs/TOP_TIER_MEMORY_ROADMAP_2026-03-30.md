@@ -218,6 +218,11 @@ Current status after the 2026-03-30 trust/safety pass:
   stable-summary retrieval and composition can run in `auto`,
   `prefer-reflection`, or `prefer-source` mode instead of baking one engine
   default into every app
+- reflected knowledge now also needs negative-lifecycle handling, not just
+  promotion:
+  - contest detection when qualified trusted summaries disagree
+  - refresh when support materially weakens
+  - retirement when a current reflected row no longer qualifies
 
 ### 6. Keep Evaluation Engine-Centric
 

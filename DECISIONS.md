@@ -1713,6 +1713,70 @@ productizable across different consumers.
 
 ---
 
+## Decision 049: Reflection Refresh Must Handle Contention, Weakening, and Retirement
+
+**Date:** 2026-03-31
+
+**Decision:** Reflected knowledge lifecycle cannot stop at promotion. FeMind
+must also detect when a current reflected summary becomes contested by another
+qualified trusted summary, when support materially weakens, and when the
+current reflected row no longer qualifies at all.
+
+**Context:** Decisions 042-048 established deterministic reflection,
+consumer-safe persistence, lifecycle supersession, application-facing refresh
+planning, and caller-controlled stable-summary promotion. That was sufficient
+for strengthening summaries over time, but it still assumed reflected
+knowledge only improves. Real memory systems also need the opposite behavior:
+- trusted summaries can begin to conflict even when the current winner does not
+  change
+- support counts can fall, leaving the persisted reflected row overstating how
+  well grounded it is
+- a persisted current reflection can outlive the evidence that originally made
+  it qualify
+
+Without these negative-lifecycle rules, reflected knowledge becomes stale in a
+more subtle way: not because the summary text changed, but because the support
+quality behind it changed.
+
+**Consequences:**
+- `KnowledgeObject` and `PersistedKnowledgeSummary` now carry contested-summary
+  metadata:
+  - `contested`
+  - `competing_summary_count`
+  - `strongest_competing_summary`
+  - `strongest_competing_support_count`
+  - `strongest_competing_trusted_support_count`
+- contested reflected summaries now lower deterministic reflection confidence
+  when another qualified trusted summary competes for the same `knowledge_key`
+- `ReflectionLifecycleStatus` now includes:
+  - `retired`
+- `ReflectionRefreshPolicy` now handles both reinforcement and regression:
+  - support growth
+  - trusted-support growth
+  - support weakening
+  - trusted-support weakening
+  - competing trusted summaries
+  - retirement when no current reflected summary still qualifies
+- `ReflectionRefreshPlanItem` now exposes:
+  - the `key`
+  - the planned `action` (`persist` or `retire`)
+  - an optional synthesized `object`
+  - the current persisted row and refresh reasons
+- `refresh_reflected_knowledge_objects_with_policy(...)` now:
+  - persists updated reflected rows when evidence grows, weakens, or becomes
+    contested
+  - retires current reflected rows when no qualifying reflected object remains
+- the practical suite now proves contested reflection explicitly
+- focused engine tests now prove:
+  - competing trusted summary detection
+  - support weakening refresh
+  - retirement of no-longer-qualified current reflected rows
+- Remote-GPU validation is green after the change:
+  practical `48/48` exact, practical `48/48` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
+---
+
 ## Open Questions
 
 ### Q1: Crate Naming and Publishing

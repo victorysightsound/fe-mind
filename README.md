@@ -94,6 +94,10 @@ The practical live-validation path is now established and repeatable:
 - persisted reflected knowledge now has a lifecycle:
   - older reflected rows with the same `knowledge_key` are superseded when the
     derived summary changes
+  - current reflected rows can now be retired when the derived summary no
+    longer qualifies under the active reflection thresholds
+  - current reflected rows now preserve contested-summary metadata when another
+    qualified trusted summary competes for the same `knowledge_key`
   - persisted reflection rows get `validated_by` graph links back to their
     source memories
   - the practical suite now queries persisted reflection rows directly instead
@@ -112,6 +116,10 @@ The practical live-validation path is now established and repeatable:
 - reflection refresh planning is now application-facing:
   stale, changed, or newly reinforced derived knowledge can be recomputed using
   an explicit `ReflectionRefreshPolicy` instead of ad hoc timer logic
+- reflection refresh planning now also handles the negative side of memory
+  quality:
+  support weakening, trusted-summary conflicts, and retirement when a current
+  reflected row no longer qualifies
 - routed retrieval now also has an explicit `stable-summary` intent:
   questions that clearly ask for the supported, preferred, recommended, or
   current durable summary can automatically prefer current reflected knowledge

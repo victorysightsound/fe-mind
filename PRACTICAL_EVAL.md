@@ -113,6 +113,7 @@ Each scenario should include:
   `content_sensitivity`
 - optional explicit retrieval criteria such as:
   - `expected_intent`
+  - `expected_stable_summary_policy`
   - `expected_reflection_preference`
   - `required_fragments`
   - `forbidden_fragments`
@@ -136,6 +137,7 @@ Each scenario should include:
   - `key`
   - `expected_summary`
   - `expected_kind`
+  - `expected_contested`
   - `min_support_count`
   - `min_trusted_support_count`
   - `min_confidence`
@@ -357,6 +359,10 @@ Current validated baseline:
 - persisted reflected knowledge now has an explicit lifecycle:
   - older reflected rows with the same `knowledge_key` are superseded when the
     derived summary changes
+  - current reflected rows can be retired when they no longer qualify under
+    the active support thresholds
+  - current reflected rows can carry contested-summary metadata when another
+    qualified trusted summary competes for the same key
   - persisted reflection rows get `validated_by` graph links back to their
     supporting source memories
   - the practical suite now queries persisted reflection rows directly through
@@ -373,6 +379,10 @@ Current validated baseline:
 - reflection refresh is now driven by `ReflectionRefreshPolicy`, so apps can
   recompute persisted knowledge when it is stale, materially changed, or backed
   by stronger support instead of relying on an opaque background cadence
+- the same refresh policy now also covers quality regressions:
+  - support weakening
+  - trusted-summary contention
+  - retirement when a current reflected row no longer qualifies
 - the engine now also routes a first-class `stable-summary` intent:
   supported/preferred/recommended/current durable-summary questions can
   automatically prefer current reflected rows without forcing callers to opt
@@ -398,8 +408,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `47/47`
-- latest reranker-aware `remote-fallback` ANN run passes `47/47`
+- latest reranker-aware `remote-fallback` exact run passes `48/48`
+- latest reranker-aware `remote-fallback` ANN run passes `48/48`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

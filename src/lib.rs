@@ -66,8 +66,8 @@ pub mod prelude {
     pub use crate::engine::{
         CompositionEvidenceBasis, KnowledgeObject, KnowledgeObjectKind, MemoryEngine,
         PersistedKnowledgeObject, PersistedKnowledgeSummary, ReflectionConfig,
-        ReflectionLifecycleStatus, ReflectionRefreshPlanItem, ReflectionRefreshPolicy,
-        ReflectionRefreshReason, ReviewItem, VectorSearchMode,
+        ReflectionLifecycleStatus, ReflectionRefreshAction, ReflectionRefreshPlanItem,
+        ReflectionRefreshPolicy, ReflectionRefreshReason, ReviewItem, VectorSearchMode,
     };
     pub use crate::error::{FemindError, Result};
     pub use crate::memory::store::StoreResult;

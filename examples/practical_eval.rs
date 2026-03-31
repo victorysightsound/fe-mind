@@ -207,6 +207,8 @@ mod app {
         #[serde(default)]
         expected_kind: Option<String>,
         #[serde(default)]
+        expected_contested: Option<bool>,
+        #[serde(default)]
         min_support_count: Option<usize>,
         #[serde(default)]
         min_trusted_support_count: Option<usize>,
@@ -854,6 +856,10 @@ mod app {
         confidence: String,
         support_count: usize,
         trusted_support_count: usize,
+        contested: bool,
+        competing_summary_count: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        strongest_competing_summary: Option<String>,
         source_ids: Vec<i64>,
     }
 
@@ -862,9 +868,14 @@ mod app {
         found: bool,
         summary_match: bool,
         kind_ok: bool,
+        contested_ok: bool,
         support_ok: bool,
         trusted_support_ok: bool,
         confidence_ok: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_contested: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_contested: Option<bool>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         missing_required_fragments: Vec<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -2261,6 +2272,9 @@ mod app {
             confidence: object.confidence.as_str().to_string(),
             support_count: object.support_count,
             trusted_support_count: object.trusted_support_count,
+            contested: object.contested,
+            competing_summary_count: object.competing_summary_count,
+            strongest_competing_summary: object.strongest_competing_summary.clone(),
             source_ids: object.source_ids.clone(),
         }
     }
@@ -2285,6 +2299,11 @@ mod app {
             check
                 .min_support_count
                 .is_none_or(|minimum| object.support_count >= minimum)
+        });
+        let contested_ok = matched.is_none_or(|object| {
+            check
+                .expected_contested
+                .is_none_or(|expected| object.contested == expected)
         });
         let trusted_support_ok = matched.is_none_or(|object| {
             check
@@ -2321,15 +2340,19 @@ mod app {
             found: matched.is_some(),
             summary_match,
             kind_ok,
+            contested_ok,
             support_ok,
             trusted_support_ok,
             confidence_ok,
+            expected_contested: check.expected_contested,
+            observed_contested: matched.map(|object| object.contested),
             missing_required_fragments,
             present_forbidden_fragments,
         };
         let passed = criteria.found
             && criteria.summary_match
             && criteria.kind_ok
+            && criteria.contested_ok
             && criteria.support_ok
             && criteria.trusted_support_ok
             && criteria.confidence_ok

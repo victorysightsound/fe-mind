@@ -229,6 +229,16 @@ pub struct KnowledgeObject {
     pub support_count: usize,
     /// Number of trusted or normal-trust supports in the chosen cluster.
     pub trusted_support_count: usize,
+    /// Whether another qualified summary cluster competes with this one.
+    pub contested: bool,
+    /// Number of competing qualified summary clusters for the same knowledge key.
+    pub competing_summary_count: usize,
+    /// Strongest competing summary text when the reflected knowledge is contested.
+    pub strongest_competing_summary: Option<String>,
+    /// Support count for the strongest competing summary cluster.
+    pub strongest_competing_support_count: usize,
+    /// Trusted support count for the strongest competing summary cluster.
+    pub strongest_competing_trusted_support_count: usize,
     /// Database row IDs of supporting memories.
     pub source_ids: Vec<i64>,
     /// When the knowledge object was generated.
@@ -257,6 +267,11 @@ pub struct PersistedKnowledgeSummary {
     pub confidence: CompositionConfidence,
     pub support_count: usize,
     pub trusted_support_count: usize,
+    pub contested: bool,
+    pub competing_summary_count: usize,
+    pub strongest_competing_summary: Option<String>,
+    pub strongest_competing_support_count: usize,
+    pub strongest_competing_trusted_support_count: usize,
     pub source_ids: Vec<i64>,
     pub generated_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -268,6 +283,7 @@ pub struct PersistedKnowledgeSummary {
 pub enum ReflectionLifecycleStatus {
     Current,
     Superseded,
+    Retired,
 }
 
 impl ReflectionLifecycleStatus {
@@ -275,11 +291,13 @@ impl ReflectionLifecycleStatus {
         match self {
             Self::Current => "current",
             Self::Superseded => "superseded",
+            Self::Retired => "retired",
         }
     }
 
     fn from_metadata_value(value: Option<&str>) -> Self {
         match value {
+            Some(value) if value.eq_ignore_ascii_case("retired") => Self::Retired,
             Some(value) if value.eq_ignore_ascii_case("superseded") => Self::Superseded,
             _ => Self::Current,
         }
@@ -298,7 +316,11 @@ pub struct ReflectionRefreshPolicy {
     pub max_age: Option<Duration>,
     pub min_support_growth: usize,
     pub min_trusted_support_growth: usize,
+    pub min_support_drop: usize,
+    pub min_trusted_support_drop: usize,
     pub refresh_on_summary_change: bool,
+    pub refresh_on_competing_trusted_summary: bool,
+    pub retire_when_no_longer_qualified: bool,
 }
 
 impl Default for ReflectionRefreshPolicy {
@@ -307,7 +329,11 @@ impl Default for ReflectionRefreshPolicy {
             max_age: Some(Duration::hours(24)),
             min_support_growth: 1,
             min_trusted_support_growth: 1,
+            min_support_drop: 1,
+            min_trusted_support_drop: 1,
             refresh_on_summary_change: true,
+            refresh_on_competing_trusted_summary: true,
+            retire_when_no_longer_qualified: true,
         }
     }
 }
@@ -320,6 +346,10 @@ pub enum ReflectionRefreshReason {
     SummaryChanged,
     SupportGrowth,
     TrustedSupportGrowth,
+    SupportWeakened,
+    TrustedSupportWeakened,
+    CompetingTrustedSummary,
+    NoLongerQualifies,
 }
 
 impl ReflectionRefreshReason {
@@ -330,7 +360,33 @@ impl ReflectionRefreshReason {
             Self::SummaryChanged => "summary-changed",
             Self::SupportGrowth => "support-growth",
             Self::TrustedSupportGrowth => "trusted-support-growth",
+            Self::SupportWeakened => "support-weakened",
+            Self::TrustedSupportWeakened => "trusted-support-weakened",
+            Self::CompetingTrustedSummary => "competing-trusted-summary",
+            Self::NoLongerQualifies => "no-longer-qualifies",
         }
+    }
+}
+
+/// Action implied by a reflection refresh plan item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ReflectionRefreshAction {
+    Persist,
+    Retire,
+}
+
+impl ReflectionRefreshAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Persist => "persist",
+            Self::Retire => "retire",
+        }
+    }
+}
+
+impl std::fmt::Display for ReflectionRefreshAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -343,7 +399,9 @@ impl std::fmt::Display for ReflectionRefreshReason {
 /// Planned refresh action for a reflected knowledge object.
 #[derive(Debug, Clone)]
 pub struct ReflectionRefreshPlanItem {
-    pub object: KnowledgeObject,
+    pub key: String,
+    pub action: ReflectionRefreshAction,
+    pub object: Option<KnowledgeObject>,
     pub current: Option<PersistedKnowledgeSummary>,
     pub reasons: Vec<ReflectionRefreshReason>,
 }
@@ -1264,23 +1322,40 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             .filter(|row| row.status == ReflectionLifecycleStatus::Current)
             .map(|row| (normalize_reflection_value(&row.key), row))
             .collect::<std::collections::HashMap<_, _>>();
-        let now = Utc::now();
-
-        let mut plan = reflected
+        let reflected_by_key = reflected
             .into_iter()
-            .map(|object| {
-                let current = current_by_key
-                    .get(&normalize_reflection_value(&object.key))
-                    .cloned();
-                let reasons = reflection_refresh_reasons(&object, current.as_ref(), policy, now);
+            .map(|object| (normalize_reflection_value(&object.key), object))
+            .collect::<std::collections::HashMap<_, _>>();
+        let now = Utc::now();
+        let keys = current_by_key
+            .keys()
+            .cloned()
+            .chain(reflected_by_key.keys().cloned())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        let mut plan = keys
+            .into_iter()
+            .map(|key| {
+                let current = current_by_key.get(&key).cloned();
+                let object = reflected_by_key.get(&key).cloned();
+                let reasons =
+                    reflection_refresh_reasons(object.as_ref(), current.as_ref(), policy, now);
+                let action = match (object.is_some(), current.is_some()) {
+                    (true, _) => ReflectionRefreshAction::Persist,
+                    (false, true) => ReflectionRefreshAction::Retire,
+                    (false, false) => ReflectionRefreshAction::Persist,
+                };
                 ReflectionRefreshPlanItem {
+                    key,
+                    action,
                     object,
                     current,
                     reasons,
                 }
             })
+            .filter(|item| !item.reasons.is_empty())
             .collect::<Vec<_>>();
-        plan.sort_by(|left, right| left.object.key.cmp(&right.object.key));
+        plan.sort_by(|left, right| left.key.cmp(&right.key));
         Ok(plan)
     }
 
@@ -1301,10 +1376,22 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             if item.reasons.is_empty() {
                 continue;
             }
-            if let Some(result) =
-                self.persist_reflected_knowledge_object_with(item.object, &mut record_builder)?
-            {
-                persisted.push(result);
+            match item.action {
+                ReflectionRefreshAction::Persist => {
+                    let Some(object) = item.object else {
+                        continue;
+                    };
+                    if let Some(result) =
+                        self.persist_reflected_knowledge_object_with(object, &mut record_builder)?
+                    {
+                        persisted.push(result);
+                    }
+                }
+                ReflectionRefreshAction::Retire => {
+                    if let Some(current) = item.current {
+                        self.retire_persisted_reflection(current.memory_id)?;
+                    }
+                }
             }
         }
 
@@ -2027,11 +2114,23 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let mut objects = buckets
             .into_iter()
             .filter_map(|(key, clusters)| {
-                clusters
+                let mut qualified = clusters
                     .into_iter()
                     .filter(|cluster| cluster.qualifies(config))
-                    .max_by(ReflectionCluster::compare_rank)
-                    .map(|cluster| cluster.into_knowledge_object(key, config, now))
+                    .collect::<Vec<_>>();
+                qualified.sort_by(|left, right| ReflectionCluster::compare_rank(right, left));
+                let mut qualified_iter = qualified.into_iter();
+                let winner = qualified_iter.next()?;
+                let runners_up = qualified_iter.collect::<Vec<_>>();
+                let strongest_competing = runners_up.first();
+                let competing_summary_count = runners_up.len();
+                Some(winner.into_knowledge_object(
+                    key,
+                    config,
+                    now,
+                    strongest_competing,
+                    competing_summary_count,
+                ))
             })
             .collect::<Vec<_>>();
 
@@ -2564,11 +2663,36 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 object.trusted_support_count.to_string(),
             );
             metadata.insert(
+                "reflection_contested".to_string(),
+                object.contested.to_string(),
+            );
+            metadata.insert(
+                "reflection_competing_summary_count".to_string(),
+                object.competing_summary_count.to_string(),
+            );
+            if let Some(summary) = &object.strongest_competing_summary {
+                metadata.insert(
+                    "reflection_strongest_competing_summary".to_string(),
+                    summary.clone(),
+                );
+            } else {
+                metadata.remove("reflection_strongest_competing_summary");
+            }
+            metadata.insert(
+                "reflection_strongest_competing_support_count".to_string(),
+                object.strongest_competing_support_count.to_string(),
+            );
+            metadata.insert(
+                "reflection_strongest_competing_trusted_support_count".to_string(),
+                object.strongest_competing_trusted_support_count.to_string(),
+            );
+            metadata.insert(
                 "reflection_generated_at".to_string(),
                 object.generated_at.to_rfc3339(),
             );
             metadata.remove("reflection_replaced_by");
             metadata.remove("reflection_superseded_at");
+            metadata.remove("reflection_retired_at");
 
             let metadata_json = serde_json::to_string(&metadata)?;
             let source_ids_json = serde_json::to_string(&object.source_ids)?;
@@ -2675,6 +2799,42 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         })
     }
 
+    fn retire_persisted_reflection(&self, memory_id: i64) -> Result<()> {
+        self.db.with_writer(|conn| {
+            let existing = conn.query_row(
+                "SELECT metadata_json FROM memories WHERE id = ?1",
+                [memory_id],
+                |row| row.get::<_, Option<String>>(0),
+            )?;
+            let Some(existing) = existing else {
+                return Ok(());
+            };
+            let mut metadata =
+                serde_json::from_str::<std::collections::HashMap<String, String>>(&existing)
+                    .unwrap_or_default();
+            let retired_at = Utc::now().to_rfc3339();
+            metadata.insert("reflection_status".to_string(), "retired".to_string());
+            metadata.insert("reflection_retired_at".to_string(), retired_at.clone());
+            metadata.remove("reflection_replaced_by");
+            metadata.remove("reflection_superseded_at");
+            let metadata_json = serde_json::to_string(&metadata)?;
+            conn.execute(
+                "UPDATE memories
+                 SET metadata_json = ?1,
+                     valid_until = ?2
+                 WHERE id = ?3",
+                rusqlite::params![metadata_json, retired_at, memory_id],
+            )?;
+            conn.execute(
+                "DELETE FROM memory_relations
+                 WHERE source_id = ?1
+                   AND relation = ?2",
+                rusqlite::params![memory_id, crate::memory::RelationType::ValidatedBy.as_str()],
+            )?;
+            Ok(())
+        })
+    }
+
     fn persist_reflected_knowledge_object_with<F>(
         &self,
         object: KnowledgeObject,
@@ -2766,6 +2926,25 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                         .unwrap_or(0),
                     trusted_support_count: metadata
                         .get("reflection_trusted_support_count")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0),
+                    contested: metadata
+                        .get("reflection_contested")
+                        .and_then(|value| value.parse::<bool>().ok())
+                        .unwrap_or(false),
+                    competing_summary_count: metadata
+                        .get("reflection_competing_summary_count")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0),
+                    strongest_competing_summary: metadata
+                        .get("reflection_strongest_competing_summary")
+                        .cloned(),
+                    strongest_competing_support_count: metadata
+                        .get("reflection_strongest_competing_support_count")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0),
+                    strongest_competing_trusted_support_count: metadata
+                        .get("reflection_strongest_competing_trusted_support_count")
                         .and_then(|value| value.parse::<usize>().ok())
                         .unwrap_or(0),
                     source_ids: source_ids_raw
@@ -2982,7 +3161,7 @@ impl ReflectionCluster {
             && self.trusted_support_count >= config.min_trusted_support_count
     }
 
-    fn confidence(&self, config: &ReflectionConfig) -> CompositionConfidence {
+    fn base_confidence(&self, config: &ReflectionConfig) -> CompositionConfidence {
         if self.support_count() >= config.min_support_count
             && self.trusted_support_count >= config.min_trusted_support_count.max(1) + 1
         {
@@ -2999,8 +3178,23 @@ impl ReflectionCluster {
         key: String,
         config: &ReflectionConfig,
         generated_at: DateTime<Utc>,
+        strongest_competing: Option<&ReflectionCluster>,
+        competing_summary_count: usize,
     ) -> KnowledgeObject {
-        let confidence = self.confidence(config);
+        let contested = competing_summary_count > 0;
+        let strongest_competing_summary =
+            strongest_competing.map(|cluster| cluster.summary.clone());
+        let strongest_competing_support_count =
+            strongest_competing.map_or(0, ReflectionCluster::support_count);
+        let strongest_competing_trusted_support_count =
+            strongest_competing.map_or(0, |cluster| cluster.trusted_support_count);
+        let mut confidence = self.base_confidence(config);
+        if strongest_competing_trusted_support_count > 0 {
+            confidence = match confidence {
+                CompositionConfidence::High => CompositionConfidence::Medium,
+                other => other,
+            };
+        }
         let support_count = self.support_count();
         let trusted_support_count = self.trusted_support_count;
         KnowledgeObject {
@@ -3010,6 +3204,11 @@ impl ReflectionCluster {
             confidence,
             support_count,
             trusted_support_count,
+            contested,
+            competing_summary_count,
+            strongest_competing_summary,
+            strongest_competing_support_count,
+            strongest_competing_trusted_support_count,
             source_ids: self.source_ids,
             generated_at,
         }
@@ -3175,51 +3374,84 @@ fn parse_temporal(value: &str) -> Option<DateTime<Utc>> {
 }
 
 fn reflection_refresh_reasons(
-    object: &KnowledgeObject,
+    object: Option<&KnowledgeObject>,
     current: Option<&PersistedKnowledgeSummary>,
     policy: &ReflectionRefreshPolicy,
     now: DateTime<Utc>,
 ) -> Vec<ReflectionRefreshReason> {
-    let Some(current) = current else {
-        return vec![ReflectionRefreshReason::MissingPersisted];
-    };
+    match (object, current) {
+        (Some(_), None) => return vec![ReflectionRefreshReason::MissingPersisted],
+        (None, Some(_)) if policy.retire_when_no_longer_qualified => {
+            return vec![ReflectionRefreshReason::NoLongerQualifies];
+        }
+        (None, Some(_)) | (None, None) => return Vec::new(),
+        (Some(object), Some(current)) => {
+            let mut reasons = Vec::new();
 
-    let mut reasons = Vec::new();
-
-    if policy.refresh_on_summary_change
-        && normalize_reflection_value(&current.summary)
-            != normalize_reflection_value(&object.summary)
-    {
-        reasons.push(ReflectionRefreshReason::SummaryChanged);
-    }
-
-    if object.support_count
-        >= current
-            .support_count
-            .saturating_add(policy.min_support_growth.max(1))
-    {
-        reasons.push(ReflectionRefreshReason::SupportGrowth);
-    }
-
-    if object.trusted_support_count
-        >= current
-            .trusted_support_count
-            .saturating_add(policy.min_trusted_support_growth.max(1))
-    {
-        reasons.push(ReflectionRefreshReason::TrustedSupportGrowth);
-    }
-
-    if let Some(max_age) = policy.max_age {
-        if let Some(generated_at) = current.generated_at {
-            if now.signed_duration_since(generated_at) >= max_age {
-                reasons.push(ReflectionRefreshReason::StaleByAge);
+            if policy.refresh_on_summary_change
+                && normalize_reflection_value(&current.summary)
+                    != normalize_reflection_value(&object.summary)
+            {
+                reasons.push(ReflectionRefreshReason::SummaryChanged);
             }
-        } else {
-            reasons.push(ReflectionRefreshReason::StaleByAge);
+
+            if object.support_count
+                >= current
+                    .support_count
+                    .saturating_add(policy.min_support_growth.max(1))
+            {
+                reasons.push(ReflectionRefreshReason::SupportGrowth);
+            }
+
+            if object.trusted_support_count
+                >= current
+                    .trusted_support_count
+                    .saturating_add(policy.min_trusted_support_growth.max(1))
+            {
+                reasons.push(ReflectionRefreshReason::TrustedSupportGrowth);
+            }
+
+            if current.support_count
+                >= object
+                    .support_count
+                    .saturating_add(policy.min_support_drop.max(1))
+            {
+                reasons.push(ReflectionRefreshReason::SupportWeakened);
+            }
+
+            if current.trusted_support_count
+                >= object
+                    .trusted_support_count
+                    .saturating_add(policy.min_trusted_support_drop.max(1))
+            {
+                reasons.push(ReflectionRefreshReason::TrustedSupportWeakened);
+            }
+
+            if policy.refresh_on_competing_trusted_summary
+                && object.strongest_competing_trusted_support_count > 0
+                && (!current.contested
+                    || current.strongest_competing_summary != object.strongest_competing_summary
+                    || current.strongest_competing_support_count
+                        != object.strongest_competing_support_count
+                    || current.strongest_competing_trusted_support_count
+                        != object.strongest_competing_trusted_support_count)
+            {
+                reasons.push(ReflectionRefreshReason::CompetingTrustedSummary);
+            }
+
+            if let Some(max_age) = policy.max_age {
+                if let Some(generated_at) = current.generated_at {
+                    if now.signed_duration_since(generated_at) >= max_age {
+                        reasons.push(ReflectionRefreshReason::StaleByAge);
+                    }
+                } else {
+                    reasons.push(ReflectionRefreshReason::StaleByAge);
+                }
+            }
+
+            reasons
         }
     }
-
-    reasons
 }
 
 fn compose_aggregation_answer(
@@ -5882,6 +6114,367 @@ mod tests {
                 .reasons
                 .contains(&ReflectionRefreshReason::StaleByAge)
         );
+    }
+
+    #[test]
+    fn reflection_refresh_plan_marks_competing_trusted_summaries() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        engine
+            .store(&rich_mem(
+                "Supported remote runtime path: run the remote embedding service as a native Windows scheduled task on the GPU host.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "system"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-remote-runtime"),
+                    (
+                        "knowledge_summary",
+                        "Run the remote embedding service as a native Windows scheduled task on the GPU host.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store support");
+        engine
+            .store(&rich_mem(
+                "Current supported remote runtime uses the native Windows scheduled task on the GPU host.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-remote-runtime"),
+                    (
+                        "knowledge_summary",
+                        "Run the remote embedding service as a native Windows scheduled task on the GPU host.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store support");
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        engine
+            .store(&rich_mem(
+                "Competing trusted note: run the remote embedding service inside WSL systemd on the GPU host.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "declared"),
+                    ("knowledge_key", "femind-remote-runtime"),
+                    (
+                        "knowledge_summary",
+                        "Run the remote embedding service inside WSL systemd on the GPU host.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store competing");
+
+        let plan = engine
+            .reflection_refresh_plan(
+                &ReflectionConfig {
+                    min_support_count: 1,
+                    min_trusted_support_count: 1,
+                    max_objects: 8,
+                },
+                &ReflectionRefreshPolicy::default(),
+            )
+            .expect("plan");
+
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].action, ReflectionRefreshAction::Persist);
+        assert!(
+            plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::CompetingTrustedSummary)
+        );
+        let object = plan[0].object.as_ref().expect("object");
+        assert!(object.contested);
+        assert_eq!(object.competing_summary_count, 1);
+        assert_eq!(
+            object.strongest_competing_summary.as_deref(),
+            Some("Run the remote embedding service inside WSL systemd on the GPU host.")
+        );
+    }
+
+    #[test]
+    fn reflection_refresh_plan_marks_support_weakened_when_support_drops() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        let support_one = match engine
+            .store(&rich_mem(
+                "Supported startup path: use the Windows Scheduled Task at logon.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "system"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store one")
+        {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+        let support_two = match engine
+            .store(&rich_mem(
+                "Project doc confirms the Windows Scheduled Task at logon is the supported startup path.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store two")
+        {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+        let support_three = match engine
+            .store(&rich_mem(
+                "Ops note also repeats the Windows Scheduled Task at logon startup path.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store three")
+        {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        engine
+            .database()
+            .with_writer(|conn| {
+                let metadata_json = conn.query_row(
+                    "SELECT metadata_json FROM memories WHERE id = ?1",
+                    [support_three],
+                    |row| row.get::<_, Option<String>>(0),
+                )?;
+                let mut metadata = metadata_json
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+                    .expect("metadata");
+                metadata.remove("knowledge_key");
+                metadata.remove("knowledge_summary");
+                metadata.remove("knowledge_kind");
+                conn.execute(
+                    "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
+                    rusqlite::params![
+                        serde_json::to_string(&metadata).expect("serialize"),
+                        support_three
+                    ],
+                )?;
+                Ok::<(), FemindError>(())
+            })
+            .expect("weaken support");
+
+        let plan = engine
+            .reflection_refresh_plan(
+                &ReflectionConfig::default(),
+                &ReflectionRefreshPolicy::default(),
+            )
+            .expect("plan");
+
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].action, ReflectionRefreshAction::Persist);
+        assert!(
+            plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::SupportWeakened)
+        );
+        assert!(
+            plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::TrustedSupportWeakened)
+        );
+        let object = plan[0].object.as_ref().expect("object");
+        assert_eq!(object.support_count, 2);
+        assert_eq!(object.trusted_support_count, 2);
+        assert_ne!(support_one, support_two);
+    }
+
+    #[test]
+    fn reflection_refresh_can_retire_current_rows_that_no_longer_qualify() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        let support_one = match engine
+            .store(&rich_mem(
+                "Supported startup path: use the Windows Scheduled Task at logon.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "system"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store one")
+        {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+        let support_two = match engine
+            .store(&rich_mem(
+                "Project doc confirms the Windows Scheduled Task at logon is the supported startup path.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("knowledge_key", "femind-startup-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the Windows Scheduled Task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store two")
+        {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        for memory_id in [support_one, support_two] {
+            engine
+                .database()
+                .with_writer(|conn| {
+                    let metadata_json = conn.query_row(
+                        "SELECT metadata_json FROM memories WHERE id = ?1",
+                        [memory_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )?;
+                    let mut metadata = metadata_json
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+                        .expect("metadata");
+                    metadata.remove("knowledge_key");
+                    metadata.remove("knowledge_summary");
+                    metadata.remove("knowledge_kind");
+                    conn.execute(
+                        "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
+                        rusqlite::params![
+                            serde_json::to_string(&metadata).expect("serialize"),
+                            memory_id
+                        ],
+                    )?;
+                    Ok::<(), FemindError>(())
+                })
+                .expect("drop support");
+        }
+
+        let plan = engine
+            .reflection_refresh_plan(
+                &ReflectionConfig::default(),
+                &ReflectionRefreshPolicy::default(),
+            )
+            .expect("plan");
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].action, ReflectionRefreshAction::Retire);
+        assert!(
+            plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::NoLongerQualifies)
+        );
+        assert!(plan[0].object.is_none());
+
+        let refreshed = engine
+            .refresh_reflected_knowledge_objects_with_policy(
+                &ReflectionConfig::default(),
+                &ReflectionRefreshPolicy::default(),
+                |object| {
+                    Some(RichTestMem {
+                        id: None,
+                        text: object.summary.clone(),
+                        created_at: object.generated_at,
+                        memory_type: MemoryType::Semantic,
+                        metadata: HashMap::new(),
+                    })
+                },
+            )
+            .expect("refresh");
+        assert!(refreshed.is_empty());
+        assert!(
+            engine
+                .reflected_knowledge_for_key("femind-startup-path")
+                .expect("lookup")
+                .is_none()
+        );
+        let retired = engine
+            .persisted_reflected_knowledge()
+            .expect("load persisted")
+            .into_iter()
+            .find(|row| row.key == "femind-startup-path")
+            .expect("retired row");
+        assert_eq!(retired.status, ReflectionLifecycleStatus::Retired);
     }
 
     #[test]

@@ -1457,5 +1457,79 @@
         ]
       }
     ]
+  },
+  {
+    "id": "reflection-contested-remote-runtime",
+    "title": "Reflection should mark contested stable summaries when trusted evidence conflicts",
+    "category": "reflection-stable-knowledge",
+    "goal": "When multiple qualified trusted summaries compete for the same knowledge key, FeMind should keep the stronger winner but mark the reflected object as contested.",
+    "records": [
+      {
+        "timestamp": "2026-03-30T11:00:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "knowledge_key": "femind-remote-runtime",
+          "knowledge_summary": "Run the remote embedding service as a native Windows scheduled task on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Supported remote runtime path: run the remote embedding service as a native Windows scheduled task on the GPU host."
+      },
+      {
+        "timestamp": "2026-03-30T11:05:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "knowledge_key": "femind-remote-runtime",
+          "knowledge_summary": "Run the remote embedding service as a native Windows scheduled task on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Current supported remote runtime uses the native Windows scheduled task on the GPU host."
+      },
+      {
+        "timestamp": "2026-03-30T11:08:00Z",
+        "source": "maintainer-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "maintainer",
+          "source_verification": "declared",
+          "knowledge_key": "femind-remote-runtime",
+          "knowledge_summary": "Run the remote embedding service inside WSL systemd on the GPU host.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Competing trusted note: run the remote embedding service inside WSL systemd on the GPU host."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 1,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_checks": [
+      {
+        "key": "femind-remote-runtime",
+        "expected_summary": "Run the remote embedding service as a native Windows scheduled task on the GPU host.",
+        "expected_kind": "stable-procedure",
+        "expected_contested": true,
+        "min_support_count": 2,
+        "min_trusted_support_count": 2,
+        "min_confidence": "medium",
+        "required_fragments": [
+          "native Windows scheduled task",
+          "GPU host"
+        ],
+        "forbidden_fragments": [
+          "WSL systemd"
+        ]
+      }
+    ]
   }
 ]
