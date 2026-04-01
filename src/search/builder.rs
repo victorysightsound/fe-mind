@@ -460,8 +460,8 @@ impl<'a, T: MemoryRecord> SearchBuilder<'a, T> {
         let intent = self
             .query_intent
             .unwrap_or_else(|| infer_query_intent(&self.query));
-        let current_state_signal =
-            query_requests_current_state(&self.query) || query_requests_operational_constraint(&self.query);
+        let current_state_signal = query_requests_current_state(&self.query)
+            || query_requests_operational_constraint(&self.query);
         let historical_state_signal =
             query_requests_historical_state(&self.query) && !current_state_signal;
         if !self.routing_enabled {
@@ -3600,7 +3600,10 @@ mod tests {
 
         assert_eq!(route.intent, QueryIntent::ExactDetail);
         assert_eq!(route.temporal_policy, TemporalPolicy::PreferNewer);
-        assert_eq!(route.state_conflict_policy, StateConflictPolicy::PreferCurrent);
+        assert_eq!(
+            route.state_conflict_policy,
+            StateConflictPolicy::PreferCurrent
+        );
         assert!(!matches!(route.mode, SearchMode::Keyword));
     }
 
