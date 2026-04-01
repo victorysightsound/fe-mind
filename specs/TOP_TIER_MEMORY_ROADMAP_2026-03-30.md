@@ -269,6 +269,11 @@ Current status after the 2026-03-30 trust/safety pass:
     should be able to answer with an explicit “still contested” summary shape
   - that composition should surface the strongest competing summary instead of
     hiding the disagreement behind lowered confidence alone
+  - apps should also be able to decide by authority domain whether contested
+    stable summaries should:
+    - surface the explicit contested answer
+    - surface the current winner plus a conflict note
+    - or abstain until the disagreement is resolved
 
 ### 6. Keep Evaluation Engine-Centric
 

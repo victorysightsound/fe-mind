@@ -125,6 +125,36 @@ impl std::fmt::Display for SourceAuthorityLevel {
     }
 }
 
+/// App-facing policy for how contested reflected summaries should compose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ContestedSummaryPolicy {
+    PreferContestedAnswer,
+    WinnerWithConflictNote,
+    AbstainUntilResolved,
+}
+
+impl ContestedSummaryPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PreferContestedAnswer => "prefer-contested-answer",
+            Self::WinnerWithConflictNote => "winner-with-conflict-note",
+            Self::AbstainUntilResolved => "abstain-until-resolved",
+        }
+    }
+}
+
+impl Default for ContestedSummaryPolicy {
+    fn default() -> Self {
+        Self::PreferContestedAnswer
+    }
+}
+
+impl std::fmt::Display for ContestedSummaryPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceAuthorityPolicy {
     pub domain: SourceAuthorityDomain,
@@ -178,6 +208,7 @@ pub struct SourceAuthorityDomainPolicy {
     pub primary_kinds: Vec<String>,
     pub delegated_kinds: Vec<String>,
     pub reference_kinds: Vec<String>,
+    pub contested_summary_policy: Option<ContestedSummaryPolicy>,
 }
 
 impl SourceAuthorityDomainPolicy {
@@ -192,6 +223,7 @@ impl SourceAuthorityDomainPolicy {
             primary_kinds: Vec::new(),
             delegated_kinds: Vec::new(),
             reference_kinds: Vec::new(),
+            contested_summary_policy: None,
         }
     }
 
@@ -234,12 +266,30 @@ impl SourceAuthorityDomainPolicy {
         self.reference_kinds.push(normalize_tag(&kind.into()));
         self
     }
+
+    pub fn with_contested_summary_policy(mut self, policy: ContestedSummaryPolicy) -> Self {
+        self.contested_summary_policy = Some(policy);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContestedSummaryDomainPolicy {
+    pub domain: SourceAuthorityDomain,
+    pub policy: ContestedSummaryPolicy,
+}
+
+impl ContestedSummaryDomainPolicy {
+    pub fn new(domain: SourceAuthorityDomain, policy: ContestedSummaryPolicy) -> Self {
+        Self { domain, policy }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceAuthorityRegistry {
     policies: Vec<SourceAuthorityPolicy>,
     kind_policies: Vec<SourceAuthorityKindPolicy>,
+    contested_summary_policies: Vec<ContestedSummaryDomainPolicy>,
 }
 
 impl SourceAuthorityRegistry {
@@ -255,6 +305,10 @@ impl SourceAuthorityRegistry {
         &self.kind_policies
     }
 
+    pub fn contested_summary_policies(&self) -> &[ContestedSummaryDomainPolicy] {
+        &self.contested_summary_policies
+    }
+
     pub fn with_policy(mut self, policy: SourceAuthorityPolicy) -> Self {
         self.add_policy(policy);
         self
@@ -267,6 +321,15 @@ impl SourceAuthorityRegistry {
 
     pub fn with_domain_policy(mut self, policy: SourceAuthorityDomainPolicy) -> Self {
         self.add_domain_policy(policy);
+        self
+    }
+
+    pub fn with_contested_summary_policy(
+        mut self,
+        domain: SourceAuthorityDomain,
+        policy: ContestedSummaryPolicy,
+    ) -> Self {
+        self.set_contested_summary_policy(domain, policy);
         self
     }
 
@@ -305,30 +368,41 @@ impl SourceAuthorityRegistry {
     }
 
     pub fn add_domain_policy(&mut self, policy: SourceAuthorityDomainPolicy) {
-        let domain = policy.domain;
+        let SourceAuthorityDomainPolicy {
+            domain,
+            authoritative_chains,
+            primary_chains,
+            delegated_chains,
+            reference_chains,
+            authoritative_kinds,
+            primary_kinds,
+            delegated_kinds,
+            reference_kinds,
+            contested_summary_policy,
+        } = policy;
 
-        for chain in policy.authoritative_chains {
+        for chain in authoritative_chains {
             self.add_policy(SourceAuthorityPolicy::new(
                 domain,
                 chain,
                 SourceAuthorityLevel::Authoritative,
             ));
         }
-        for chain in policy.primary_chains {
+        for chain in primary_chains {
             self.add_policy(SourceAuthorityPolicy::new(
                 domain,
                 chain,
                 SourceAuthorityLevel::Primary,
             ));
         }
-        for chain in policy.delegated_chains {
+        for chain in delegated_chains {
             self.add_policy(SourceAuthorityPolicy::new(
                 domain,
                 chain,
                 SourceAuthorityLevel::Delegated,
             ));
         }
-        for chain in policy.reference_chains {
+        for chain in reference_chains {
             self.add_policy(SourceAuthorityPolicy::new(
                 domain,
                 chain,
@@ -336,33 +410,37 @@ impl SourceAuthorityRegistry {
             ));
         }
 
-        for kind in policy.authoritative_kinds {
+        for kind in authoritative_kinds {
             self.add_kind_policy(SourceAuthorityKindPolicy::new(
                 domain,
                 kind,
                 SourceAuthorityLevel::Authoritative,
             ));
         }
-        for kind in policy.primary_kinds {
+        for kind in primary_kinds {
             self.add_kind_policy(SourceAuthorityKindPolicy::new(
                 domain,
                 kind,
                 SourceAuthorityLevel::Primary,
             ));
         }
-        for kind in policy.delegated_kinds {
+        for kind in delegated_kinds {
             self.add_kind_policy(SourceAuthorityKindPolicy::new(
                 domain,
                 kind,
                 SourceAuthorityLevel::Delegated,
             ));
         }
-        for kind in policy.reference_kinds {
+        for kind in reference_kinds {
             self.add_kind_policy(SourceAuthorityKindPolicy::new(
                 domain,
                 kind,
                 SourceAuthorityLevel::Reference,
             ));
+        }
+
+        if let Some(policy) = contested_summary_policy {
+            self.set_contested_summary_policy(domain, policy);
         }
     }
 
@@ -418,6 +496,25 @@ impl SourceAuthorityRegistry {
         self.set_kind(domain, kind, SourceAuthorityLevel::Primary)
     }
 
+    pub fn set_contested_summary_policy(
+        &mut self,
+        domain: SourceAuthorityDomain,
+        policy: ContestedSummaryPolicy,
+    ) -> &mut Self {
+        if let Some(existing) = self
+            .contested_summary_policies
+            .iter_mut()
+            .find(|existing| existing.domain == domain)
+        {
+            existing.policy = policy;
+            return self;
+        }
+
+        self.contested_summary_policies
+            .push(ContestedSummaryDomainPolicy::new(domain, policy));
+        self
+    }
+
     pub fn level_for_chain(
         &self,
         domain: SourceAuthorityDomain,
@@ -444,6 +541,31 @@ impl SourceAuthorityRegistry {
             .map(|policy| policy.level)
             .max()
             .unwrap_or(SourceAuthorityLevel::Unknown)
+    }
+
+    pub fn contested_summary_policy_for_domain(
+        &self,
+        domain: SourceAuthorityDomain,
+    ) -> Option<ContestedSummaryPolicy> {
+        self.contested_summary_policies
+            .iter()
+            .find(|entry| entry.domain == domain)
+            .map(|entry| entry.policy)
+    }
+
+    pub fn contested_summary_policy_for_domains(
+        &self,
+        domains: &[SourceAuthorityDomain],
+    ) -> ContestedSummaryPolicy {
+        domains
+            .iter()
+            .filter_map(|domain| self.contested_summary_policy_for_domain(*domain))
+            .max_by_key(|policy| match policy {
+                ContestedSummaryPolicy::WinnerWithConflictNote => 1u8,
+                ContestedSummaryPolicy::PreferContestedAnswer => 2u8,
+                ContestedSummaryPolicy::AbstainUntilResolved => 3u8,
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -580,7 +702,9 @@ pub(crate) fn source_authority_rank_for_domains(
     domains: &[SourceAuthorityDomain],
     registry: Option<&SourceAuthorityRegistry>,
 ) -> u8 {
-    authority_rank_for_level(source_authority_level_for_domains(record, domains, registry))
+    authority_rank_for_level(source_authority_level_for_domains(
+        record, domains, registry,
+    ))
 }
 
 pub(crate) fn source_authority_score_sum_for_domains(
@@ -591,11 +715,13 @@ pub(crate) fn source_authority_score_sum_for_domains(
     domains
         .iter()
         .copied()
-        .map(|domain| authority_rank_for_level(source_authority_level_for_domain(
-            record,
-            Some(domain),
-            registry,
-        )) as u16)
+        .map(|domain| {
+            authority_rank_for_level(source_authority_level_for_domain(
+                record,
+                Some(domain),
+                registry,
+            )) as u16
+        })
         .sum()
 }
 
@@ -1064,8 +1190,9 @@ mod tests {
                 SourceAuthorityLevel::Reference,
             ));
 
-        let domains =
-            infer_authority_domains("Which runtime startup path should the service use through the private endpoint on the GPU host now?");
+        let domains = infer_authority_domains(
+            "Which runtime startup path should the service use through the private endpoint on the GPU host now?",
+        );
 
         assert_eq!(
             source_authority_rank_for_domains(&record, &domains, Some(&registry)),
@@ -1074,6 +1201,31 @@ mod tests {
         assert_eq!(
             source_authority_score_sum_for_domains(&record, &domains, Some(&registry)),
             210
+        );
+    }
+
+    #[test]
+    fn contested_summary_policy_uses_strictest_matching_domain_policy() {
+        let registry = SourceAuthorityRegistry::new()
+            .with_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_contested_summary_policy(ContestedSummaryPolicy::WinnerWithConflictNote),
+            )
+            .with_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Security)
+                    .with_contested_summary_policy(ContestedSummaryPolicy::AbstainUntilResolved),
+            );
+
+        assert_eq!(
+            registry.contested_summary_policy_for_domains(&[
+                SourceAuthorityDomain::RuntimeOps,
+                SourceAuthorityDomain::Security,
+            ]),
+            ContestedSummaryPolicy::AbstainUntilResolved
+        );
+        assert_eq!(
+            registry.contested_summary_policy_for_domains(&[SourceAuthorityDomain::RuntimeOps]),
+            ContestedSummaryPolicy::WinnerWithConflictNote
         );
     }
 }

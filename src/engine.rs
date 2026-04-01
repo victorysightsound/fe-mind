@@ -12,17 +12,17 @@ use crate::memory::MemoryStore;
 use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{
-    CompositeScorer, ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
-    ReviewApprovalTemplate, ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity,
-    ReviewStatus, SecretClass, SourceAuthorityDomain, SourceAuthorityDomainPolicy,
-    SourceAuthorityKindPolicy, SourceAuthorityPolicy, SourceAuthorityRegistry,
-    SourceProvenanceScorer, SourceTrustScorer, detect_review_flag, effective_review_status,
-    evidence_contains_secret_material, infer_authority_domain, infer_authority_domains,
-    query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
-    query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
-    review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
-    source_authority_rank_for_domains, source_authority_score_sum_for_domains,
-    source_provenance_rank, source_trust_level,
+    CompositeScorer, ContestedSummaryPolicy, ImportanceScorer, MemoryTypeScorer,
+    ProceduralSafetyScorer, RecencyScorer, ReviewApprovalTemplate, ReviewPolicyClass,
+    ReviewSafetyScorer, ReviewScope, ReviewSeverity, ReviewStatus, SecretClass,
+    SourceAuthorityDomain, SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy,
+    SourceAuthorityPolicy, SourceAuthorityRegistry, SourceProvenanceScorer, SourceTrustScorer,
+    detect_review_flag, effective_review_status, evidence_contains_secret_material,
+    infer_authority_domain, infer_authority_domains, query_requests_private_infra_guidance,
+    query_requests_secret_location_or_reference, query_requests_sensitive_secret_detail,
+    redact_secret_material, review_expires_at, review_policy_class_matches_query,
+    review_scope_matches_query, secret_class_from_metadata, source_authority_rank_for_domains,
+    source_authority_score_sum_for_domains, source_provenance_rank, source_trust_level,
 };
 use crate::search::StableSummaryPolicy;
 use crate::search::builder::SearchBuilder;
@@ -1344,8 +1344,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let normalized_key = normalize_reflection_value(key);
         let mut rows = self.load_persisted_reflected_knowledge()?;
         rows.retain(|row| {
-            normalize_reflection_value(&row.key) == normalized_key
-                && row.status.is_active()
+            normalize_reflection_value(&row.key) == normalized_key && row.status.is_active()
         });
         rows.sort_by(|left, right| right.created_at.cmp(&left.created_at));
         Ok(rows.into_iter().next())
@@ -2356,11 +2355,14 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
 
         let top = select_best_evidence(query, &evidence, self.authority_registry.as_ref());
-        let has_active_reflected_summary = matches!(
-            route.intent,
-            crate::search::QueryIntent::StableSummary
-        ) && select_current_reflection_evidence(query, &evidence, self.authority_registry.as_ref())
-            .is_some();
+        let has_active_reflected_summary =
+            matches!(route.intent, crate::search::QueryIntent::StableSummary)
+                && select_current_reflection_evidence(
+                    query,
+                    &evidence,
+                    self.authority_registry.as_ref(),
+                )
+                .is_some();
         if evidence_explicitly_lacks_requested_detail(query, &evidence) {
             return Ok(ComposedAnswerResult {
                 answer: "I don’t have the exact grounded detail needed to answer that.".to_string(),
@@ -2393,7 +2395,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             });
         }
 
-        let (answer, kind, basis, confidence, rationale) = if is_yes_no_query(query) {
+        let (answer, kind, basis, confidence, abstained, rationale) = if is_yes_no_query(query) {
             let (answer, kind, confidence, rationale) =
                 compose_yes_no_answer(query, &evidence, self.authority_registry.as_ref());
             (
@@ -2401,6 +2403,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 kind,
                 CompositionEvidenceBasis::Source,
                 confidence,
+                false,
                 rationale,
             )
         } else if matches!(route.intent, crate::search::QueryIntent::StableSummary) {
@@ -2421,6 +2424,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 kind,
                 CompositionEvidenceBasis::Source,
                 confidence,
+                false,
                 rationale,
             )
         } else if requires_strict_grounding {
@@ -2429,6 +2433,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 "direct",
                 CompositionEvidenceBasis::Source,
                 CompositionConfidence::High,
+                false,
                 "grounded-detail",
             )
         } else {
@@ -2437,6 +2442,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 "direct",
                 CompositionEvidenceBasis::Source,
                 CompositionConfidence::Medium,
+                false,
                 "top-evidence",
             )
         };
@@ -2448,7 +2454,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             kind,
             basis,
             confidence,
-            abstained: false,
+            abstained,
             rationale,
             total_matches: evidence.len(),
             distinct_match_count: evidence.len(),
@@ -3872,6 +3878,7 @@ fn compose_stable_summary_answer(
     &'static str,
     CompositionEvidenceBasis,
     CompositionConfidence,
+    bool,
     &'static str,
 ) {
     let current_reflection =
@@ -3889,6 +3896,7 @@ fn compose_stable_summary_answer(
                 } else {
                     CompositionConfidence::High
                 },
+                false,
                 "source-summary-policy",
             );
         }
@@ -3901,6 +3909,7 @@ fn compose_stable_summary_answer(
                 "stable-summary",
                 CompositionEvidenceBasis::Reflected,
                 reflection_confidence(reflection),
+                false,
                 "reflected-fallback-no-source",
             );
         }
@@ -3914,6 +3923,58 @@ fn compose_stable_summary_answer(
         let is_contested = reflection_is_contested(reflection);
 
         if is_contested {
+            let contested_policy =
+                contested_summary_policy_for_match(query, reflection, authority_registry);
+
+            if matches!(
+                contested_policy,
+                ContestedSummaryPolicy::AbstainUntilResolved
+            ) {
+                return (
+                    compose_contested_abstention_text(&summary, competing_summary.as_deref()),
+                    "abstain",
+                    CompositionEvidenceBasis::Reflected,
+                    CompositionConfidence::Low,
+                    true,
+                    "contested-abstain-policy",
+                );
+            }
+
+            if matches!(
+                contested_policy,
+                ContestedSummaryPolicy::WinnerWithConflictNote
+            ) {
+                if query_requests_evidence_citation(query) {
+                    if let Some(source) = best_source {
+                        return (
+                            compose_winner_with_conflict_note_text(
+                                &summary,
+                                competing_summary.as_deref(),
+                                Some(source.text.trim()),
+                            ),
+                            "stable-summary",
+                            CompositionEvidenceBasis::Blended,
+                            reflection_confidence,
+                            false,
+                            "winner-with-conflict-note",
+                        );
+                    }
+                }
+
+                return (
+                    compose_winner_with_conflict_note_text(
+                        &summary,
+                        competing_summary.as_deref(),
+                        None,
+                    ),
+                    "stable-summary",
+                    CompositionEvidenceBasis::Reflected,
+                    reflection_confidence,
+                    false,
+                    "winner-with-conflict-note",
+                );
+            }
+
             if query_requests_evidence_citation(query) {
                 if let Some(source) = best_source {
                     return (
@@ -3925,20 +3986,18 @@ fn compose_stable_summary_answer(
                         "stable-summary",
                         CompositionEvidenceBasis::Blended,
                         reflection_confidence,
+                        false,
                         "contested-reflected-summary-with-support",
                     );
                 }
             }
 
             return (
-                compose_contested_stable_summary_text(
-                    &summary,
-                    competing_summary.as_deref(),
-                    None,
-                ),
+                compose_contested_stable_summary_text(&summary, competing_summary.as_deref(), None),
                 "stable-summary",
                 CompositionEvidenceBasis::Reflected,
                 reflection_confidence,
+                false,
                 "contested-reflected-summary",
             );
         }
@@ -3954,6 +4013,7 @@ fn compose_stable_summary_answer(
                     } else {
                         reflection_confidence
                     },
+                    false,
                     "reflected-summary-with-support",
                 );
             }
@@ -3964,6 +4024,7 @@ fn compose_stable_summary_answer(
             "stable-summary",
             CompositionEvidenceBasis::Reflected,
             reflection_confidence,
+            false,
             "reflected-summary",
         );
     }
@@ -3979,6 +4040,7 @@ fn compose_stable_summary_answer(
         } else {
             CompositionConfidence::High
         },
+        false,
         "source-summary-fallback",
     )
 }
@@ -4038,8 +4100,7 @@ fn is_current_reflection_match(candidate: &AggregatedMatch) -> bool {
             .metadata
             .get("reflection_status")
             .is_none_or(|value| {
-                value.eq_ignore_ascii_case("current")
-                    || value.eq_ignore_ascii_case("contested")
+                value.eq_ignore_ascii_case("current") || value.eq_ignore_ascii_case("contested")
             })
 }
 
@@ -4091,6 +4152,68 @@ fn compose_contested_stable_summary_text(
     }
 
     answer
+}
+
+fn compose_winner_with_conflict_note_text(
+    summary: &str,
+    competing_summary: Option<&str>,
+    support_text: Option<&str>,
+) -> String {
+    let mut answer = summary.to_string();
+    if let Some(competing) = competing_summary {
+        answer.push_str(" Note: authoritative guidance remains contested by: ");
+        answer.push_str(competing);
+    } else {
+        answer.push_str(" Note: authoritative guidance remains contested.");
+    }
+
+    if let Some(support_text) = support_text {
+        answer.push_str(" Supported by: ");
+        answer.push_str(support_text);
+    }
+
+    answer
+}
+
+fn compose_contested_abstention_text(summary: &str, competing_summary: Option<&str>) -> String {
+    match competing_summary {
+        Some(competing) => format!(
+            "I don’t have a single resolved stable summary yet because authoritative guidance remains contested between: {summary} and {competing}"
+        ),
+        None => format!(
+            "I don’t have a single resolved stable summary yet because authoritative guidance remains contested around: {summary}"
+        ),
+    }
+}
+
+fn contested_summary_policy_for_match(
+    query: &str,
+    reflection: &AggregatedMatch,
+    authority_registry: &SourceAuthorityRegistry,
+) -> ContestedSummaryPolicy {
+    let mut domains = reflection_match_authority_domains(reflection);
+    for domain in infer_authority_domains(query) {
+        if !domains.contains(&domain) {
+            domains.push(domain);
+        }
+    }
+
+    authority_registry.contested_summary_policy_for_domains(&domains)
+}
+
+fn reflection_match_authority_domains(candidate: &AggregatedMatch) -> Vec<SourceAuthorityDomain> {
+    let key = candidate
+        .metadata
+        .get("knowledge_key")
+        .map(String::as_str)
+        .unwrap_or("");
+    let summary = candidate
+        .metadata
+        .get("knowledge_summary")
+        .map(String::as_str)
+        .unwrap_or(candidate.text.as_str());
+
+    reflection_authority_domains(key, summary, &candidate.text)
 }
 
 fn reflection_confidence(candidate: &AggregatedMatch) -> CompositionConfidence {
@@ -4157,11 +4280,7 @@ fn evidence_selection_rank(
         0_u16
     };
 
-    trust_rank
-        + authority_rank
-        + provenance_rank
-        + scope_rank
-        + policy_rank
+    trust_rank + authority_rank + provenance_rank + scope_rank + policy_rank
         - negative_state_penalty
 }
 
@@ -4603,6 +4722,16 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
         kind: impl Into<String>,
     ) -> Self {
         Arc::make_mut(&mut self.authority_registry).set_primary_kind(domain, kind);
+        self
+    }
+
+    /// Control how contested reflected summaries should compose for one domain.
+    pub fn contested_summary_policy(
+        mut self,
+        domain: SourceAuthorityDomain,
+        policy: ContestedSummaryPolicy,
+    ) -> Self {
+        Arc::make_mut(&mut self.authority_registry).set_contested_summary_policy(domain, policy);
         self
     }
 
@@ -5475,15 +5604,232 @@ mod tests {
         assert_eq!(answer.basis, CompositionEvidenceBasis::Reflected);
         assert_eq!(answer.rationale, "contested-reflected-summary");
         assert!(answer.answer.contains("This remains contested."));
-        assert!(
-            answer
-                .answer
-                .contains("Use the native Windows scheduled task at logon to launch femind-embed-service.")
-        );
+        assert!(answer.answer.contains(
+            "Use the native Windows scheduled task at logon to launch femind-embed-service."
+        ));
         assert!(
             answer
                 .answer
                 .contains("Keep femind-embed-service running inside WSL systemd before the Windows session starts.")
+        );
+    }
+
+    #[test]
+    fn compose_answer_can_prefer_winner_with_conflict_note_for_contested_reflection() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_authoritative_chain("runtime-ops")
+                    .with_reference_chain("deployment-docs")
+                    .with_contested_summary_policy(ContestedSummaryPolicy::WinnerWithConflictNote),
+            )
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Deployment)
+                    .with_authoritative_chain("deployment-docs")
+                    .with_reference_chain("runtime-ops")
+                    .with_contested_summary_policy(ContestedSummaryPolicy::WinnerWithConflictNote),
+            )
+            .build()
+            .expect("build");
+
+        let at = |value: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .expect("timestamp")
+                .with_timezone(&Utc)
+        };
+
+        for (text, created_at, chain, summary) in [
+            (
+                "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service.",
+                "2026-03-31T18:10:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Runtime startup guidance repeats the native Windows scheduled task at logon.",
+                "2026-03-31T18:15:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+                "2026-03-31T17:50:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+            (
+                "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon.",
+                "2026-03-31T17:55:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+        ] {
+            engine
+                .store(&RichTestMem {
+                    id: None,
+                    text: text.into(),
+                    created_at: at(created_at),
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::from([
+                        ("source_trust".to_string(), "trusted".to_string()),
+                        ("source_kind".to_string(), "project-doc".to_string()),
+                        ("source_verification".to_string(), "verified".to_string()),
+                        ("source_chain".to_string(), chain.to_string()),
+                        (
+                            "knowledge_key".to_string(),
+                            "femind-runtime-startup-host-contested-winner-note".to_string(),
+                        ),
+                        ("knowledge_summary".to_string(), summary.to_string()),
+                        ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                    ]),
+                })
+                .expect("store support");
+        }
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: format!("Stable startup host choice: {}", object.summary),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "What is the current supported startup path for femind-embed-service?",
+                &AssemblyConfig::default(),
+                5,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "stable-summary");
+        assert_eq!(answer.basis, CompositionEvidenceBasis::Reflected);
+        assert_eq!(answer.rationale, "winner-with-conflict-note");
+        assert!(!answer.abstained);
+        assert!(answer.answer.starts_with(
+            "Use the native Windows scheduled task at logon to launch femind-embed-service."
+        ));
+        assert!(
+            answer
+                .answer
+                .contains("Note: authoritative guidance remains contested by:")
+        );
+        assert!(!answer.answer.contains("This remains contested."));
+    }
+
+    #[test]
+    fn compose_answer_can_abstain_when_contested_reflection_policy_requires_resolution() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_authoritative_chain("runtime-ops")
+                    .with_reference_chain("deployment-docs")
+                    .with_contested_summary_policy(ContestedSummaryPolicy::AbstainUntilResolved),
+            )
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Deployment)
+                    .with_authoritative_chain("deployment-docs")
+                    .with_reference_chain("runtime-ops")
+                    .with_contested_summary_policy(ContestedSummaryPolicy::AbstainUntilResolved),
+            )
+            .build()
+            .expect("build");
+
+        let at = |value: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .expect("timestamp")
+                .with_timezone(&Utc)
+        };
+
+        for (text, created_at, chain, summary) in [
+            (
+                "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service.",
+                "2026-03-31T18:10:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Runtime startup guidance repeats the native Windows scheduled task at logon.",
+                "2026-03-31T18:15:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+                "2026-03-31T17:50:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+            (
+                "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon.",
+                "2026-03-31T17:55:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+        ] {
+            engine
+                .store(&RichTestMem {
+                    id: None,
+                    text: text.into(),
+                    created_at: at(created_at),
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::from([
+                        ("source_trust".to_string(), "trusted".to_string()),
+                        ("source_kind".to_string(), "project-doc".to_string()),
+                        ("source_verification".to_string(), "verified".to_string()),
+                        ("source_chain".to_string(), chain.to_string()),
+                        (
+                            "knowledge_key".to_string(),
+                            "femind-runtime-startup-host-contested-abstain".to_string(),
+                        ),
+                        ("knowledge_summary".to_string(), summary.to_string()),
+                        ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                    ]),
+                })
+                .expect("store support");
+        }
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: format!("Stable startup host choice: {}", object.summary),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "What is the current supported startup path for femind-embed-service?",
+                &AssemblyConfig::default(),
+                5,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "abstain");
+        assert_eq!(answer.basis, CompositionEvidenceBasis::Reflected);
+        assert_eq!(answer.rationale, "contested-abstain-policy");
+        assert!(answer.abstained);
+        assert!(
+            answer
+                .answer
+                .contains("I don’t have a single resolved stable summary yet")
+        );
+        assert!(
+            answer
+                .answer
+                .contains("authoritative guidance remains contested")
         );
     }
 

@@ -217,12 +217,27 @@ The practical live-validation path is now established and repeatable:
     returning only the current winner text
   - that answer can surface both the current reflected summary and the
     strongest competing authoritative summary
+- contested reflected stable-summary composition is now application-facing by
+  authority domain too:
+  - `SourceAuthorityDomainPolicy::with_contested_summary_policy(...)`
+  - `MemoryEngineBuilder::contested_summary_policy(...)`
+  - per relevant domain, apps can now choose:
+    - `prefer-contested-answer`
+    - `winner-with-conflict-note`
+    - `abstain-until-resolved`
+  - when a query spans more than one relevant authority domain, FeMind uses
+    the strictest matching contested-summary policy
 - stable-summary promotion is now application-facing too:
   callers can choose `auto`, `prefer-reflection`, or `prefer-source` for
   stable-summary retrieval and composition instead of accepting only the
   engine default
 - the practical suite now asserts stable-summary policy explicitly, not just
   routed reflection preference
+- practical retrieval checks can now also assert:
+  - `expected_composed_rationale`
+  - `expected_abstained`
+  so contested-summary policy is proven in the engine-first loop, not only in
+  unit tests
 - routed retrieval now includes an explicit temporal policy:
   current-state queries mildly favor newer evidence, historical-state queries
   mildly favor older evidence, and exact-detail / abstention routes stay

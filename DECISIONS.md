@@ -2377,6 +2377,52 @@ time, not only in persistence metadata.
   practical `89/89` exact, practical `89/89` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 066: Make Contested Stable-Summary Composition Domain-Policy-Aware
+
+**Date:** 2026-04-01
+
+**Decision:** Extend app-facing authority-domain policy so contested
+stable-summary answers can be configured per domain to either:
+- surface the explicit contested answer
+- surface the current winner plus a conflict note
+- or abstain until the disagreement is resolved
+
+**Context:** Decision 065 made contested reflected knowledge explicit at answer
+time, but it still treated every domain the same. That was not enough for
+production applications:
+- some domains need user-facing continuity even when authoritative sources are
+  unresolved, so a winner plus conflict note is preferable
+- some domains are too sensitive to present any winner while disagreement
+  remains, so the right answer is an intentional abstention
+- the practical harness could prove contested composition generally, but not
+  that application policy actually changed the composed result
+
+For a top-tier memory engine, contested knowledge must be composable under app
+policy, not only under a single engine default.
+
+**Consequences:**
+- `SourceAuthorityDomainPolicy` now supports
+  `with_contested_summary_policy(...)`
+- `MemoryEngineBuilder` now exposes `contested_summary_policy(...)` as a
+  convenience surface
+- contested composition is now resolved across all relevant authority domains
+  for the reflected key and query, using the strictest matching policy when
+  multiple domains apply
+- stable-summary composition can now produce three domain-policy-aware
+  outcomes for contested reflected knowledge:
+  - `contested-reflected-summary`
+  - `winner-with-conflict-note`
+  - `contested-abstain-policy`
+- the practical harness now supports:
+  - `expected_composed_rationale`
+  - `expected_abstained`
+- the engine-first suite now includes:
+  - `reflection-contested-runtime-winner-note`
+  - `reflection-contested-runtime-abstain-until-resolved`
+- Remote-GPU validation is green after the change:
+  practical `93/93` exact, practical `93/93` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

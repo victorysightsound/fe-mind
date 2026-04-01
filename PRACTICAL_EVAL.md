@@ -466,6 +466,14 @@ Current validated baseline:
   - the answer can include both the current reflected summary and the
     strongest competing authoritative summary instead of only lowering
     confidence silently
+- contested stable-summary composition is now policy-aware by authority domain:
+  - grouped `authority_domain_policies` can set `contested_summary_policy`
+  - supported values are:
+    - `prefer-contested-answer`
+    - `winner-with-conflict-note`
+    - `abstain-until-resolved`
+  - when more than one relevant authority domain matches a contested query,
+    FeMind applies the strictest configured policy
 - callers can now set an explicit stable-summary promotion policy:
   - `auto`
   - `prefer-reflection`
@@ -477,6 +485,9 @@ Current validated baseline:
   - `expected_stable_summary_policy`
 - practical retrieval checks can now assert that with
   `expected_composed_basis`
+- practical retrieval checks can now also assert:
+  - `expected_composed_rationale`
+  - `expected_abstained`
 - practical retrieval checks can now fail explicitly when the routed intent or
   routed reflection preference is wrong, even if the answer still happens to
   pass by accident
@@ -485,8 +496,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `73/73`
-- latest reranker-aware `remote-fallback` ANN run passes `73/73`
+- latest reranker-aware `remote-fallback` exact run passes `93/93`
+- latest reranker-aware `remote-fallback` ANN run passes `93/93`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

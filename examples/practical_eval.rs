@@ -25,8 +25,7 @@ mod app {
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
     use femind::engine::{
         EngineConfig, KnowledgeObject, MemoryEngine, PersistedKnowledgeSummary, ReflectionConfig,
-        ReflectionRefreshPlanItem, ReflectionRefreshPolicy, ReviewItem,
-        VectorSearchMode,
+        ReflectionRefreshPlanItem, ReflectionRefreshPolicy, ReviewItem, VectorSearchMode,
     };
     #[cfg(feature = "api-llm")]
     use femind::llm::ApiLlmCallback;
@@ -43,8 +42,8 @@ mod app {
     use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
     use femind::scoring::redact_secret_material;
     use femind::scoring::{
-        SourceAuthorityDomain, SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy,
-        SourceAuthorityLevel,
+        ContestedSummaryPolicy, SourceAuthorityDomain, SourceAuthorityDomainPolicy,
+        SourceAuthorityKindPolicy, SourceAuthorityLevel,
     };
     use femind::search::{QueryIntent, QueryRoute, SearchMode, StableSummaryPolicy};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
@@ -176,6 +175,8 @@ mod app {
         delegated_kinds: Vec<String>,
         #[serde(default)]
         reference_kinds: Vec<String>,
+        #[serde(default)]
+        contested_summary_policy: Option<String>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -192,6 +193,10 @@ mod app {
         expected_reflection_preference: Option<String>,
         #[serde(default)]
         expected_composed_basis: Option<String>,
+        #[serde(default)]
+        expected_composed_rationale: Option<String>,
+        #[serde(default)]
+        expected_abstained: Option<bool>,
         #[serde(default)]
         stable_summary_policy: Option<String>,
         #[serde(default)]
@@ -880,6 +885,8 @@ mod app {
         stable_summary_policy_ok: bool,
         reflection_preference_ok: bool,
         composed_basis_ok: bool,
+        composed_rationale_ok: bool,
+        abstained_ok: bool,
         required_fragments_ok: bool,
         forbidden_fragments_ok: bool,
         required_sources_ok: bool,
@@ -906,6 +913,14 @@ mod app {
         expected_composed_basis: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         observed_composed_basis: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_composed_rationale: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_composed_rationale: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_abstained: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        observed_abstained: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
         min_observed_hits: Option<usize>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -2412,9 +2427,7 @@ mod app {
         check: &RetrievalCheck,
     ) -> (bool, RetrievalCriteriaReport) {
         let combined = match composed_answer {
-            Some(answer) if !answer.abstained && !answer.answer.trim().is_empty() => {
-                answer.answer.clone()
-            }
+            Some(answer) if !answer.answer.trim().is_empty() => answer.answer.clone(),
             _ => match composed_summary {
                 Some(summary) if !summary.trim().is_empty() => summary.to_string(),
                 _ => observed
@@ -2504,6 +2517,17 @@ mod app {
                 .as_ref()
                 .is_some_and(|observed| normalize(expected) == normalize(observed))
         });
+        let observed_composed_rationale = composed_answer.map(|answer| answer.rationale.clone());
+        let expected_composed_rationale = check.expected_composed_rationale.clone();
+        let composed_rationale_ok = expected_composed_rationale.as_ref().is_none_or(|expected| {
+            observed_composed_rationale
+                .as_ref()
+                .is_some_and(|observed| normalize(expected) == normalize(observed))
+        });
+        let observed_abstained = composed_answer.map(|answer| answer.abstained);
+        let expected_abstained = check.expected_abstained;
+        let abstained_ok = expected_abstained
+            .is_none_or(|expected| observed_abstained.is_some_and(|observed| observed == expected));
 
         let criteria = RetrievalCriteriaReport {
             expected_match,
@@ -2512,6 +2536,8 @@ mod app {
             stable_summary_policy_ok,
             reflection_preference_ok,
             composed_basis_ok,
+            composed_rationale_ok,
+            abstained_ok,
             required_fragments_ok,
             forbidden_fragments_ok,
             required_sources_ok,
@@ -2528,6 +2554,10 @@ mod app {
             observed_reflection_preference: Some(observed_reflection_preference),
             expected_composed_basis,
             observed_composed_basis,
+            expected_composed_rationale,
+            observed_composed_rationale,
+            expected_abstained,
+            observed_abstained,
             min_observed_hits: check.min_observed_hits,
             missing_required_fragments,
             present_forbidden_fragments,
@@ -2540,6 +2570,8 @@ mod app {
             && criteria.stable_summary_policy_ok
             && criteria.reflection_preference_ok
             && criteria.composed_basis_ok
+            && criteria.composed_rationale_ok
+            && criteria.abstained_ok
             && criteria.required_fragments_ok
             && criteria.forbidden_fragments_ok
             && criteria.required_sources_ok
@@ -3337,8 +3369,33 @@ mod app {
         for kind in &policy.reference_kinds {
             domain_policy = domain_policy.with_reference_kind(kind);
         }
+        if let Some(contested_summary_policy) = &policy.contested_summary_policy {
+            domain_policy = domain_policy.with_contested_summary_policy(
+                parse_contested_summary_policy(contested_summary_policy)?,
+            );
+        }
 
         Ok(domain_policy)
+    }
+
+    fn parse_contested_summary_policy(
+        value: &str,
+    ) -> Result<ContestedSummaryPolicy, Box<dyn std::error::Error>> {
+        match value.trim().to_lowercase().as_str() {
+            "prefer-contested-answer" | "prefer-contested" | "contested" => {
+                Ok(ContestedSummaryPolicy::PreferContestedAnswer)
+            }
+            "winner-with-conflict-note" | "winner-note" | "winner-with-note" => {
+                Ok(ContestedSummaryPolicy::WinnerWithConflictNote)
+            }
+            "abstain-until-resolved" | "abstain" => {
+                Ok(ContestedSummaryPolicy::AbstainUntilResolved)
+            }
+            other => Err(format!(
+                "unknown contested_summary_policy '{other}', expected prefer-contested-answer | winner-with-conflict-note | abstain-until-resolved"
+            )
+            .into()),
+        }
     }
 
     fn load_scenarios(path: &Path) -> Result<Vec<Scenario>, Box<dyn std::error::Error>> {
