@@ -2356,6 +2356,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
 
         let top = select_best_evidence(query, &evidence, self.authority_registry.as_ref());
+        let has_active_reflected_summary = matches!(
+            route.intent,
+            crate::search::QueryIntent::StableSummary
+        ) && select_current_reflection_evidence(query, &evidence, self.authority_registry.as_ref())
+            .is_some();
         if evidence_explicitly_lacks_requested_detail(query, &evidence) {
             return Ok(ComposedAnswerResult {
                 answer: "I don’t have the exact grounded detail needed to answer that.".to_string(),
@@ -2371,6 +2376,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         }
 
         if requires_strict_grounding
+            && !has_active_reflected_summary
             && !is_yes_no_query(query)
             && !crate::search::builder::lexical_grounding_ok(query, &top.text)
         {
@@ -3904,6 +3910,38 @@ fn compose_stable_summary_answer(
         let summary = reflection_summary_text(reflection)
             .unwrap_or_else(|| reflection.text.trim().to_string());
         let reflection_confidence = reflection_confidence(reflection);
+        let competing_summary = reflection_competing_summary_text(reflection);
+        let is_contested = reflection_is_contested(reflection);
+
+        if is_contested {
+            if query_requests_evidence_citation(query) {
+                if let Some(source) = best_source {
+                    return (
+                        compose_contested_stable_summary_text(
+                            &summary,
+                            competing_summary.as_deref(),
+                            Some(source.text.trim()),
+                        ),
+                        "stable-summary",
+                        CompositionEvidenceBasis::Blended,
+                        reflection_confidence,
+                        "contested-reflected-summary-with-support",
+                    );
+                }
+            }
+
+            return (
+                compose_contested_stable_summary_text(
+                    &summary,
+                    competing_summary.as_deref(),
+                    None,
+                ),
+                "stable-summary",
+                CompositionEvidenceBasis::Reflected,
+                reflection_confidence,
+                "contested-reflected-summary",
+            );
+        }
 
         if query_requests_evidence_citation(query) {
             if let Some(source) = best_source {
@@ -4016,6 +4054,43 @@ fn reflection_summary_text(candidate: &AggregatedMatch) -> Option<String> {
                 .to_string();
             (!trimmed.is_empty()).then_some(trimmed)
         })
+}
+
+fn reflection_is_contested(candidate: &AggregatedMatch) -> bool {
+    candidate
+        .metadata
+        .get("reflection_contested")
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or(false)
+}
+
+fn reflection_competing_summary_text(candidate: &AggregatedMatch) -> Option<String> {
+    candidate
+        .metadata
+        .get("reflection_strongest_competing_summary")
+        .cloned()
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn compose_contested_stable_summary_text(
+    summary: &str,
+    competing_summary: Option<&str>,
+    support_text: Option<&str>,
+) -> String {
+    let mut answer = if let Some(competing) = competing_summary {
+        format!(
+            "This remains contested. Current reflected guidance favors: {summary} Competing authoritative guidance says: {competing}"
+        )
+    } else {
+        format!("This remains contested. Current reflected guidance favors: {summary}")
+    };
+
+    if let Some(support_text) = support_text {
+        answer.push_str(" Supported by: ");
+        answer.push_str(support_text);
+    }
+
+    answer
 }
 
 fn reflection_confidence(candidate: &AggregatedMatch) -> CompositionConfidence {
@@ -5302,6 +5377,114 @@ mod tests {
         assert_eq!(answer.rationale, "reflected-summary-with-support");
         assert!(answer.answer.contains("Supported by:"));
         assert!(answer.answer.contains("Windows Scheduled Task"));
+    }
+
+    #[test]
+    fn compose_answer_surfaces_contested_reflection_state_explicitly() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_authoritative_chain("runtime-ops")
+                    .with_reference_chain("deployment-docs"),
+            )
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Deployment)
+                    .with_authoritative_chain("deployment-docs")
+                    .with_reference_chain("runtime-ops"),
+            )
+            .build()
+            .expect("build");
+
+        let at = |value: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .expect("timestamp")
+                .with_timezone(&Utc)
+        };
+
+        for (text, created_at, chain, summary) in [
+            (
+                "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service.",
+                "2026-03-31T18:10:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Runtime startup guidance repeats the native Windows scheduled task at logon.",
+                "2026-03-31T18:15:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+                "2026-03-31T17:50:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+            (
+                "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon.",
+                "2026-03-31T17:55:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+        ] {
+            engine
+                .store(&RichTestMem {
+                    id: None,
+                    text: text.into(),
+                    created_at: at(created_at),
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::from([
+                        ("source_trust".to_string(), "trusted".to_string()),
+                        ("source_kind".to_string(), "project-doc".to_string()),
+                        ("source_verification".to_string(), "verified".to_string()),
+                        ("source_chain".to_string(), chain.to_string()),
+                        (
+                            "knowledge_key".to_string(),
+                            "femind-runtime-startup-host-contested-compose".to_string(),
+                        ),
+                        ("knowledge_summary".to_string(), summary.to_string()),
+                        ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                    ]),
+                })
+                .expect("store support");
+        }
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: format!("Stable startup host choice: {}", object.summary),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "What is the current supported startup path for femind-embed-service?",
+                &AssemblyConfig::default(),
+                5,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "stable-summary");
+        assert_eq!(answer.basis, CompositionEvidenceBasis::Reflected);
+        assert_eq!(answer.rationale, "contested-reflected-summary");
+        assert!(answer.answer.contains("This remains contested."));
+        assert!(
+            answer
+                .answer
+                .contains("Use the native Windows scheduled task at logon to launch femind-embed-service.")
+        );
+        assert!(
+            answer
+                .answer
+                .contains("Keep femind-embed-service running inside WSL systemd before the Windows session starts.")
+        );
     }
 
     #[test]

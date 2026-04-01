@@ -460,6 +460,12 @@ Current validated baseline:
   - reflected knowledge
   - raw source evidence
   - a blend of reflected summary plus supporting source evidence
+- contested reflected stable-summary answers are now first-class too:
+  - when an active reflected row is contested, the composer can emit an
+    explicit “still contested” answer shape
+  - the answer can include both the current reflected summary and the
+    strongest competing authoritative summary instead of only lowering
+    confidence silently
 - callers can now set an explicit stable-summary promotion policy:
   - `auto`
   - `prefer-reflection`

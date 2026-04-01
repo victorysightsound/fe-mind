@@ -211,6 +211,12 @@ The practical live-validation path is now established and repeatable:
   - fall back to raw source evidence
   - blend reflected summaries with supporting source evidence for
     provenance-sensitive questions
+- contested reflected summaries now have an explicit composition path too:
+  - when an active reflected row is contested, stable-summary composition can
+    answer with a deliberate “still contested” summary instead of silently
+    returning only the current winner text
+  - that answer can surface both the current reflected summary and the
+    strongest competing authoritative summary
 - stable-summary promotion is now application-facing too:
   callers can choose `auto`, `prefer-reflection`, or `prefer-source` for
   stable-summary retrieval and composition instead of accepting only the

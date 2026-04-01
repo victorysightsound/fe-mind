@@ -3975,6 +3975,20 @@
           "WSL systemd"
         ]
       }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the current supported startup path for femind-embed-service?",
+        "expected_answer": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_intent": "stable-summary",
+        "expected_reflection_preference": "prefer-current",
+        "expected_composed_basis": "reflected",
+        "required_fragments": [
+          "This remains contested.",
+          "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "Keep femind-embed-service running inside WSL systemd before the Windows session starts."
+        ]
+      }
     ]
   },
   {

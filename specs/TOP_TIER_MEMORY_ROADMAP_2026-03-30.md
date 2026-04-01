@@ -263,6 +263,12 @@ Current status after the 2026-03-30 trust/safety pass:
     app-facing authority-domain policy
   - once that contested state exists, unchanged disagreement should become a
     stable no-op lifecycle outcome instead of generating repeated refresh work
+- reflected knowledge also needs contested composition, not only contested
+  storage:
+  - when a stable-summary query lands on a contested reflected row, the engine
+    should be able to answer with an explicit “still contested” summary shape
+  - that composition should surface the strongest competing summary instead of
+    hiding the disagreement behind lowered confidence alone
 
 ### 6. Keep Evaluation Engine-Centric
 

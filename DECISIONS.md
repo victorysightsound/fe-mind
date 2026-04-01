@@ -2338,6 +2338,45 @@ just a temporary flag on a winner row.
   practical `88/88` exact, practical `88/88` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 065: Compose Contested Stable Summaries Explicitly
+
+**Date:** 2026-03-31
+
+**Decision:** When a stable-summary query lands on an active contested
+reflected row, compose an explicit “still contested” answer instead of only
+returning the current winner text with lowered confidence.
+
+**Context:** Decision 064 made contested reflection a first-class active
+lifecycle state, but composition still treated those rows like ordinary
+reflected summaries. That left one important quality gap:
+- a contested reflected row was visible in storage and search, but the final
+  answer still looked like an unqualified winner unless the caller inspected
+  metadata separately
+- the practical suite could prove contested lifecycle state, but not that
+  users would actually see the disagreement in the composed answer
+- stable-summary routing also needed to stay grounded: reflected stable-summary
+  queries should be able to bypass literal top-hit grounding only when an
+  active reflected row actually exists, not for any source-only stable-summary
+  query
+
+For a top-tier memory engine, contested knowledge should be explicit at answer
+time, not only in persistence metadata.
+
+**Consequences:**
+- stable-summary composition now has a dedicated contested reflected path:
+  - the answer can say the summary is still contested
+  - the answer can surface both the current reflected summary and the strongest
+    competing authoritative summary
+- the strict-grounding exemption for stable-summary composition is now narrow:
+  it only applies when an active reflected row is present
+- the engine-first practical suite now proves this behavior in the contested
+  reflection lifecycle scenario through a real stable-summary retrieval query
+- targeted engine coverage now includes:
+  - `compose_answer_surfaces_contested_reflection_state_explicitly`
+- Remote-GPU validation is green after the change:
+  practical `89/89` exact, practical `89/89` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions
