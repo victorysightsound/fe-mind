@@ -25,7 +25,7 @@ mod app {
     use femind::embeddings::{CandleNativeBackend, LocalEmbeddingDevice};
     use femind::engine::{
         EngineConfig, KnowledgeObject, MemoryEngine, PersistedKnowledgeSummary, ReflectionConfig,
-        ReflectionLifecycleStatus, ReflectionRefreshPlanItem, ReflectionRefreshPolicy, ReviewItem,
+        ReflectionRefreshPlanItem, ReflectionRefreshPolicy, ReviewItem,
         VectorSearchMode,
     };
     #[cfg(feature = "api-llm")]
@@ -2789,15 +2789,20 @@ mod app {
         let current_after = observed_after
             .iter()
             .copied()
-            .find(|item| item.status == ReflectionLifecycleStatus::Current);
+            .find(|item| item.status.is_active());
         let latest_after = observed_after
             .iter()
             .copied()
             .max_by(|left, right| left.created_at.cmp(&right.created_at));
 
-        let action_ok = matched.is_some_and(|item| {
-            normalize(&item.action.to_string()) == normalize(&check.expected_action)
-        });
+        let expects_none = normalize(&check.expected_action) == "none";
+        let action_ok = if expects_none {
+            matched.is_none()
+        } else {
+            matched.is_some_and(|item| {
+                normalize(&item.action.to_string()) == normalize(&check.expected_action)
+            })
+        };
         let missing_required_reasons = matched
             .map(|item| {
                 check
@@ -2849,7 +2854,7 @@ mod app {
             });
 
         let criteria = ReflectionRefreshCriteriaReport {
-            found: matched.is_some(),
+            found: expects_none || matched.is_some(),
             action_ok,
             current_present_ok,
             current_summary_ok,

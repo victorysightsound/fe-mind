@@ -151,6 +151,7 @@ Each scenario should include:
 - optional `reflection_refresh_checks`, including:
   - `key`
   - `expected_action`
+  - `expected_action: "none"` when the correct outcome is no refresh-plan item
   - `required_reasons`
   - `forbidden_reasons`
   - `expected_current_present`
@@ -440,11 +441,17 @@ Current validated baseline:
   - keep the current reflected summary but mark it contested
   - or retire the persisted summary entirely through
     `retire_when_unresolved_authority_conflict`
+- persisted reflected rows can now also surface that outcome explicitly
+  through `reflection_status=contested`
+- active reflection checks now treat both `current` and `contested` rows as
+  live reflected knowledge
 - the practical harness can now validate those refresh decisions end to end:
   - apply follow-up records after the initial persisted reflection pass
   - mutate supporting records so support can genuinely weaken or disappear
   - assert refresh plan action/reasons
   - assert persisted current/retired lifecycle state after refresh execution
+  - assert that a contested reflected summary remains stable with no refresh
+    work when the disagreement itself has not materially changed
 - the engine now also routes a first-class `stable-summary` intent:
   supported/preferred/recommended/current durable-summary questions can
   automatically prefer current reflected rows without forcing callers to opt

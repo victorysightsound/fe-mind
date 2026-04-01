@@ -1542,7 +1542,7 @@ fn reflection_row_state(
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_else(|| "current".to_string());
     ReflectionRowState {
-        is_current_reflection: status == "current",
+        is_current_reflection: status == "current" || status == "contested",
         is_superseded_reflection: status == "superseded",
     }
 }

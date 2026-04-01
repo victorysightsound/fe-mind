@@ -261,6 +261,8 @@ Current status after the 2026-03-30 trust/safety pass:
     current reflection contested or retires it entirely
   - the engine-first suite should keep proving both outcomes under
     app-facing authority-domain policy
+  - once that contested state exists, unchanged disagreement should become a
+    stable no-op lifecycle outcome instead of generating repeated refresh work
 
 ### 6. Keep Evaluation Engine-Centric
 

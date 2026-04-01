@@ -298,6 +298,7 @@ pub struct PersistedKnowledgeSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReflectionLifecycleStatus {
     Current,
+    Contested,
     Superseded,
     Retired,
 }
@@ -306,15 +307,21 @@ impl ReflectionLifecycleStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Current => "current",
+            Self::Contested => "contested",
             Self::Superseded => "superseded",
             Self::Retired => "retired",
         }
+    }
+
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Current | Self::Contested)
     }
 
     fn from_metadata_value(value: Option<&str>) -> Self {
         match value {
             Some(value) if value.eq_ignore_ascii_case("retired") => Self::Retired,
             Some(value) if value.eq_ignore_ascii_case("superseded") => Self::Superseded,
+            Some(value) if value.eq_ignore_ascii_case("contested") => Self::Contested,
             _ => Self::Current,
         }
     }
@@ -1338,7 +1345,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let mut rows = self.load_persisted_reflected_knowledge()?;
         rows.retain(|row| {
             normalize_reflection_value(&row.key) == normalized_key
-                && row.status == ReflectionLifecycleStatus::Current
+                && row.status.is_active()
         });
         rows.sort_by(|left, right| right.created_at.cmp(&left.created_at));
         Ok(rows.into_iter().next())
@@ -1354,7 +1361,7 @@ impl<T: MemoryRecord> MemoryEngine<T> {
         let persisted = self.persisted_reflected_knowledge()?;
         let current_by_key = persisted
             .into_iter()
-            .filter(|row| row.status == ReflectionLifecycleStatus::Current)
+            .filter(|row| row.status.is_active())
             .map(|row| (normalize_reflection_value(&row.key), row))
             .collect::<std::collections::HashMap<_, _>>();
         let reflected_by_key = reflected
@@ -2712,7 +2719,14 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             metadata.insert("knowledge_key".to_string(), object.key.clone());
             metadata.insert("knowledge_summary".to_string(), object.summary.clone());
             metadata.insert("knowledge_kind".to_string(), object.kind.to_string());
-            metadata.insert("reflection_status".to_string(), "current".to_string());
+            metadata.insert(
+                "reflection_status".to_string(),
+                if object.unresolved_authority_conflict {
+                    ReflectionLifecycleStatus::Contested.as_str().to_string()
+                } else {
+                    ReflectionLifecycleStatus::Current.as_str().to_string()
+                },
+            );
             metadata.insert(
                 "reflection_confidence".to_string(),
                 object.confidence.as_str().to_string(),
@@ -3985,7 +3999,10 @@ fn is_current_reflection_match(candidate: &AggregatedMatch) -> bool {
         && candidate
             .metadata
             .get("reflection_status")
-            .is_none_or(|value| value.eq_ignore_ascii_case("current"))
+            .is_none_or(|value| {
+                value.eq_ignore_ascii_case("current")
+                    || value.eq_ignore_ascii_case("contested")
+            })
 }
 
 fn reflection_summary_text(candidate: &AggregatedMatch) -> Option<String> {
@@ -7268,6 +7285,193 @@ mod tests {
             plan[0]
                 .reasons
                 .contains(&ReflectionRefreshReason::UnresolvedAuthoritativeConflict)
+        );
+    }
+
+    #[test]
+    fn reflected_knowledge_for_key_returns_contested_rows_as_active() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_authoritative_chain("runtime-ops")
+                    .with_reference_chain("deployment-docs"),
+            )
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Deployment)
+                    .with_authoritative_chain("deployment-docs")
+                    .with_reference_chain("runtime-ops"),
+            )
+            .build()
+            .expect("build");
+
+        let at = |value: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .expect("timestamp")
+                .with_timezone(&Utc)
+        };
+
+        for (text, created_at, chain, summary) in [
+            (
+                "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service.",
+                "2026-03-31T18:10:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Runtime startup guidance repeats the native Windows scheduled task at logon.",
+                "2026-03-31T18:15:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+                "2026-03-31T17:50:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+            (
+                "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon.",
+                "2026-03-31T17:55:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+        ] {
+            engine
+                .store(&RichTestMem {
+                    id: None,
+                    text: text.into(),
+                    created_at: at(created_at),
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::from([
+                        ("source_trust".to_string(), "trusted".to_string()),
+                        ("source_kind".to_string(), "project-doc".to_string()),
+                        ("source_verification".to_string(), "verified".to_string()),
+                        ("source_chain".to_string(), chain.to_string()),
+                        (
+                            "knowledge_key".to_string(),
+                            "femind-runtime-startup-host-contested".to_string(),
+                        ),
+                        ("knowledge_summary".to_string(), summary.to_string()),
+                        ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                    ]),
+                })
+                .expect("store support");
+        }
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        let current = engine
+            .reflected_knowledge_for_key("femind-runtime-startup-host-contested")
+            .expect("load contested reflection")
+            .expect("contested reflection exists");
+        assert_eq!(current.status, ReflectionLifecycleStatus::Contested);
+        assert!(current.contested);
+        assert!(current.unresolved_authority_conflict);
+    }
+
+    #[test]
+    fn reflection_refresh_plan_skips_unchanged_contested_conflict() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_authoritative_chain("runtime-ops")
+                    .with_reference_chain("deployment-docs"),
+            )
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Deployment)
+                    .with_authoritative_chain("deployment-docs")
+                    .with_reference_chain("runtime-ops"),
+            )
+            .build()
+            .expect("build");
+
+        let at = |value: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .expect("timestamp")
+                .with_timezone(&Utc)
+        };
+
+        for (text, created_at, chain, summary) in [
+            (
+                "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service.",
+                "2026-03-31T18:10:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Runtime startup guidance repeats the native Windows scheduled task at logon.",
+                "2026-03-31T18:15:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+                "2026-03-31T17:50:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+            (
+                "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon.",
+                "2026-03-31T17:55:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+        ] {
+            engine
+                .store(&RichTestMem {
+                    id: None,
+                    text: text.into(),
+                    created_at: at(created_at),
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::from([
+                        ("source_trust".to_string(), "trusted".to_string()),
+                        ("source_kind".to_string(), "project-doc".to_string()),
+                        ("source_verification".to_string(), "verified".to_string()),
+                        ("source_chain".to_string(), chain.to_string()),
+                        (
+                            "knowledge_key".to_string(),
+                            "femind-runtime-startup-host-contested-stable".to_string(),
+                        ),
+                        ("knowledge_summary".to_string(), summary.to_string()),
+                        ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                    ]),
+                })
+                .expect("store support");
+        }
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        let plan = engine
+            .reflection_refresh_plan(
+                &ReflectionConfig::default(),
+                &ReflectionRefreshPolicy::default(),
+            )
+            .expect("plan");
+
+        assert!(
+            plan.into_iter()
+                .all(|item| item.key != "femind-runtime-startup-host-contested-stable"),
+            "unchanged contested conflict should not keep generating refresh work"
         );
     }
 

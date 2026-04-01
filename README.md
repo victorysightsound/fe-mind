@@ -183,6 +183,14 @@ The practical live-validation path is now established and repeatable:
     `ReflectionRefreshPolicy.retire_when_unresolved_authority_conflict`
   - the engine-first practical suite now proves both outcomes under
     app-facing authority-domain policy
+- unresolved authoritative disagreement now has an explicit active lifecycle
+  state:
+  - persisted reflected rows can carry `reflection_status=contested`
+  - application-facing lookup and stable-knowledge retrieval treat
+    `current` and `contested` rows as live reflection state
+  - unchanged contested disagreement no longer creates repeated refresh churn;
+    FeMind can intentionally leave a reflected summary in a stable
+    “still contested” state until the disagreement materially changes
 - routed retrieval now also has an explicit `stable-summary` intent:
   questions that clearly ask for the supported, preferred, recommended, or
   current durable summary can automatically prefer current reflected knowledge

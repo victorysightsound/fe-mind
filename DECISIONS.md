@@ -2298,6 +2298,46 @@ winner exists when equally strong authoritative chains remain in live conflict.
   practical `86/86` exact, practical `86/86` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 064: Keep Unchanged Reflection Conflict Stable
+
+**Date:** 2026-03-31
+
+**Decision:** Promote unresolved authoritative disagreement from a boolean
+detail on current reflected rows into an explicit active lifecycle state, and
+make unchanged contested disagreement a no-op refresh outcome instead of
+repeatedly generating refresh work.
+
+**Context:** Decision 063 added unresolved-authority conflict detection and a
+policy choice between keeping a contested summary or retiring it. That still
+left one practical gap:
+- persisted reflection rows still looked like ordinary `current` rows even
+  when their real lifecycle state was “live but disputed”
+- application-facing lookup treated only `current` rows as active, so contested
+  reflection was not first-class in the public API
+- the refresh harness could prove that contested disagreement could be created,
+  but not that unchanged disagreement would remain stable without creating
+  churn on every refresh pass
+
+For a production memory engine, “still contested” is a real stable state, not
+just a temporary flag on a winner row.
+
+**Consequences:**
+- `ReflectionLifecycleStatus` now includes:
+  - `Contested`
+- persisted reflected rows now store `reflection_status=contested` when the
+  winning reflected summary remains active but unresolved authoritative
+  disagreement exists
+- application-facing active reflection lookups and stable-summary retrieval now
+  treat both `current` and `contested` rows as live reflection state
+- the practical harness now supports `expected_action: "none"` in
+  `reflection_refresh_checks`, so scenarios can prove that no refresh-plan item
+  is the correct outcome
+- the engine-first suite now includes:
+  - `reflection-refresh-domain-policy-unresolved-conflict-stable-contested`
+- Remote-GPU validation is green after the change:
+  practical `88/88` exact, practical `88/88` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions
