@@ -2173,6 +2173,50 @@ scenario coverage as retrieval, authority, and safety.
   practical `73/73` exact, practical `73/73` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 061: Refresh Reflections On Authority And Provenance Drift
+
+**Decision:** Treat `knowledge_key` as the canonical authority-domain hint for
+reflected knowledge when it carries one, and refresh persisted reflections when
+authority or provenance materially changes even if the derived summary text
+does not.
+
+**Context:** Decision 060 added end-to-end reflection refresh coverage, but the
+first pass still had a real blind spot:
+- a reflected summary could stay textually identical while the underlying
+  support became more authoritative or less trustworthy
+- reflection ranking still let incidental summary wording pull in the wrong
+  domain, so a deployment-heavy phrasing could outweigh a runtime-authoritative
+  source chain for the same knowledge key
+- the practical suite could not yet prove that same-summary authority or
+  provenance drift would trigger a refresh
+
+For a production memory engine, reflected knowledge quality cannot be keyed
+only to changed text or raw support counts. The supporting authority and
+provenance profile matters too.
+
+**Consequences:**
+- reflection candidate authority now prefers domains inferred from
+  `knowledge_key` before falling back to summary or source text
+- reflected objects and persisted reflection summaries now carry:
+  - `authoritative_support_count`
+  - `authority_score_sum`
+  - `provenance_score_sum`
+- refresh planning can now emit:
+  - `authority-strengthened`
+  - `authority-weakened`
+  - `provenance-strengthened`
+  - `provenance-weakened`
+- the practical harness now supports:
+  - `min_authoritative_support_count` in `reflection_checks`
+  - same-summary lifecycle scenarios where only the authority or provenance
+    profile changes
+- the engine-first suite now includes:
+  - `reflection-refresh-authority-strengthened-same-summary`
+  - `reflection-refresh-provenance-weakened-same-summary`
+- Remote-GPU validation is green after the change:
+  practical `77/77` exact, practical `77/77` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

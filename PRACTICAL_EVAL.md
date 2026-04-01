@@ -163,6 +163,11 @@ Each scenario should include:
   - `knowledge_key`
   - `knowledge_summary`
   - `knowledge_kind`
+- persisted reflection reports now also include:
+  - `authoritative_support_count`
+  - `authority_score_sum`
+  - `provenance_score_sum`
+- `reflection_checks` can now assert `min_authoritative_support_count`
 - source authority metadata on records such as:
   - `source_authority_domain`
   - `source_authority_level`
@@ -174,6 +179,11 @@ Each scenario should include:
   arbitration
 - app-facing `source_kind` defaults are now validated in two ways:
   - runtime guidance can win without any `source_chain` metadata
+- reflection lifecycle coverage now also includes same-summary drift:
+  - stronger authority on the same summary
+  - weaker provenance on the same summary
+  - those cases are expected to refresh even when `knowledge_summary` itself
+    does not change
   - provenance still matters inside an authoritative source kind, so
     `partially-verified` and `relayed` guidance do not collapse into the same
     answer quality

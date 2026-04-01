@@ -300,6 +300,8 @@ mod app {
         #[serde(default)]
         min_trusted_support_count: Option<usize>,
         #[serde(default)]
+        min_authoritative_support_count: Option<usize>,
+        #[serde(default)]
         min_confidence: Option<String>,
         #[serde(default)]
         required_fragments: Vec<String>,
@@ -976,6 +978,9 @@ mod app {
         confidence: String,
         support_count: usize,
         trusted_support_count: usize,
+        authoritative_support_count: usize,
+        authority_score_sum: u32,
+        provenance_score_sum: u32,
         contested: bool,
         competing_summary_count: usize,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -993,6 +998,9 @@ mod app {
         confidence: String,
         support_count: usize,
         trusted_support_count: usize,
+        authoritative_support_count: usize,
+        authority_score_sum: u32,
+        provenance_score_sum: u32,
         contested: bool,
         source_ids: Vec<i64>,
         created_at: String,
@@ -1008,6 +1016,7 @@ mod app {
         contested_ok: bool,
         support_ok: bool,
         trusted_support_ok: bool,
+        authoritative_support_ok: bool,
         confidence_ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         expected_contested: Option<bool>,
@@ -2589,6 +2598,9 @@ mod app {
             confidence: object.confidence.as_str().to_string(),
             support_count: object.support_count,
             trusted_support_count: object.trusted_support_count,
+            authoritative_support_count: object.authoritative_support_count,
+            authority_score_sum: object.authority_score_sum,
+            provenance_score_sum: object.provenance_score_sum,
             contested: object.contested,
             competing_summary_count: object.competing_summary_count,
             strongest_competing_summary: object.strongest_competing_summary.clone(),
@@ -2608,6 +2620,9 @@ mod app {
             confidence: summary.confidence.as_str().to_string(),
             support_count: summary.support_count,
             trusted_support_count: summary.trusted_support_count,
+            authoritative_support_count: summary.authoritative_support_count,
+            authority_score_sum: summary.authority_score_sum,
+            provenance_score_sum: summary.provenance_score_sum,
             contested: summary.contested,
             source_ids: summary.source_ids.clone(),
             created_at: summary.created_at.to_rfc3339(),
@@ -2661,6 +2676,11 @@ mod app {
                 .min_trusted_support_count
                 .is_none_or(|minimum| object.trusted_support_count >= minimum)
         });
+        let authoritative_support_ok = matched.is_none_or(|object| {
+            check
+                .min_authoritative_support_count
+                .is_none_or(|minimum| object.authoritative_support_count >= minimum)
+        });
         let confidence_ok = matched.is_none_or(|object| {
             check.min_confidence.as_ref().is_none_or(|minimum| {
                 confidence_rank(object.confidence.as_str()) >= confidence_rank(minimum)
@@ -2694,6 +2714,7 @@ mod app {
             contested_ok,
             support_ok,
             trusted_support_ok,
+            authoritative_support_ok,
             confidence_ok,
             expected_contested: check.expected_contested,
             observed_contested: matched.map(|object| object.contested),
@@ -2706,6 +2727,7 @@ mod app {
             && criteria.contested_ok
             && criteria.support_ok
             && criteria.trusted_support_ok
+            && criteria.authoritative_support_ok
             && criteria.confidence_ok
             && criteria.missing_required_fragments.is_empty()
             && criteria.present_forbidden_fragments.is_empty();

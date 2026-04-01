@@ -149,6 +149,20 @@ The practical live-validation path is now established and repeatable:
   - stronger authoritative evidence can refresh a persisted summary
   - weakened support can force a refresh with lower support counts
   - lost qualification can retire a persisted reflected row
+- reflection refresh now also detects authority and provenance drift even when
+  the derived summary text stays the same:
+  - `knowledge_key` is treated as the canonical authority-domain hint when it
+    carries one, so incidental deployment wording in supporting text does not
+    overpower a runtime-scoped reflected object
+  - persisted reflections now record:
+    - `reflection_authoritative_support_count`
+    - `reflection_authority_score_sum`
+    - `reflection_provenance_score_sum`
+  - refresh planning can now surface:
+    - `authority-strengthened`
+    - `authority-weakened`
+    - `provenance-strengthened`
+    - `provenance-weakened`
 - routed retrieval now also has an explicit `stable-summary` intent:
   questions that clearly ask for the supported, preferred, recommended, or
   current durable summary can automatically prefer current reflected knowledge

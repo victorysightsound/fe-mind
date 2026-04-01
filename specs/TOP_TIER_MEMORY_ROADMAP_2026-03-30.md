@@ -243,6 +243,11 @@ Current status after the 2026-03-30 trust/safety pass:
   - contest detection when qualified trusted summaries disagree
   - refresh when support materially weakens
   - retirement when a current reflected row no longer qualifies
+- reflected knowledge now also needs authority-aware lifecycle handling:
+  - same-summary refresh when stronger authority arrives later
+  - same-summary refresh when provenance weakens even without text drift
+  - key-scoped authority routing so reflected runtime knowledge is not dragged
+    off course by deployment-specific wording in the supporting text
 
 ### 6. Keep Evaluation Engine-Centric
 

@@ -21,8 +21,7 @@ use crate::scoring::{
     query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
     review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
-    source_authority_rank, source_authority_rank_for_domains, source_provenance_rank,
-    source_trust_level,
+    source_authority_rank_for_domains, source_provenance_rank, source_trust_level,
 };
 use crate::search::StableSummaryPolicy;
 use crate::search::builder::SearchBuilder;
@@ -232,6 +231,12 @@ pub struct KnowledgeObject {
     pub support_count: usize,
     /// Number of trusted or normal-trust supports in the chosen cluster.
     pub trusted_support_count: usize,
+    /// Number of supports that are authoritative for the inferred authority domains.
+    pub authoritative_support_count: usize,
+    /// Aggregate authority score across supporting memories.
+    pub authority_score_sum: u32,
+    /// Aggregate provenance score across supporting memories.
+    pub provenance_score_sum: u32,
     /// Whether another qualified summary cluster competes with this one.
     pub contested: bool,
     /// Number of competing qualified summary clusters for the same knowledge key.
@@ -270,6 +275,9 @@ pub struct PersistedKnowledgeSummary {
     pub confidence: CompositionConfidence,
     pub support_count: usize,
     pub trusted_support_count: usize,
+    pub authoritative_support_count: usize,
+    pub authority_score_sum: u32,
+    pub provenance_score_sum: u32,
     pub contested: bool,
     pub competing_summary_count: usize,
     pub strongest_competing_summary: Option<String>,
@@ -349,8 +357,12 @@ pub enum ReflectionRefreshReason {
     SummaryChanged,
     SupportGrowth,
     TrustedSupportGrowth,
+    AuthorityStrengthened,
+    ProvenanceStrengthened,
     SupportWeakened,
     TrustedSupportWeakened,
+    AuthorityWeakened,
+    ProvenanceWeakened,
     CompetingTrustedSummary,
     NoLongerQualifies,
 }
@@ -363,8 +375,12 @@ impl ReflectionRefreshReason {
             Self::SummaryChanged => "summary-changed",
             Self::SupportGrowth => "support-growth",
             Self::TrustedSupportGrowth => "trusted-support-growth",
+            Self::AuthorityStrengthened => "authority-strengthened",
+            Self::ProvenanceStrengthened => "provenance-strengthened",
             Self::SupportWeakened => "support-weakened",
             Self::TrustedSupportWeakened => "trusted-support-weakened",
+            Self::AuthorityWeakened => "authority-weakened",
+            Self::ProvenanceWeakened => "provenance-weakened",
             Self::CompetingTrustedSummary => "competing-trusted-summary",
             Self::NoLongerQualifies => "no-longer-qualifies",
         }
@@ -2627,10 +2643,10 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 let Some(summary) = reflection_summary(&text, &metadata) else {
                     continue;
                 };
-                let authority_domain = reflection_authority_domain(&key, &summary, &text);
-                let authority_rank = source_authority_rank(
+                let authority_domains = reflection_authority_domains(&key, &summary, &text);
+                let authority_rank = source_authority_rank_for_domains(
                     &meta,
-                    authority_domain,
+                    &authority_domains,
                     Some(self.authority_registry.as_ref()),
                 );
 
@@ -2686,6 +2702,18 @@ impl<T: MemoryRecord> MemoryEngine<T> {
             metadata.insert(
                 "reflection_trusted_support_count".to_string(),
                 object.trusted_support_count.to_string(),
+            );
+            metadata.insert(
+                "reflection_authoritative_support_count".to_string(),
+                object.authoritative_support_count.to_string(),
+            );
+            metadata.insert(
+                "reflection_authority_score_sum".to_string(),
+                object.authority_score_sum.to_string(),
+            );
+            metadata.insert(
+                "reflection_provenance_score_sum".to_string(),
+                object.provenance_score_sum.to_string(),
             );
             metadata.insert(
                 "reflection_contested".to_string(),
@@ -2952,6 +2980,18 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     trusted_support_count: metadata
                         .get("reflection_trusted_support_count")
                         .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0),
+                    authoritative_support_count: metadata
+                        .get("reflection_authoritative_support_count")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0),
+                    authority_score_sum: metadata
+                        .get("reflection_authority_score_sum")
+                        .and_then(|value| value.parse::<u32>().ok())
+                        .unwrap_or(0),
+                    provenance_score_sum: metadata
+                        .get("reflection_provenance_score_sum")
+                        .and_then(|value| value.parse::<u32>().ok())
                         .unwrap_or(0),
                     contested: metadata
                         .get("reflection_contested")
@@ -3239,6 +3279,9 @@ impl ReflectionCluster {
             confidence,
             support_count,
             trusted_support_count,
+            authoritative_support_count: self.authoritative_support_count,
+            authority_score_sum: self.authority_sum,
+            provenance_score_sum: self.provenance_sum,
             contested,
             competing_summary_count,
             strongest_competing_summary,
@@ -3296,14 +3339,34 @@ fn reflection_summary(
         .or_else(|| derive_reflection_summary(text))
 }
 
-fn reflection_authority_domain(
+fn reflection_authority_domains(
     key: &str,
     summary: &str,
     text: &str,
-) -> Option<crate::scoring::SourceAuthorityDomain> {
+) -> Vec<crate::scoring::SourceAuthorityDomain> {
+    // The reflected knowledge key is the canonical identity for stable summaries.
+    // If it already carries a clear authority domain, prefer that over incidental
+    // wording in supporting text such as deployment-specific phrasing.
+    let key_domains = infer_authority_domains(key);
+    if !key_domains.is_empty() {
+        return key_domains;
+    }
+
+    let summary_domains = infer_authority_domains(summary);
+    if !summary_domains.is_empty() {
+        return summary_domains;
+    }
+
+    let text_domains = infer_authority_domains(text);
+    if !text_domains.is_empty() {
+        return text_domains;
+    }
+
     infer_authority_domain(key)
         .or_else(|| infer_authority_domain(summary))
         .or_else(|| infer_authority_domain(text))
+        .into_iter()
+        .collect()
 }
 
 fn derive_reflection_summary(text: &str) -> Option<String> {
@@ -3458,6 +3521,16 @@ fn reflection_refresh_reasons(
                 reasons.push(ReflectionRefreshReason::TrustedSupportGrowth);
             }
 
+            if object.authoritative_support_count > current.authoritative_support_count
+                || object.authority_score_sum > current.authority_score_sum
+            {
+                reasons.push(ReflectionRefreshReason::AuthorityStrengthened);
+            }
+
+            if object.provenance_score_sum > current.provenance_score_sum {
+                reasons.push(ReflectionRefreshReason::ProvenanceStrengthened);
+            }
+
             if current.support_count
                 >= object
                     .support_count
@@ -3472,6 +3545,16 @@ fn reflection_refresh_reasons(
                     .saturating_add(policy.min_trusted_support_drop.max(1))
             {
                 reasons.push(ReflectionRefreshReason::TrustedSupportWeakened);
+            }
+
+            if current.authoritative_support_count > object.authoritative_support_count
+                || current.authority_score_sum > object.authority_score_sum
+            {
+                reasons.push(ReflectionRefreshReason::AuthorityWeakened);
+            }
+
+            if current.provenance_score_sum > object.provenance_score_sum {
+                reasons.push(ReflectionRefreshReason::ProvenanceWeakened);
             }
 
             if policy.refresh_on_competing_trusted_summary
@@ -6648,6 +6731,346 @@ mod tests {
     }
 
     #[test]
+    fn reflection_refresh_plan_marks_authority_strengthened_for_same_summary() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        let old_one = match engine
+            .store(&rich_mem(
+                "Deployment doc: use the native Windows scheduled task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("source_authority_domain", "deployment"),
+                    ("source_authority_level", "primary"),
+                    ("source_chain", "deployment-docs"),
+                    ("knowledge_key", "femind-runtime-startup-authority"),
+                    (
+                        "knowledge_summary",
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store old one")
+        {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+        let old_two = match engine
+            .store(&rich_mem(
+                "Deployment bootstrap note repeats the native Windows scheduled task at logon.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("source_authority_domain", "deployment"),
+                    ("source_authority_level", "primary"),
+                    ("source_chain", "deployment-docs"),
+                    ("knowledge_key", "femind-runtime-startup-authority"),
+                    (
+                        "knowledge_summary",
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store old two")
+        {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        for memory_id in [old_one, old_two] {
+            engine
+                .database()
+                .with_writer(|conn| {
+                    let metadata_json = conn.query_row(
+                        "SELECT metadata_json FROM memories WHERE id = ?1",
+                        [memory_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )?;
+                    let mut metadata = metadata_json
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+                        .expect("metadata");
+                    metadata.remove("knowledge_key");
+                    metadata.remove("knowledge_summary");
+                    metadata.remove("knowledge_kind");
+                    conn.execute(
+                        "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
+                        rusqlite::params![
+                            serde_json::to_string(&metadata).expect("serialize"),
+                            memory_id
+                        ],
+                    )?;
+                    Ok::<(), FemindError>(())
+                })
+                .expect("drop old support");
+        }
+
+        engine
+            .store(&rich_mem(
+                "Runtime doc: use the native Windows scheduled task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("source_authority_domain", "runtime"),
+                    ("source_authority_level", "authoritative"),
+                    ("source_chain", "runtime-ops"),
+                    ("knowledge_key", "femind-runtime-startup-authority"),
+                    (
+                        "knowledge_summary",
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store new one");
+        engine
+            .store(&rich_mem(
+                "Runtime support note confirms the native Windows scheduled task at logon.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("source_authority_domain", "runtime"),
+                    ("source_authority_level", "authoritative"),
+                    ("source_chain", "runtime-ops"),
+                    ("knowledge_key", "femind-runtime-startup-authority"),
+                    (
+                        "knowledge_summary",
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store new two");
+
+        let plan = engine
+            .reflection_refresh_plan(
+                &ReflectionConfig::default(),
+                &ReflectionRefreshPolicy::default(),
+            )
+            .expect("plan");
+
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].action, ReflectionRefreshAction::Persist);
+        assert!(
+            plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::AuthorityStrengthened)
+        );
+        assert!(
+            !plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::SummaryChanged)
+        );
+        assert!(
+            !plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::SupportGrowth)
+        );
+        assert!(
+            !plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::SupportWeakened)
+        );
+        assert!(
+            !plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::ProvenanceStrengthened)
+        );
+    }
+
+    #[test]
+    fn reflection_refresh_plan_marks_provenance_weakened_for_same_summary() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .build()
+            .expect("build");
+
+        let old_one = match engine
+            .store(&rich_mem(
+                "Observed runtime note: use the native Windows scheduled task at logon to launch femind-embed-service.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "system"),
+                    ("source_verification", "verified"),
+                    ("source_authority_domain", "runtime"),
+                    ("source_authority_level", "authoritative"),
+                    ("source_chain", "runtime-ops"),
+                    ("knowledge_key", "femind-runtime-canonical-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store old one")
+        {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+        let old_two = match engine
+            .store(&rich_mem(
+                "Project doc repeats the native Windows scheduled task at logon runtime path.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "project-doc"),
+                    ("source_verification", "verified"),
+                    ("source_authority_domain", "runtime"),
+                    ("source_authority_level", "authoritative"),
+                    ("source_chain", "runtime-ops"),
+                    ("knowledge_key", "femind-runtime-canonical-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store old two")
+        {
+            StoreResult::Added(id) | StoreResult::Duplicate(id) => id,
+        };
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        for memory_id in [old_one, old_two] {
+            engine
+                .database()
+                .with_writer(|conn| {
+                    let metadata_json = conn.query_row(
+                        "SELECT metadata_json FROM memories WHERE id = ?1",
+                        [memory_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )?;
+                    let mut metadata = metadata_json
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str::<HashMap<String, String>>(json).ok())
+                        .expect("metadata");
+                    metadata.remove("knowledge_key");
+                    metadata.remove("knowledge_summary");
+                    metadata.remove("knowledge_kind");
+                    conn.execute(
+                        "UPDATE memories SET metadata_json = ?1 WHERE id = ?2",
+                        rusqlite::params![
+                            serde_json::to_string(&metadata).expect("serialize"),
+                            memory_id
+                        ],
+                    )?;
+                    Ok::<(), FemindError>(())
+                })
+                .expect("drop old support");
+        }
+
+        engine
+            .store(&rich_mem(
+                "Relayed maintainer note says to use the native Windows scheduled task at logon.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "relayed"),
+                    ("source_authority_domain", "runtime"),
+                    ("source_authority_level", "authoritative"),
+                    ("source_chain", "runtime-ops"),
+                    ("knowledge_key", "femind-runtime-canonical-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store new one");
+        engine
+            .store(&rich_mem(
+                "Second relayed maintainer note also points to the native Windows scheduled task at logon.",
+                MemoryType::Procedural,
+                &[
+                    ("source_trust", "trusted"),
+                    ("source_kind", "maintainer"),
+                    ("source_verification", "relayed"),
+                    ("source_authority_domain", "runtime"),
+                    ("source_authority_level", "authoritative"),
+                    ("source_chain", "runtime-ops"),
+                    ("knowledge_key", "femind-runtime-canonical-path"),
+                    (
+                        "knowledge_summary",
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+                    ),
+                    ("knowledge_kind", "stable-procedure"),
+                ],
+            ))
+            .expect("store new two");
+
+        let plan = engine
+            .reflection_refresh_plan(
+                &ReflectionConfig::default(),
+                &ReflectionRefreshPolicy::default(),
+            )
+            .expect("plan");
+
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].action, ReflectionRefreshAction::Persist);
+        assert!(
+            plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::ProvenanceWeakened)
+        );
+        assert!(
+            !plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::SummaryChanged)
+        );
+        assert!(
+            !plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::SupportGrowth)
+        );
+        assert!(
+            !plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::SupportWeakened)
+        );
+        assert!(
+            !plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::AuthorityWeakened)
+        );
+    }
+
+    #[test]
     fn reflection_refresh_can_retire_current_rows_that_no_longer_qualify() {
         let engine = MemoryEngine::<RichTestMem>::builder()
             .build()
@@ -7041,17 +7464,17 @@ mod tests {
         let deployment_meta = candidate_memory_meta(&evidence[0]);
         let runtime_meta = candidate_memory_meta(&evidence[1]);
         assert_eq!(
-            source_authority_rank(
+            source_authority_rank_for_domains(
                 &deployment_meta,
-                Some(crate::scoring::SourceAuthorityDomain::RuntimeOps),
+                &[crate::scoring::SourceAuthorityDomain::RuntimeOps],
                 Some(&authority_registry),
             ),
             0
         );
         assert_eq!(
-            source_authority_rank(
+            source_authority_rank_for_domains(
                 &runtime_meta,
-                Some(crate::scoring::SourceAuthorityDomain::RuntimeOps),
+                &[crate::scoring::SourceAuthorityDomain::RuntimeOps],
                 Some(&authority_registry),
             ),
             100
