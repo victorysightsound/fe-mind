@@ -474,6 +474,16 @@ Current validated baseline:
     - `abstain-until-resolved`
   - when more than one relevant authority domain matches a contested query,
     FeMind applies the strictest configured policy
+- contested-answer citation detail is now also policy-aware by authority
+  domain:
+  - grouped `authority_domain_policies` can set `contested_citation_policy`
+  - supported values are:
+    - `cite-both-sides`
+    - `cite-winner-only`
+    - `suppress-supporting-detail`
+  - this lets applications decide whether a contested answer should expose the
+    competing authoritative summary, only the current leading summary, or no
+    supporting detail at all
 - callers can now set an explicit stable-summary promotion policy:
   - `auto`
   - `prefer-reflection`
@@ -488,6 +498,9 @@ Current validated baseline:
 - practical retrieval checks can now also assert:
   - `expected_composed_rationale`
   - `expected_abstained`
+- the practical suite now includes contested-composition policy coverage for:
+  - explicit contested answers that hide the competing summary
+  - winner-plus-conflict-note answers that suppress supporting detail
 - practical retrieval checks can now fail explicitly when the routed intent or
   routed reflection preference is wrong, even if the answer still happens to
   pass by accident
@@ -496,8 +509,8 @@ Current validated baseline:
 - graph-connected practical coverage now passes with routed graph expansion
   even when the global CLI graph depth stays at `0`
 - reranker-aware `remote-fallback` retrieval is now wired into the same runner
-- latest reranker-aware `remote-fallback` exact run passes `93/93`
-- latest reranker-aware `remote-fallback` ANN run passes `93/93`
+- latest reranker-aware `remote-fallback` exact run passes `97/97`
+- latest reranker-aware `remote-fallback` ANN run passes `97/97`
 - reranker-aware summary artifact: `target/practical-eval/retrieval-exact.json`
 - broader live-library retrieval sample from actual project docs currently
   passes `58/58`

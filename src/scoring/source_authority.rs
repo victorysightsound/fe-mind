@@ -155,6 +155,36 @@ impl std::fmt::Display for ContestedSummaryPolicy {
     }
 }
 
+/// App-facing policy for how much contested-answer detail should be surfaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ContestedCitationPolicy {
+    CiteBothSides,
+    CiteWinnerOnly,
+    SuppressSupportingDetail,
+}
+
+impl ContestedCitationPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CiteBothSides => "cite-both-sides",
+            Self::CiteWinnerOnly => "cite-winner-only",
+            Self::SuppressSupportingDetail => "suppress-supporting-detail",
+        }
+    }
+}
+
+impl Default for ContestedCitationPolicy {
+    fn default() -> Self {
+        Self::CiteBothSides
+    }
+}
+
+impl std::fmt::Display for ContestedCitationPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceAuthorityPolicy {
     pub domain: SourceAuthorityDomain,
@@ -209,6 +239,7 @@ pub struct SourceAuthorityDomainPolicy {
     pub delegated_kinds: Vec<String>,
     pub reference_kinds: Vec<String>,
     pub contested_summary_policy: Option<ContestedSummaryPolicy>,
+    pub contested_citation_policy: Option<ContestedCitationPolicy>,
 }
 
 impl SourceAuthorityDomainPolicy {
@@ -224,6 +255,7 @@ impl SourceAuthorityDomainPolicy {
             delegated_kinds: Vec::new(),
             reference_kinds: Vec::new(),
             contested_summary_policy: None,
+            contested_citation_policy: None,
         }
     }
 
@@ -271,6 +303,11 @@ impl SourceAuthorityDomainPolicy {
         self.contested_summary_policy = Some(policy);
         self
     }
+
+    pub fn with_contested_citation_policy(mut self, policy: ContestedCitationPolicy) -> Self {
+        self.contested_citation_policy = Some(policy);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -285,11 +322,24 @@ impl ContestedSummaryDomainPolicy {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContestedCitationDomainPolicy {
+    pub domain: SourceAuthorityDomain,
+    pub policy: ContestedCitationPolicy,
+}
+
+impl ContestedCitationDomainPolicy {
+    pub fn new(domain: SourceAuthorityDomain, policy: ContestedCitationPolicy) -> Self {
+        Self { domain, policy }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceAuthorityRegistry {
     policies: Vec<SourceAuthorityPolicy>,
     kind_policies: Vec<SourceAuthorityKindPolicy>,
     contested_summary_policies: Vec<ContestedSummaryDomainPolicy>,
+    contested_citation_policies: Vec<ContestedCitationDomainPolicy>,
 }
 
 impl SourceAuthorityRegistry {
@@ -307,6 +357,10 @@ impl SourceAuthorityRegistry {
 
     pub fn contested_summary_policies(&self) -> &[ContestedSummaryDomainPolicy] {
         &self.contested_summary_policies
+    }
+
+    pub fn contested_citation_policies(&self) -> &[ContestedCitationDomainPolicy] {
+        &self.contested_citation_policies
     }
 
     pub fn with_policy(mut self, policy: SourceAuthorityPolicy) -> Self {
@@ -330,6 +384,15 @@ impl SourceAuthorityRegistry {
         policy: ContestedSummaryPolicy,
     ) -> Self {
         self.set_contested_summary_policy(domain, policy);
+        self
+    }
+
+    pub fn with_contested_citation_policy(
+        mut self,
+        domain: SourceAuthorityDomain,
+        policy: ContestedCitationPolicy,
+    ) -> Self {
+        self.set_contested_citation_policy(domain, policy);
         self
     }
 
@@ -379,6 +442,7 @@ impl SourceAuthorityRegistry {
             delegated_kinds,
             reference_kinds,
             contested_summary_policy,
+            contested_citation_policy,
         } = policy;
 
         for chain in authoritative_chains {
@@ -441,6 +505,9 @@ impl SourceAuthorityRegistry {
 
         if let Some(policy) = contested_summary_policy {
             self.set_contested_summary_policy(domain, policy);
+        }
+        if let Some(policy) = contested_citation_policy {
+            self.set_contested_citation_policy(domain, policy);
         }
     }
 
@@ -515,6 +582,25 @@ impl SourceAuthorityRegistry {
         self
     }
 
+    pub fn set_contested_citation_policy(
+        &mut self,
+        domain: SourceAuthorityDomain,
+        policy: ContestedCitationPolicy,
+    ) -> &mut Self {
+        if let Some(existing) = self
+            .contested_citation_policies
+            .iter_mut()
+            .find(|existing| existing.domain == domain)
+        {
+            existing.policy = policy;
+            return self;
+        }
+
+        self.contested_citation_policies
+            .push(ContestedCitationDomainPolicy::new(domain, policy));
+        self
+    }
+
     pub fn level_for_chain(
         &self,
         domain: SourceAuthorityDomain,
@@ -564,6 +650,31 @@ impl SourceAuthorityRegistry {
                 ContestedSummaryPolicy::WinnerWithConflictNote => 1u8,
                 ContestedSummaryPolicy::PreferContestedAnswer => 2u8,
                 ContestedSummaryPolicy::AbstainUntilResolved => 3u8,
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn contested_citation_policy_for_domain(
+        &self,
+        domain: SourceAuthorityDomain,
+    ) -> Option<ContestedCitationPolicy> {
+        self.contested_citation_policies
+            .iter()
+            .find(|entry| entry.domain == domain)
+            .map(|entry| entry.policy)
+    }
+
+    pub fn contested_citation_policy_for_domains(
+        &self,
+        domains: &[SourceAuthorityDomain],
+    ) -> ContestedCitationPolicy {
+        domains
+            .iter()
+            .filter_map(|domain| self.contested_citation_policy_for_domain(*domain))
+            .max_by_key(|policy| match policy {
+                ContestedCitationPolicy::CiteBothSides => 1u8,
+                ContestedCitationPolicy::CiteWinnerOnly => 2u8,
+                ContestedCitationPolicy::SuppressSupportingDetail => 3u8,
             })
             .unwrap_or_default()
     }
@@ -1226,6 +1337,33 @@ mod tests {
         assert_eq!(
             registry.contested_summary_policy_for_domains(&[SourceAuthorityDomain::RuntimeOps]),
             ContestedSummaryPolicy::WinnerWithConflictNote
+        );
+    }
+
+    #[test]
+    fn contested_citation_policy_uses_strictest_matching_domain_policy() {
+        let registry = SourceAuthorityRegistry::new()
+            .with_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_contested_citation_policy(ContestedCitationPolicy::CiteWinnerOnly),
+            )
+            .with_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Security)
+                    .with_contested_citation_policy(
+                        ContestedCitationPolicy::SuppressSupportingDetail,
+                    ),
+            );
+
+        assert_eq!(
+            registry.contested_citation_policy_for_domains(&[
+                SourceAuthorityDomain::RuntimeOps,
+                SourceAuthorityDomain::Security,
+            ]),
+            ContestedCitationPolicy::SuppressSupportingDetail
+        );
+        assert_eq!(
+            registry.contested_citation_policy_for_domains(&[SourceAuthorityDomain::RuntimeOps]),
+            ContestedCitationPolicy::CiteWinnerOnly
         );
     }
 }

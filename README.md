@@ -227,6 +227,20 @@ The practical live-validation path is now established and repeatable:
     - `abstain-until-resolved`
   - when a query spans more than one relevant authority domain, FeMind uses
     the strictest matching contested-summary policy
+- contested-answer citation detail is now application-facing by authority
+  domain too:
+  - `SourceAuthorityDomainPolicy::with_contested_citation_policy(...)`
+  - `MemoryEngineBuilder::contested_citation_policy(...)`
+  - per relevant domain, apps can now choose:
+    - `cite-both-sides`
+    - `cite-winner-only`
+    - `suppress-supporting-detail`
+  - this citation policy is independent from the contested-summary mode:
+    one domain can still prefer an explicit contested answer while hiding the
+    competing summary, or surface the winner-plus-note path while suppressing
+    all supporting detail
+  - when more than one relevant authority domain matches a contested query,
+    FeMind uses the strictest matching citation policy
 - stable-summary promotion is now application-facing too:
   callers can choose `auto`, `prefer-reflection`, or `prefer-source` for
   stable-summary retrieval and composition instead of accepting only the

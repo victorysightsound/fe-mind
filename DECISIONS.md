@@ -2423,6 +2423,52 @@ policy, not only under a single engine default.
   practical `93/93` exact, practical `93/93` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 067: Make Contested Citation Detail Domain-Policy-Aware
+
+**Date:** 2026-04-01
+
+**Decision:** Extend app-facing authority-domain policy so contested
+stable-summary answers can independently control how much contested detail they
+surface:
+- cite both sides
+- cite only the current winner
+- or suppress supporting detail entirely
+
+**Context:** Decision 066 made contested stable-summary outcomes
+application-facing, but it still assumed one answer-detail level for every
+domain. That left a practical gap:
+- some domains can tolerate explicit competing-summary detail
+- some domains should preserve only the current leading guidance while still
+  acknowledging conflict
+- some higher-risk domains should keep the answer shape but suppress competing
+  and supporting detail entirely
+
+For a production memory engine, contested-answer policy needs two layers:
+what kind of answer to return, and how much contested detail to expose inside
+that answer.
+
+**Consequences:**
+- `SourceAuthorityDomainPolicy` now supports
+  `with_contested_citation_policy(...)`
+- `MemoryEngineBuilder` now exposes `contested_citation_policy(...)`
+- contested citation policy is resolved across all relevant authority domains
+  for the reflected key and query, using the strictest matching policy when
+  multiple domains apply
+- contested composition can now independently:
+  - hide the competing authoritative summary while keeping the explicit
+    contested answer shape
+  - suppress `Supported by:` detail even on evidence-seeking questions
+  - keep abstention text generic instead of surfacing both competing summaries
+- the practical suite now includes:
+  - `reflection-contested-runtime-cite-winner-only`
+  - `reflection-contested-runtime-suppress-supporting-detail`
+- targeted engine coverage now includes:
+  - `compose_answer_can_hide_competing_summary_when_citation_policy_prefers_winner_only`
+  - `compose_answer_can_suppress_supporting_detail_for_contested_winner_note`
+- Remote-GPU validation is green after the change:
+  practical `97/97` exact, practical `97/97` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

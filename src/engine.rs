@@ -12,9 +12,9 @@ use crate::memory::MemoryStore;
 use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{
-    CompositeScorer, ContestedSummaryPolicy, ImportanceScorer, MemoryTypeScorer,
-    ProceduralSafetyScorer, RecencyScorer, ReviewApprovalTemplate, ReviewPolicyClass,
-    ReviewSafetyScorer, ReviewScope, ReviewSeverity, ReviewStatus, SecretClass,
+    CompositeScorer, ContestedCitationPolicy, ContestedSummaryPolicy, ImportanceScorer,
+    MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer, ReviewApprovalTemplate,
+    ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity, ReviewStatus, SecretClass,
     SourceAuthorityDomain, SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy,
     SourceAuthorityPolicy, SourceAuthorityRegistry, SourceProvenanceScorer, SourceTrustScorer,
     detect_review_flag, effective_review_status, evidence_contains_secret_material,
@@ -3925,13 +3925,19 @@ fn compose_stable_summary_answer(
         if is_contested {
             let contested_policy =
                 contested_summary_policy_for_match(query, reflection, authority_registry);
+            let citation_policy =
+                contested_citation_policy_for_match(query, reflection, authority_registry);
 
             if matches!(
                 contested_policy,
                 ContestedSummaryPolicy::AbstainUntilResolved
             ) {
                 return (
-                    compose_contested_abstention_text(&summary, competing_summary.as_deref()),
+                    compose_contested_abstention_text(
+                        &summary,
+                        competing_summary.as_deref(),
+                        citation_policy,
+                    ),
                     "abstain",
                     CompositionEvidenceBasis::Reflected,
                     CompositionConfidence::Low,
@@ -3951,6 +3957,7 @@ fn compose_stable_summary_answer(
                                 &summary,
                                 competing_summary.as_deref(),
                                 Some(source.text.trim()),
+                                citation_policy,
                             ),
                             "stable-summary",
                             CompositionEvidenceBasis::Blended,
@@ -3966,6 +3973,7 @@ fn compose_stable_summary_answer(
                         &summary,
                         competing_summary.as_deref(),
                         None,
+                        citation_policy,
                     ),
                     "stable-summary",
                     CompositionEvidenceBasis::Reflected,
@@ -3982,6 +3990,7 @@ fn compose_stable_summary_answer(
                             &summary,
                             competing_summary.as_deref(),
                             Some(source.text.trim()),
+                            citation_policy,
                         ),
                         "stable-summary",
                         CompositionEvidenceBasis::Blended,
@@ -3993,7 +4002,12 @@ fn compose_stable_summary_answer(
             }
 
             return (
-                compose_contested_stable_summary_text(&summary, competing_summary.as_deref(), None),
+                compose_contested_stable_summary_text(
+                    &summary,
+                    competing_summary.as_deref(),
+                    None,
+                    citation_policy,
+                ),
                 "stable-summary",
                 CompositionEvidenceBasis::Reflected,
                 reflection_confidence,
@@ -4137,18 +4151,32 @@ fn compose_contested_stable_summary_text(
     summary: &str,
     competing_summary: Option<&str>,
     support_text: Option<&str>,
+    citation_policy: ContestedCitationPolicy,
 ) -> String {
-    let mut answer = if let Some(competing) = competing_summary {
-        format!(
-            "This remains contested. Current reflected guidance favors: {summary} Competing authoritative guidance says: {competing}"
-        )
-    } else {
-        format!("This remains contested. Current reflected guidance favors: {summary}")
+    let mut answer = match citation_policy {
+        ContestedCitationPolicy::CiteBothSides => {
+            if let Some(competing) = competing_summary {
+                format!(
+                    "This remains contested. Current reflected guidance favors: {summary} Competing authoritative guidance says: {competing}"
+                )
+            } else {
+                format!("This remains contested. Current reflected guidance favors: {summary}")
+            }
+        }
+        ContestedCitationPolicy::CiteWinnerOnly
+        | ContestedCitationPolicy::SuppressSupportingDetail => {
+            format!("This remains contested. Current reflected guidance favors: {summary}")
+        }
     };
 
-    if let Some(support_text) = support_text {
-        answer.push_str(" Supported by: ");
-        answer.push_str(support_text);
+    if !matches!(
+        citation_policy,
+        ContestedCitationPolicy::SuppressSupportingDetail
+    ) {
+        if let Some(support_text) = support_text {
+            answer.push_str(" Supported by: ");
+            answer.push_str(support_text);
+        }
     }
 
     answer
@@ -4158,31 +4186,57 @@ fn compose_winner_with_conflict_note_text(
     summary: &str,
     competing_summary: Option<&str>,
     support_text: Option<&str>,
+    citation_policy: ContestedCitationPolicy,
 ) -> String {
     let mut answer = summary.to_string();
-    if let Some(competing) = competing_summary {
-        answer.push_str(" Note: authoritative guidance remains contested by: ");
-        answer.push_str(competing);
-    } else {
-        answer.push_str(" Note: authoritative guidance remains contested.");
+    match citation_policy {
+        ContestedCitationPolicy::CiteBothSides => {
+            if let Some(competing) = competing_summary {
+                answer.push_str(" Note: authoritative guidance remains contested by: ");
+                answer.push_str(competing);
+            } else {
+                answer.push_str(" Note: authoritative guidance remains contested.");
+            }
+        }
+        ContestedCitationPolicy::CiteWinnerOnly
+        | ContestedCitationPolicy::SuppressSupportingDetail => {
+            answer.push_str(" Note: authoritative guidance remains contested.");
+        }
     }
 
-    if let Some(support_text) = support_text {
-        answer.push_str(" Supported by: ");
-        answer.push_str(support_text);
+    if !matches!(
+        citation_policy,
+        ContestedCitationPolicy::SuppressSupportingDetail
+    ) {
+        if let Some(support_text) = support_text {
+            answer.push_str(" Supported by: ");
+            answer.push_str(support_text);
+        }
     }
 
     answer
 }
 
-fn compose_contested_abstention_text(summary: &str, competing_summary: Option<&str>) -> String {
-    match competing_summary {
-        Some(competing) => format!(
-            "I don’t have a single resolved stable summary yet because authoritative guidance remains contested between: {summary} and {competing}"
+fn compose_contested_abstention_text(
+    summary: &str,
+    competing_summary: Option<&str>,
+    citation_policy: ContestedCitationPolicy,
+) -> String {
+    match citation_policy {
+        ContestedCitationPolicy::CiteBothSides => match competing_summary {
+            Some(competing) => format!(
+                "I don’t have a single resolved stable summary yet because authoritative guidance remains contested between: {summary} and {competing}"
+            ),
+            None => format!(
+                "I don’t have a single resolved stable summary yet because authoritative guidance remains contested around: {summary}"
+            ),
+        },
+        ContestedCitationPolicy::CiteWinnerOnly => format!(
+            "I don’t have a single resolved stable summary yet because authoritative guidance remains contested. The current leading guidance favors: {summary}"
         ),
-        None => format!(
-            "I don’t have a single resolved stable summary yet because authoritative guidance remains contested around: {summary}"
-        ),
+        ContestedCitationPolicy::SuppressSupportingDetail => {
+            "I don’t have a single resolved stable summary yet because authoritative guidance remains contested.".to_string()
+        }
     }
 }
 
@@ -4199,6 +4253,21 @@ fn contested_summary_policy_for_match(
     }
 
     authority_registry.contested_summary_policy_for_domains(&domains)
+}
+
+fn contested_citation_policy_for_match(
+    query: &str,
+    reflection: &AggregatedMatch,
+    authority_registry: &SourceAuthorityRegistry,
+) -> ContestedCitationPolicy {
+    let mut domains = reflection_match_authority_domains(reflection);
+    for domain in infer_authority_domains(query) {
+        if !domains.contains(&domain) {
+            domains.push(domain);
+        }
+    }
+
+    authority_registry.contested_citation_policy_for_domains(&domains)
 }
 
 fn reflection_match_authority_domains(candidate: &AggregatedMatch) -> Vec<SourceAuthorityDomain> {
@@ -4732,6 +4801,16 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
         policy: ContestedSummaryPolicy,
     ) -> Self {
         Arc::make_mut(&mut self.authority_registry).set_contested_summary_policy(domain, policy);
+        self
+    }
+
+    /// Control how much contested-answer detail should be surfaced for one domain.
+    pub fn contested_citation_policy(
+        mut self,
+        domain: SourceAuthorityDomain,
+        policy: ContestedCitationPolicy,
+    ) -> Self {
+        Arc::make_mut(&mut self.authority_registry).set_contested_citation_policy(domain, policy);
         self
     }
 
@@ -5830,6 +5909,232 @@ mod tests {
             answer
                 .answer
                 .contains("authoritative guidance remains contested")
+        );
+    }
+
+    #[test]
+    fn compose_answer_can_hide_competing_summary_when_citation_policy_prefers_winner_only() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_authoritative_chain("runtime-ops")
+                    .with_reference_chain("deployment-docs")
+                    .with_contested_citation_policy(ContestedCitationPolicy::CiteWinnerOnly),
+            )
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Deployment)
+                    .with_authoritative_chain("deployment-docs")
+                    .with_reference_chain("runtime-ops")
+                    .with_contested_citation_policy(ContestedCitationPolicy::CiteWinnerOnly),
+            )
+            .build()
+            .expect("build");
+
+        let at = |value: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .expect("timestamp")
+                .with_timezone(&Utc)
+        };
+
+        for (text, created_at, chain, summary) in [
+            (
+                "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service.",
+                "2026-03-31T18:10:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Runtime startup guidance repeats the native Windows scheduled task at logon.",
+                "2026-03-31T18:15:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+                "2026-03-31T17:50:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+            (
+                "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon.",
+                "2026-03-31T17:55:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+        ] {
+            engine
+                .store(&RichTestMem {
+                    id: None,
+                    text: text.into(),
+                    created_at: at(created_at),
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::from([
+                        ("source_trust".to_string(), "trusted".to_string()),
+                        ("source_kind".to_string(), "project-doc".to_string()),
+                        ("source_verification".to_string(), "verified".to_string()),
+                        ("source_chain".to_string(), chain.to_string()),
+                        (
+                            "knowledge_key".to_string(),
+                            "femind-runtime-startup-host-contested-winner-only".to_string(),
+                        ),
+                        ("knowledge_summary".to_string(), summary.to_string()),
+                        ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                    ]),
+                })
+                .expect("store support");
+        }
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: format!("Stable startup host choice: {}", object.summary),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "What is the current supported startup path for femind-embed-service?",
+                &AssemblyConfig::default(),
+                5,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "stable-summary");
+        assert_eq!(answer.basis, CompositionEvidenceBasis::Reflected);
+        assert_eq!(answer.rationale, "contested-reflected-summary");
+        assert!(!answer.abstained);
+        assert!(answer.answer.contains("This remains contested."));
+        assert!(answer.answer.contains(
+            "Use the native Windows scheduled task at logon to launch femind-embed-service."
+        ));
+        assert!(
+            !answer.answer.contains(
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts."
+            )
+        );
+    }
+
+    #[test]
+    fn compose_answer_can_suppress_supporting_detail_for_contested_winner_note() {
+        use crate::context::AssemblyConfig;
+
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_authoritative_chain("runtime-ops")
+                    .with_reference_chain("deployment-docs")
+                    .with_contested_summary_policy(ContestedSummaryPolicy::WinnerWithConflictNote)
+                    .with_contested_citation_policy(
+                        ContestedCitationPolicy::SuppressSupportingDetail,
+                    ),
+            )
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Deployment)
+                    .with_authoritative_chain("deployment-docs")
+                    .with_reference_chain("runtime-ops")
+                    .with_contested_summary_policy(ContestedSummaryPolicy::WinnerWithConflictNote)
+                    .with_contested_citation_policy(
+                        ContestedCitationPolicy::SuppressSupportingDetail,
+                    ),
+            )
+            .build()
+            .expect("build");
+
+        let at = |value: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .expect("timestamp")
+                .with_timezone(&Utc)
+        };
+
+        for (text, created_at, chain, summary) in [
+            (
+                "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service.",
+                "2026-03-31T18:10:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Runtime startup guidance repeats the native Windows scheduled task at logon.",
+                "2026-03-31T18:15:00Z",
+                "runtime-ops",
+                "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+            ),
+            (
+                "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+                "2026-03-31T17:50:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+            (
+                "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon.",
+                "2026-03-31T17:55:00Z",
+                "deployment-docs",
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+            ),
+        ] {
+            engine
+                .store(&RichTestMem {
+                    id: None,
+                    text: text.into(),
+                    created_at: at(created_at),
+                    memory_type: MemoryType::Procedural,
+                    metadata: HashMap::from([
+                        ("source_trust".to_string(), "trusted".to_string()),
+                        ("source_kind".to_string(), "project-doc".to_string()),
+                        ("source_verification".to_string(), "verified".to_string()),
+                        ("source_chain".to_string(), chain.to_string()),
+                        (
+                            "knowledge_key".to_string(),
+                            "femind-runtime-startup-host-contested-suppress-detail".to_string(),
+                        ),
+                        ("knowledge_summary".to_string(), summary.to_string()),
+                        ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                    ]),
+                })
+                .expect("store support");
+        }
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: format!("Stable startup host choice: {}", object.summary),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        let answer = engine
+            .compose_answer_with_config(
+                "Based on current evidence, what is the current supported startup path for femind-embed-service?",
+                &AssemblyConfig::default(),
+                5,
+            )
+            .expect("compose");
+
+        assert_eq!(answer.kind, "stable-summary");
+        assert_eq!(answer.basis, CompositionEvidenceBasis::Blended);
+        assert_eq!(answer.rationale, "winner-with-conflict-note");
+        assert!(!answer.abstained);
+        assert!(
+            answer
+                .answer
+                .contains("Note: authoritative guidance remains contested.")
+        );
+        assert!(!answer.answer.contains("Supported by:"));
+        assert!(
+            !answer.answer.contains(
+                "Keep femind-embed-service running inside WSL systemd before the Windows session starts."
+            )
         );
     }
 

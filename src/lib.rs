@@ -72,8 +72,8 @@ pub mod prelude {
     pub use crate::error::{FemindError, Result};
     pub use crate::memory::store::StoreResult;
     pub use crate::scoring::{
-        ContestedSummaryPolicy, ReviewApprovalTemplate, ReviewPolicyClass, ReviewScope,
-        ReviewSeverity, ReviewStatus, SecretClass, SourceAuthorityDomain,
+        ContestedCitationPolicy, ContestedSummaryPolicy, ReviewApprovalTemplate, ReviewPolicyClass,
+        ReviewScope, ReviewSeverity, ReviewStatus, SecretClass, SourceAuthorityDomain,
         SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy, SourceAuthorityLevel,
         SourceAuthorityPolicy, SourceAuthorityRegistry,
     };

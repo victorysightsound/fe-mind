@@ -42,8 +42,8 @@ mod app {
     use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
     use femind::scoring::redact_secret_material;
     use femind::scoring::{
-        ContestedSummaryPolicy, SourceAuthorityDomain, SourceAuthorityDomainPolicy,
-        SourceAuthorityKindPolicy, SourceAuthorityLevel,
+        ContestedCitationPolicy, ContestedSummaryPolicy, SourceAuthorityDomain,
+        SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy, SourceAuthorityLevel,
     };
     use femind::search::{QueryIntent, QueryRoute, SearchMode, StableSummaryPolicy};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
@@ -177,6 +177,8 @@ mod app {
         reference_kinds: Vec<String>,
         #[serde(default)]
         contested_summary_policy: Option<String>,
+        #[serde(default)]
+        contested_citation_policy: Option<String>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -3374,6 +3376,11 @@ mod app {
                 parse_contested_summary_policy(contested_summary_policy)?,
             );
         }
+        if let Some(contested_citation_policy) = &policy.contested_citation_policy {
+            domain_policy = domain_policy.with_contested_citation_policy(
+                parse_contested_citation_policy(contested_citation_policy)?,
+            );
+        }
 
         Ok(domain_policy)
     }
@@ -3393,6 +3400,26 @@ mod app {
             }
             other => Err(format!(
                 "unknown contested_summary_policy '{other}', expected prefer-contested-answer | winner-with-conflict-note | abstain-until-resolved"
+            )
+            .into()),
+        }
+    }
+
+    fn parse_contested_citation_policy(
+        value: &str,
+    ) -> Result<ContestedCitationPolicy, Box<dyn std::error::Error>> {
+        match value.trim().to_lowercase().as_str() {
+            "cite-both-sides" | "both-sides" | "both" => {
+                Ok(ContestedCitationPolicy::CiteBothSides)
+            }
+            "cite-winner-only" | "winner-only" | "winner" => {
+                Ok(ContestedCitationPolicy::CiteWinnerOnly)
+            }
+            "suppress-supporting-detail" | "suppress" | "no-detail" => {
+                Ok(ContestedCitationPolicy::SuppressSupportingDetail)
+            }
+            other => Err(format!(
+                "unknown contested_citation_policy '{other}', expected cite-both-sides | cite-winner-only | suppress-supporting-detail"
             )
             .into()),
         }

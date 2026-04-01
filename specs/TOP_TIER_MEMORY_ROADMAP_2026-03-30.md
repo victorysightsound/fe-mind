@@ -274,6 +274,11 @@ Current status after the 2026-03-30 trust/safety pass:
     - surface the explicit contested answer
     - surface the current winner plus a conflict note
     - or abstain until the disagreement is resolved
+  - apps should also be able to decide by authority domain how much contested
+    citation detail should surface:
+    - cite both sides
+    - cite only the current winner
+    - suppress supporting detail entirely in higher-risk domains
 
 ### 6. Keep Evaluation Engine-Centric
 
