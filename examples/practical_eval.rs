@@ -269,6 +269,8 @@ mod app {
         refresh_on_competing_trusted_summary: Option<bool>,
         #[serde(default)]
         retire_when_no_longer_qualified: Option<bool>,
+        #[serde(default)]
+        retire_when_unresolved_authority_conflict: Option<bool>,
     }
 
     impl Default for ScenarioReflectionRefreshConfig {
@@ -283,6 +285,7 @@ mod app {
                 refresh_on_summary_change: None,
                 refresh_on_competing_trusted_summary: None,
                 retire_when_no_longer_qualified: None,
+                retire_when_unresolved_authority_conflict: None,
             }
         }
     }
@@ -986,6 +989,7 @@ mod app {
         authority_score_sum: u32,
         provenance_score_sum: u32,
         contested: bool,
+        unresolved_authority_conflict: bool,
         competing_summary_count: usize,
         #[serde(skip_serializing_if = "Option::is_none")]
         strongest_competing_summary: Option<String>,
@@ -1006,6 +1010,7 @@ mod app {
         authority_score_sum: u32,
         provenance_score_sum: u32,
         contested: bool,
+        unresolved_authority_conflict: bool,
         source_ids: Vec<i64>,
         created_at: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -1766,6 +1771,12 @@ mod app {
         }
         if let Some(value) = scenario.reflection_refresh.retire_when_no_longer_qualified {
             policy.retire_when_no_longer_qualified = value;
+        }
+        if let Some(value) = scenario
+            .reflection_refresh
+            .retire_when_unresolved_authority_conflict
+        {
+            policy.retire_when_unresolved_authority_conflict = value;
         }
         policy
     }
@@ -2608,6 +2619,7 @@ mod app {
             authority_score_sum: object.authority_score_sum,
             provenance_score_sum: object.provenance_score_sum,
             contested: object.contested,
+            unresolved_authority_conflict: object.unresolved_authority_conflict,
             competing_summary_count: object.competing_summary_count,
             strongest_competing_summary: object.strongest_competing_summary.clone(),
             source_ids: object.source_ids.clone(),
@@ -2630,6 +2642,7 @@ mod app {
             authority_score_sum: summary.authority_score_sum,
             provenance_score_sum: summary.provenance_score_sum,
             contested: summary.contested,
+            unresolved_authority_conflict: summary.unresolved_authority_conflict,
             source_ids: summary.source_ids.clone(),
             created_at: summary.created_at.to_rfc3339(),
             valid_until: summary.valid_until.map(|value| value.to_rfc3339()),

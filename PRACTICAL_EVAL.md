@@ -167,6 +167,7 @@ Each scenario should include:
   - `authoritative_support_count`
   - `authority_score_sum`
   - `provenance_score_sum`
+  - `unresolved_authority_conflict`
 - `reflection_checks` can now assert `min_authoritative_support_count`
 - `reflection_checks` can now also assert:
   - `min_authority_score_sum`
@@ -432,7 +433,13 @@ Current validated baseline:
 - the same refresh policy now also covers quality regressions:
   - support weakening
   - trusted-summary contention
+  - unresolved authoritative conflict
   - retirement when a current reflected row no longer qualifies
+- apps can now decide whether unresolved equal-strength authoritative
+  disagreement should:
+  - keep the current reflected summary but mark it contested
+  - or retire the persisted summary entirely through
+    `retire_when_unresolved_authority_conflict`
 - the practical harness can now validate those refresh decisions end to end:
   - apply follow-up records after the initial persisted reflection pass
   - mutate supporting records so support can genuinely weaken or disappear

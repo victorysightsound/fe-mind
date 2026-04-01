@@ -173,6 +173,16 @@ The practical live-validation path is now established and repeatable:
     - stronger multi-domain chain coverage
     - weaker multi-domain chain coverage
     - weaker provenance under unchanged multi-domain authority policy
+- reflection lifecycle now also handles unresolved authoritative disagreement:
+  - persisted reflection rows record
+    `reflection_unresolved_authority_conflict`
+  - refresh planning can now emit
+    `unresolved-authoritative-conflict`
+  - applications can choose whether equal-strength authoritative disagreement
+    should leave the current summary contested or retire it entirely through
+    `ReflectionRefreshPolicy.retire_when_unresolved_authority_conflict`
+  - the engine-first practical suite now proves both outcomes under
+    app-facing authority-domain policy
 - routed retrieval now also has an explicit `stable-summary` intent:
   questions that clearly ask for the supported, preferred, recommended, or
   current durable summary can automatically prefer current reflected knowledge

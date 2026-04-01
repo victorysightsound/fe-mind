@@ -240,6 +240,9 @@ pub struct KnowledgeObject {
     pub provenance_score_sum: u32,
     /// Whether another qualified summary cluster competes with this one.
     pub contested: bool,
+    /// Whether the strongest competing summary is substantively equal on
+    /// authority/support/provenance, leaving no clear authoritative winner.
+    pub unresolved_authority_conflict: bool,
     /// Number of competing qualified summary clusters for the same knowledge key.
     pub competing_summary_count: usize,
     /// Strongest competing summary text when the reflected knowledge is contested.
@@ -280,6 +283,7 @@ pub struct PersistedKnowledgeSummary {
     pub authority_score_sum: u32,
     pub provenance_score_sum: u32,
     pub contested: bool,
+    pub unresolved_authority_conflict: bool,
     pub competing_summary_count: usize,
     pub strongest_competing_summary: Option<String>,
     pub strongest_competing_support_count: usize,
@@ -333,6 +337,7 @@ pub struct ReflectionRefreshPolicy {
     pub refresh_on_summary_change: bool,
     pub refresh_on_competing_trusted_summary: bool,
     pub retire_when_no_longer_qualified: bool,
+    pub retire_when_unresolved_authority_conflict: bool,
 }
 
 impl Default for ReflectionRefreshPolicy {
@@ -346,6 +351,7 @@ impl Default for ReflectionRefreshPolicy {
             refresh_on_summary_change: true,
             refresh_on_competing_trusted_summary: true,
             retire_when_no_longer_qualified: true,
+            retire_when_unresolved_authority_conflict: false,
         }
     }
 }
@@ -365,6 +371,7 @@ pub enum ReflectionRefreshReason {
     AuthorityWeakened,
     ProvenanceWeakened,
     CompetingTrustedSummary,
+    UnresolvedAuthoritativeConflict,
     NoLongerQualifies,
 }
 
@@ -383,6 +390,7 @@ impl ReflectionRefreshReason {
             Self::AuthorityWeakened => "authority-weakened",
             Self::ProvenanceWeakened => "provenance-weakened",
             Self::CompetingTrustedSummary => "competing-trusted-summary",
+            Self::UnresolvedAuthoritativeConflict => "unresolved-authoritative-conflict",
             Self::NoLongerQualifies => "no-longer-qualifies",
         }
     }
@@ -1368,6 +1376,14 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 let reasons =
                     reflection_refresh_reasons(object.as_ref(), current.as_ref(), policy, now);
                 let action = match (object.is_some(), current.is_some()) {
+                    (true, true)
+                        if policy.retire_when_unresolved_authority_conflict
+                            && object
+                                .as_ref()
+                                .is_some_and(|object| object.unresolved_authority_conflict) =>
+                    {
+                        ReflectionRefreshAction::Retire
+                    }
                     (true, _) => ReflectionRefreshAction::Persist,
                     (false, true) => ReflectionRefreshAction::Retire,
                     (false, false) => ReflectionRefreshAction::Persist,
@@ -2726,6 +2742,10 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                 object.contested.to_string(),
             );
             metadata.insert(
+                "reflection_unresolved_authority_conflict".to_string(),
+                object.unresolved_authority_conflict.to_string(),
+            );
+            metadata.insert(
                 "reflection_competing_summary_count".to_string(),
                 object.competing_summary_count.to_string(),
             );
@@ -3003,6 +3023,10 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                         .get("reflection_contested")
                         .and_then(|value| value.parse::<bool>().ok())
                         .unwrap_or(false),
+                    unresolved_authority_conflict: metadata
+                        .get("reflection_unresolved_authority_conflict")
+                        .and_then(|value| value.parse::<bool>().ok())
+                        .unwrap_or(false),
                     competing_summary_count: metadata
                         .get("reflection_competing_summary_count")
                         .and_then(|value| value.parse::<usize>().ok())
@@ -3263,6 +3287,9 @@ impl ReflectionCluster {
         competing_summary_count: usize,
     ) -> KnowledgeObject {
         let contested = competing_summary_count > 0;
+        let unresolved_authority_conflict = strongest_competing
+            .map(|cluster| self.has_unresolved_authority_conflict_with(cluster))
+            .unwrap_or(false);
         let strongest_competing_summary =
             strongest_competing.map(|cluster| cluster.summary.clone());
         let strongest_competing_support_count =
@@ -3289,6 +3316,7 @@ impl ReflectionCluster {
             authority_score_sum: self.authority_sum,
             provenance_score_sum: self.provenance_sum,
             contested,
+            unresolved_authority_conflict,
             competing_summary_count,
             strongest_competing_summary,
             strongest_competing_support_count,
@@ -3306,6 +3334,16 @@ impl ReflectionCluster {
             .then(left.support_count().cmp(&right.support_count()))
             .then(left.provenance_sum.cmp(&right.provenance_sum))
             .then(left.newest_created_at.cmp(&right.newest_created_at))
+    }
+
+    fn has_unresolved_authority_conflict_with(&self, other: &Self) -> bool {
+        self.authoritative_support_count > 0
+            && other.authoritative_support_count > 0
+            && self.authoritative_support_count == other.authoritative_support_count
+            && self.authority_sum == other.authority_sum
+            && self.trusted_support_count == other.trusted_support_count
+            && self.support_count() == other.support_count()
+            && self.provenance_sum == other.provenance_sum
     }
 }
 
@@ -3573,6 +3611,13 @@ fn reflection_refresh_reasons(
                         != object.strongest_competing_trusted_support_count)
             {
                 reasons.push(ReflectionRefreshReason::CompetingTrustedSummary);
+            }
+
+            if object.unresolved_authority_conflict
+                && (!current.unresolved_authority_conflict
+                    || current.strongest_competing_summary != object.strongest_competing_summary)
+            {
+                reasons.push(ReflectionRefreshReason::UnresolvedAuthoritativeConflict);
             }
 
             if let Some(max_age) = policy.max_age {
@@ -7073,6 +7118,156 @@ mod tests {
             !plan[0]
                 .reasons
                 .contains(&ReflectionRefreshReason::AuthorityWeakened)
+        );
+    }
+
+    #[test]
+    fn reflection_refresh_plan_can_retire_unresolved_authority_conflict() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                    .with_authoritative_chain("runtime-ops")
+                    .with_reference_chain("deployment-docs"),
+            )
+            .authority_domain_policy(
+                SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::Deployment)
+                    .with_authoritative_chain("deployment-docs")
+                    .with_reference_chain("runtime-ops"),
+            )
+            .build()
+            .expect("build");
+
+        let at = |value: &str| {
+            DateTime::parse_from_rfc3339(value)
+                .expect("timestamp")
+                .with_timezone(&Utc)
+        };
+
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service.".into(),
+                created_at: at("2026-03-31T18:10:00Z"),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("source_chain".to_string(), "runtime-ops".to_string()),
+                    (
+                        "knowledge_key".to_string(),
+                        "femind-runtime-startup-host-retire".to_string(),
+                    ),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.".to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store runtime one");
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Runtime startup guidance repeats the native Windows scheduled task at logon.".into(),
+                created_at: at("2026-03-31T18:15:00Z"),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("source_chain".to_string(), "runtime-ops".to_string()),
+                    (
+                        "knowledge_key".to_string(),
+                        "femind-runtime-startup-host-retire".to_string(),
+                    ),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Use the native Windows scheduled task at logon to launch femind-embed-service.".to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store runtime two");
+
+        engine
+            .persist_reflected_knowledge_objects_with(&ReflectionConfig::default(), |object| {
+                Some(RichTestMem {
+                    id: None,
+                    text: object.summary.clone(),
+                    created_at: object.generated_at,
+                    memory_type: MemoryType::Semantic,
+                    metadata: HashMap::new(),
+                })
+            })
+            .expect("persist");
+
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts.".into(),
+                created_at: at("2026-03-31T17:50:00Z"),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("source_chain".to_string(), "deployment-docs".to_string()),
+                    (
+                        "knowledge_key".to_string(),
+                        "femind-runtime-startup-host-retire".to_string(),
+                    ),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Keep femind-embed-service running inside WSL systemd before the Windows session starts.".to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store deployment one");
+        engine
+            .store(&RichTestMem {
+                id: None,
+                text: "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon.".into(),
+                created_at: at("2026-03-31T17:55:00Z"),
+                memory_type: MemoryType::Procedural,
+                metadata: HashMap::from([
+                    ("source_trust".to_string(), "trusted".to_string()),
+                    ("source_kind".to_string(), "project-doc".to_string()),
+                    ("source_verification".to_string(), "verified".to_string()),
+                    ("source_chain".to_string(), "deployment-docs".to_string()),
+                    (
+                        "knowledge_key".to_string(),
+                        "femind-runtime-startup-host-retire".to_string(),
+                    ),
+                    (
+                        "knowledge_summary".to_string(),
+                        "Keep femind-embed-service running inside WSL systemd before the Windows session starts.".to_string(),
+                    ),
+                    ("knowledge_kind".to_string(), "stable-procedure".to_string()),
+                ]),
+            })
+            .expect("store deployment two");
+
+        let plan = engine
+            .reflection_refresh_plan(
+                &ReflectionConfig::default(),
+                &ReflectionRefreshPolicy {
+                    retire_when_unresolved_authority_conflict: true,
+                    ..ReflectionRefreshPolicy::default()
+                },
+            )
+            .expect("plan");
+
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].action, ReflectionRefreshAction::Retire);
+        let object = plan[0].object.as_ref().expect("object");
+        assert!(object.contested);
+        assert!(object.unresolved_authority_conflict);
+        assert!(
+            plan[0]
+                .reasons
+                .contains(&ReflectionRefreshReason::UnresolvedAuthoritativeConflict)
         );
     }
 

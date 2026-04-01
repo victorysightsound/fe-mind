@@ -2257,6 +2257,47 @@ family, not only when its best single-domain match changes.
   practical `83/83` exact, practical `83/83` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 063: Treat Unresolved Authoritative Reflection Conflict Explicitly
+
+**Date:** 2026-03-31
+
+**Decision:** Add an explicit unresolved-authority-conflict state to
+deterministic reflection lifecycle, and let applications choose whether
+equally strong authoritative disagreement should keep the current reflected
+summary contested or retire it entirely.
+
+**Context:** Decision 062 made reflection authority scoring multi-domain, but
+the lifecycle still assumed there would always be a single strongest winner
+once authority and provenance were summed. That left a real production gap:
+- two different authoritative domain policies could remain in unresolved
+  disagreement over the same `knowledge_key`
+- the current reflection lifecycle could describe that as “competing” but not
+  model it as its own durable state
+- applications had no policy control over whether a contested current summary
+  was acceptable or whether persisted reflection should retire until the
+  conflict was resolved
+
+For a top-tier memory engine, reflected knowledge should not silently pretend a
+winner exists when equally strong authoritative chains remain in live conflict.
+
+**Consequences:**
+- reflected knowledge objects and persisted reflection summaries now carry
+  `unresolved_authority_conflict`
+- refresh planning can now emit
+  `ReflectionRefreshReason::UnresolvedAuthoritativeConflict`
+- `ReflectionRefreshPolicy` now includes:
+  - `retire_when_unresolved_authority_conflict`
+- when that policy is `false`, FeMind can keep the current reflected summary
+  but mark it contested under equal-strength authoritative disagreement
+- when that policy is `true`, FeMind can retire the persisted reflection
+  instead of leaving any summary current
+- the engine-first practical suite now includes:
+  - `reflection-refresh-domain-policy-unresolved-conflict-persist`
+  - `reflection-refresh-domain-policy-unresolved-conflict-retire`
+- Remote-GPU validation is green after the change:
+  practical `86/86` exact, practical `86/86` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

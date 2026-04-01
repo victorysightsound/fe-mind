@@ -253,6 +253,14 @@ Current status after the 2026-03-30 trust/safety pass:
     profile of a fact family, not just one strongest domain match
   - app-facing authority-domain defaults should influence reflected knowledge
     refresh the same way they already influence retrieval
+- reflected knowledge now also needs unresolved-conflict policy, not only
+  winner refresh:
+  - equally strong authoritative domain disagreement should be detectable as
+    its own lifecycle state
+  - applications should be able to choose whether that state leaves the
+    current reflection contested or retires it entirely
+  - the engine-first suite should keep proving both outcomes under
+    app-facing authority-domain policy
 
 ### 6. Keep Evaluation Engine-Centric
 
