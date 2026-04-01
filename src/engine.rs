@@ -21,7 +21,8 @@ use crate::scoring::{
     query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
     query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
     review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
-    source_authority_rank_for_domains, source_provenance_rank, source_trust_level,
+    source_authority_rank_for_domains, source_authority_score_sum_for_domains,
+    source_provenance_rank, source_trust_level,
 };
 use crate::search::StableSummaryPolicy;
 use crate::search::builder::SearchBuilder;
@@ -2649,6 +2650,11 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                     &authority_domains,
                     Some(self.authority_registry.as_ref()),
                 );
+                let authority_score = source_authority_score_sum_for_domains(
+                    &meta,
+                    &authority_domains,
+                    Some(self.authority_registry.as_ref()),
+                );
 
                 candidates.push(ReflectionCandidate {
                     memory_id,
@@ -2662,8 +2668,8 @@ impl<T: MemoryRecord> MemoryEngine<T> {
                         crate::scoring::SourceTrustLevel::Trusted
                             | crate::scoring::SourceTrustLevel::Normal
                     ),
-                    authoritative_support: authority_rank > 0,
-                    authority_rank,
+                    authoritative_support: authority_rank >= 100,
+                    authority_score,
                     provenance_rank: source_provenance_rank(&meta),
                 });
             }
@@ -3175,7 +3181,7 @@ struct ReflectionCandidate {
     created_at: DateTime<Utc>,
     trusted_support: bool,
     authoritative_support: bool,
-    authority_rank: u8,
+    authority_score: u16,
     provenance_rank: u8,
 }
 
@@ -3202,7 +3208,7 @@ impl ReflectionCluster {
             source_ids: vec![candidate.memory_id],
             trusted_support_count: usize::from(candidate.trusted_support),
             authoritative_support_count: usize::from(candidate.authoritative_support),
-            authority_sum: u32::from(candidate.authority_rank),
+            authority_sum: u32::from(candidate.authority_score),
             provenance_sum: u32::from(candidate.provenance_rank),
             newest_created_at,
         }
@@ -3218,7 +3224,7 @@ impl ReflectionCluster {
         if candidate.authoritative_support {
             self.authoritative_support_count += 1;
         }
-        self.authority_sum += u32::from(candidate.authority_rank);
+        self.authority_sum += u32::from(candidate.authority_score);
         self.provenance_sum += u32::from(candidate.provenance_rank);
         if candidate.created_at >= self.newest_created_at {
             self.newest_created_at = candidate.created_at;

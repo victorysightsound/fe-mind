@@ -3382,5 +3382,458 @@
         ]
       }
     ]
+  },
+  {
+    "id": "reflection-refresh-domain-policy-authority-strengthened-same-summary",
+    "title": "Reflection refresh should strengthen across multiple authority domains under app policy",
+    "category": "reflection-refresh-lifecycle",
+    "goal": "A persisted reflection should refresh when the same summary shifts from deployment-heavy chain support to stronger runtime-scoped chain support under app-facing domain policy.",
+    "authority_domain_policies": [
+      {
+        "domain": "runtime",
+        "authoritative_chains": [
+          "runtime-ops"
+        ],
+        "reference_chains": [
+          "deployment-docs"
+        ]
+      },
+      {
+        "domain": "deployment",
+        "authoritative_chains": [
+          "deployment-docs"
+        ],
+        "primary_chains": [
+          "runtime-ops"
+        ]
+      }
+    ],
+    "records": [
+      {
+        "key": "domain-auth-old-one",
+        "timestamp": "2026-03-30T14:00:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-startup-path",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Deployment docs say the native Windows scheduled task at logon launches femind-embed-service."
+      },
+      {
+        "key": "domain-auth-old-two",
+        "timestamp": "2026-03-30T14:05:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-startup-path",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Deployment bootstrap guidance repeats the native Windows scheduled task at logon."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 2,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_followup_records": [
+      {
+        "key": "domain-auth-new-one",
+        "timestamp": "2026-03-31T14:00:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-startup-path",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service."
+      },
+      {
+        "key": "domain-auth-new-two",
+        "timestamp": "2026-03-31T14:05:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-startup-path",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Runtime operations bootstrap guidance repeats the native Windows scheduled task at logon."
+      }
+    ],
+    "reflection_followup_mutations": [
+      {
+        "key": "domain-auth-old-one",
+        "remove_metadata_keys": [
+          "knowledge_key",
+          "knowledge_summary",
+          "knowledge_kind"
+        ]
+      },
+      {
+        "key": "domain-auth-old-two",
+        "remove_metadata_keys": [
+          "knowledge_key",
+          "knowledge_summary",
+          "knowledge_kind"
+        ]
+      }
+    ],
+    "reflection_refresh_checks": [
+      {
+        "key": "femind-runtime-startup-path",
+        "expected_action": "persist",
+        "required_reasons": [
+          "authority-strengthened"
+        ],
+        "forbidden_reasons": [
+          "summary-changed",
+          "support-growth",
+          "support-weakened",
+          "provenance-strengthened",
+          "provenance-weakened"
+        ],
+        "expected_current_present": true,
+        "expected_current_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_latest_status": "current"
+      }
+    ],
+    "reflection_checks": [
+      {
+        "key": "femind-runtime-startup-path",
+        "expected_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_kind": "stable-procedure",
+        "expected_contested": false,
+        "min_support_count": 2,
+        "min_trusted_support_count": 2,
+        "min_authoritative_support_count": 2,
+        "min_authority_score_sum": 360,
+        "min_confidence": "high",
+        "required_fragments": [
+          "native Windows scheduled task",
+          "logon"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "reflection-refresh-domain-policy-authority-weakened-same-summary",
+    "title": "Reflection refresh should weaken across multiple authority domains under app policy",
+    "category": "reflection-refresh-lifecycle",
+    "goal": "A persisted reflection should refresh when the same summary loses stronger runtime-scoped chain coverage and falls back to weaker deployment-heavy support under app-facing domain policy.",
+    "authority_domain_policies": [
+      {
+        "domain": "runtime",
+        "authoritative_chains": [
+          "runtime-ops"
+        ],
+        "reference_chains": [
+          "deployment-docs"
+        ]
+      },
+      {
+        "domain": "deployment",
+        "authoritative_chains": [
+          "deployment-docs"
+        ],
+        "primary_chains": [
+          "runtime-ops"
+        ]
+      }
+    ],
+    "records": [
+      {
+        "key": "domain-weak-old-one",
+        "timestamp": "2026-03-30T15:00:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-startup-path-weakened",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service."
+      },
+      {
+        "key": "domain-weak-old-two",
+        "timestamp": "2026-03-30T15:05:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-startup-path-weakened",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Runtime operations bootstrap guidance repeats the native Windows scheduled task at logon."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 2,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_followup_records": [
+      {
+        "key": "domain-weak-new-one",
+        "timestamp": "2026-03-31T15:00:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-startup-path-weakened",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Deployment docs say the native Windows scheduled task at logon launches femind-embed-service."
+      },
+      {
+        "key": "domain-weak-new-two",
+        "timestamp": "2026-03-31T15:05:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-startup-path-weakened",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Deployment bootstrap guidance repeats the native Windows scheduled task at logon."
+      }
+    ],
+    "reflection_followup_mutations": [
+      {
+        "key": "domain-weak-old-one",
+        "remove_metadata_keys": [
+          "knowledge_key",
+          "knowledge_summary",
+          "knowledge_kind"
+        ]
+      },
+      {
+        "key": "domain-weak-old-two",
+        "remove_metadata_keys": [
+          "knowledge_key",
+          "knowledge_summary",
+          "knowledge_kind"
+        ]
+      }
+    ],
+    "reflection_refresh_checks": [
+      {
+        "key": "femind-runtime-startup-path-weakened",
+        "expected_action": "persist",
+        "required_reasons": [
+          "authority-weakened"
+        ],
+        "forbidden_reasons": [
+          "summary-changed",
+          "support-growth",
+          "support-weakened",
+          "provenance-strengthened",
+          "provenance-weakened"
+        ],
+        "expected_current_present": true,
+        "expected_current_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_latest_status": "current"
+      }
+    ],
+    "reflection_checks": [
+      {
+        "key": "femind-runtime-startup-path-weakened",
+        "expected_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_kind": "stable-procedure",
+        "expected_contested": false,
+        "min_support_count": 2,
+        "min_trusted_support_count": 2,
+        "min_authoritative_support_count": 2,
+        "min_authority_score_sum": 260,
+        "min_confidence": "high",
+        "required_fragments": [
+          "native Windows scheduled task",
+          "logon"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "reflection-refresh-domain-policy-provenance-weakened-same-summary",
+    "title": "Reflection refresh should detect provenance drift across a multi-domain key",
+    "category": "reflection-refresh-lifecycle",
+    "goal": "A persisted reflection should refresh when the same multi-domain summary keeps the same authority policy coverage but drops from verified to relayed support.",
+    "authority_domain_policies": [
+      {
+        "domain": "runtime",
+        "authoritative_kinds": [
+          "system"
+        ]
+      },
+      {
+        "domain": "deployment",
+        "primary_kinds": [
+          "system"
+        ]
+      }
+    ],
+    "records": [
+      {
+        "key": "domain-prov-old-one",
+        "timestamp": "2026-03-30T16:00:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "knowledge_key": "femind-runtime-startup-path-verified",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Observed runtime startup path: use the native Windows scheduled task at logon to launch femind-embed-service."
+      },
+      {
+        "key": "domain-prov-old-two",
+        "timestamp": "2026-03-30T16:05:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "verified",
+          "knowledge_key": "femind-runtime-startup-path-verified",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Observed startup note confirms the native Windows scheduled task at logon."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 2,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_followup_records": [
+      {
+        "key": "domain-prov-new-one",
+        "timestamp": "2026-03-31T16:00:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "relayed",
+          "knowledge_key": "femind-runtime-startup-path-verified",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Relayed system startup note says the native Windows scheduled task at logon launches femind-embed-service."
+      },
+      {
+        "key": "domain-prov-new-two",
+        "timestamp": "2026-03-31T16:05:00Z",
+        "source": "system-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "system",
+          "source_verification": "relayed",
+          "knowledge_key": "femind-runtime-startup-path-verified",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Second relayed system note repeats the native Windows scheduled task at logon startup path."
+      }
+    ],
+    "reflection_followup_mutations": [
+      {
+        "key": "domain-prov-old-one",
+        "remove_metadata_keys": [
+          "knowledge_key",
+          "knowledge_summary",
+          "knowledge_kind"
+        ]
+      },
+      {
+        "key": "domain-prov-old-two",
+        "remove_metadata_keys": [
+          "knowledge_key",
+          "knowledge_summary",
+          "knowledge_kind"
+        ]
+      }
+    ],
+    "reflection_refresh_checks": [
+      {
+        "key": "femind-runtime-startup-path-verified",
+        "expected_action": "persist",
+        "required_reasons": [
+          "provenance-weakened"
+        ],
+        "forbidden_reasons": [
+          "summary-changed",
+          "support-growth",
+          "support-weakened",
+          "authority-strengthened",
+          "authority-weakened"
+        ],
+        "expected_current_present": true,
+        "expected_current_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_latest_status": "current"
+      }
+    ],
+    "reflection_checks": [
+      {
+        "key": "femind-runtime-startup-path-verified",
+        "expected_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_kind": "stable-procedure",
+        "expected_contested": false,
+        "min_support_count": 2,
+        "min_trusted_support_count": 2,
+        "min_authoritative_support_count": 2,
+        "min_authority_score_sum": 360,
+        "min_provenance_score_sum": 134,
+        "min_confidence": "high",
+        "required_fragments": [
+          "native Windows scheduled task",
+          "logon"
+        ]
+      }
+    ]
   }
 ]

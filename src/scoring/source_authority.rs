@@ -572,13 +572,7 @@ pub(crate) fn source_authority_rank(
     domain: Option<SourceAuthorityDomain>,
     registry: Option<&SourceAuthorityRegistry>,
 ) -> u8 {
-    match source_authority_level_for_domain(record, domain, registry) {
-        SourceAuthorityLevel::Authoritative => 100,
-        SourceAuthorityLevel::Primary => 80,
-        SourceAuthorityLevel::Delegated => 55,
-        SourceAuthorityLevel::Reference => 30,
-        SourceAuthorityLevel::Unknown => 0,
-    }
+    authority_rank_for_level(source_authority_level_for_domain(record, domain, registry))
 }
 
 pub(crate) fn source_authority_rank_for_domains(
@@ -586,13 +580,23 @@ pub(crate) fn source_authority_rank_for_domains(
     domains: &[SourceAuthorityDomain],
     registry: Option<&SourceAuthorityRegistry>,
 ) -> u8 {
-    match source_authority_level_for_domains(record, domains, registry) {
-        SourceAuthorityLevel::Authoritative => 100,
-        SourceAuthorityLevel::Primary => 80,
-        SourceAuthorityLevel::Delegated => 55,
-        SourceAuthorityLevel::Reference => 30,
-        SourceAuthorityLevel::Unknown => 0,
-    }
+    authority_rank_for_level(source_authority_level_for_domains(record, domains, registry))
+}
+
+pub(crate) fn source_authority_score_sum_for_domains(
+    record: &MemoryMeta,
+    domains: &[SourceAuthorityDomain],
+    registry: Option<&SourceAuthorityRegistry>,
+) -> u16 {
+    domains
+        .iter()
+        .copied()
+        .map(|domain| authority_rank_for_level(source_authority_level_for_domain(
+            record,
+            Some(domain),
+            registry,
+        )) as u16)
+        .sum()
 }
 
 pub(crate) fn source_chain_for_domain(
@@ -754,6 +758,16 @@ fn parse_domain_tag(raw: &str) -> Option<SourceAuthorityDomain> {
             Some(SourceAuthorityDomain::Maintenance)
         }
         _ => None,
+    }
+}
+
+fn authority_rank_for_level(level: SourceAuthorityLevel) -> u8 {
+    match level {
+        SourceAuthorityLevel::Authoritative => 100,
+        SourceAuthorityLevel::Primary => 80,
+        SourceAuthorityLevel::Delegated => 55,
+        SourceAuthorityLevel::Reference => 30,
+        SourceAuthorityLevel::Unknown => 0,
     }
 }
 
@@ -1027,6 +1041,39 @@ mod tests {
         assert_eq!(
             source_chain_for_domains(&record, &domains, Some(&registry)),
             None
+        );
+    }
+
+    #[test]
+    fn multi_domain_score_sum_accumulates_matching_domains() {
+        let record = meta(None, None, None, Some("maintainer"));
+        let registry = SourceAuthorityRegistry::new()
+            .with_kind_policy(SourceAuthorityKindPolicy::new(
+                SourceAuthorityDomain::RuntimeOps,
+                "maintainer",
+                SourceAuthorityLevel::Authoritative,
+            ))
+            .with_kind_policy(SourceAuthorityKindPolicy::new(
+                SourceAuthorityDomain::Networking,
+                "maintainer",
+                SourceAuthorityLevel::Primary,
+            ))
+            .with_kind_policy(SourceAuthorityKindPolicy::new(
+                SourceAuthorityDomain::Deployment,
+                "maintainer",
+                SourceAuthorityLevel::Reference,
+            ));
+
+        let domains =
+            infer_authority_domains("Which runtime startup path should the service use through the private endpoint on the GPU host now?");
+
+        assert_eq!(
+            source_authority_rank_for_domains(&record, &domains, Some(&registry)),
+            100
+        );
+        assert_eq!(
+            source_authority_score_sum_for_domains(&record, &domains, Some(&registry)),
+            210
         );
     }
 }

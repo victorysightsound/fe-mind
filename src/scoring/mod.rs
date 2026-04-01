@@ -39,7 +39,7 @@ pub use source_authority::{
 };
 pub(crate) use source_authority::{
     infer_authority_domain, infer_authority_domains, source_authority_rank_for_domains,
-    source_chain_for_domains,
+    source_authority_score_sum_for_domains, source_chain_for_domains,
 };
 pub use source_provenance::SourceProvenanceScorer;
 pub(crate) use source_provenance::source_provenance_rank;

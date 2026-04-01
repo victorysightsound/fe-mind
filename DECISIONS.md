@@ -2217,6 +2217,46 @@ provenance profile matters too.
   practical `77/77` exact, practical `77/77` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 062: Make Reflection Authority Scoring Multi-Domain
+
+**Decision:** For deterministic reflection, accumulate authority score across
+all inferred authority domains instead of using only the strongest single
+domain match, and extend the engine-first practical suite to prove same-summary
+authority drift under app-facing domain policy.
+
+**Context:** Decision 061 made reflected knowledge refresh on authority and
+provenance drift, but reflection still reduced each supporting record to a
+single strongest authority rank. That left a deeper gap:
+- reflected keys such as runtime startup paths implicitly span multiple domains
+  like `runtime` and `deployment`
+- app-facing `SourceAuthorityDomainPolicy` defaults could already shape
+  retrieval, but reflection did not yet reward broader matching domain
+  coverage across those same domains
+- same-summary lifecycle cases could still miss a meaningful shift from
+  deployment-heavy support to runtime-scoped support if both records had one
+  equally strong single-domain rank
+
+For a production memory engine, reflected knowledge should notice when a
+summary becomes better grounded across the full domain profile of the fact
+family, not only when its best single-domain match changes.
+
+**Consequences:**
+- reflection candidate authority now uses a summed multi-domain score via
+  `source_authority_score_sum_for_domains(...)`
+- `authoritative_support_count` now counts only truly authoritative supporting
+  records, not any nonzero authority match
+- practical reflection checks can now assert:
+  - `min_authority_score_sum`
+  - `min_provenance_score_sum`
+- the engine-first suite now includes multi-domain same-summary lifecycle
+  coverage under app-facing domain policy:
+  - `reflection-refresh-domain-policy-authority-strengthened-same-summary`
+  - `reflection-refresh-domain-policy-authority-weakened-same-summary`
+  - `reflection-refresh-domain-policy-provenance-weakened-same-summary`
+- Remote-GPU validation is green after the change:
+  practical `83/83` exact, practical `83/83` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

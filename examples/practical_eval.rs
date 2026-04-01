@@ -302,6 +302,10 @@ mod app {
         #[serde(default)]
         min_authoritative_support_count: Option<usize>,
         #[serde(default)]
+        min_authority_score_sum: Option<u32>,
+        #[serde(default)]
+        min_provenance_score_sum: Option<u32>,
+        #[serde(default)]
         min_confidence: Option<String>,
         #[serde(default)]
         required_fragments: Vec<String>,
@@ -1017,6 +1021,8 @@ mod app {
         support_ok: bool,
         trusted_support_ok: bool,
         authoritative_support_ok: bool,
+        authority_score_ok: bool,
+        provenance_score_ok: bool,
         confidence_ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         expected_contested: Option<bool>,
@@ -2681,6 +2687,16 @@ mod app {
                 .min_authoritative_support_count
                 .is_none_or(|minimum| object.authoritative_support_count >= minimum)
         });
+        let authority_score_ok = matched.is_none_or(|object| {
+            check
+                .min_authority_score_sum
+                .is_none_or(|minimum| object.authority_score_sum >= minimum)
+        });
+        let provenance_score_ok = matched.is_none_or(|object| {
+            check
+                .min_provenance_score_sum
+                .is_none_or(|minimum| object.provenance_score_sum >= minimum)
+        });
         let confidence_ok = matched.is_none_or(|object| {
             check.min_confidence.as_ref().is_none_or(|minimum| {
                 confidence_rank(object.confidence.as_str()) >= confidence_rank(minimum)
@@ -2715,6 +2731,8 @@ mod app {
             support_ok,
             trusted_support_ok,
             authoritative_support_ok,
+            authority_score_ok,
+            provenance_score_ok,
             confidence_ok,
             expected_contested: check.expected_contested,
             observed_contested: matched.map(|object| object.contested),
@@ -2728,6 +2746,8 @@ mod app {
             && criteria.support_ok
             && criteria.trusted_support_ok
             && criteria.authoritative_support_ok
+            && criteria.authority_score_ok
+            && criteria.provenance_score_ok
             && criteria.confidence_ok
             && criteria.missing_required_fragments.is_empty()
             && criteria.present_forbidden_fragments.is_empty();

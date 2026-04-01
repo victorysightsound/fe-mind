@@ -163,6 +163,16 @@ The practical live-validation path is now established and repeatable:
     - `authority-weakened`
     - `provenance-strengthened`
     - `provenance-weakened`
+- reflection authority scoring is now multi-domain, not single-max:
+  - for reflection, authority score sums now accumulate across all inferred
+    authority domains instead of collapsing to the single strongest match
+  - that lets persisted reflections refresh when the same summary gains or
+    loses stronger domain coverage under app-facing `SourceAuthorityDomainPolicy`
+    defaults
+  - the practical suite now proves same-summary drift for:
+    - stronger multi-domain chain coverage
+    - weaker multi-domain chain coverage
+    - weaker provenance under unchanged multi-domain authority policy
 - routed retrieval now also has an explicit `stable-summary` intent:
   questions that clearly ask for the supported, preferred, recommended, or
   current durable summary can automatically prefer current reflected knowledge

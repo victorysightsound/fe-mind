@@ -248,6 +248,11 @@ Current status after the 2026-03-30 trust/safety pass:
   - same-summary refresh when provenance weakens even without text drift
   - key-scoped authority routing so reflected runtime knowledge is not dragged
     off course by deployment-specific wording in the supporting text
+- reflected knowledge now also needs multi-domain authority accounting:
+  - lifecycle should see stronger or weaker coverage across the whole domain
+    profile of a fact family, not just one strongest domain match
+  - app-facing authority-domain defaults should influence reflected knowledge
+    refresh the same way they already influence retrieval
 
 ### 6. Keep Evaluation Engine-Centric
 

@@ -168,6 +168,9 @@ Each scenario should include:
   - `authority_score_sum`
   - `provenance_score_sum`
 - `reflection_checks` can now assert `min_authoritative_support_count`
+- `reflection_checks` can now also assert:
+  - `min_authority_score_sum`
+  - `min_provenance_score_sum`
 - source authority metadata on records such as:
   - `source_authority_domain`
   - `source_authority_level`
@@ -184,6 +187,12 @@ Each scenario should include:
   - weaker provenance on the same summary
   - those cases are expected to refresh even when `knowledge_summary` itself
     does not change
+- reflection lifecycle coverage now also includes multi-domain authority drift
+  under app-facing domain policy:
+  - stronger runtime/deployment chain coverage for the same summary
+  - weaker runtime/deployment chain coverage for the same summary
+  - weaker provenance for the same summary while authority policy coverage
+    stays constant
   - provenance still matters inside an authoritative source kind, so
     `partially-verified` and `relayed` guidance do not collapse into the same
     answer quality
