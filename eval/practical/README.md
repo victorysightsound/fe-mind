@@ -210,8 +210,8 @@ Current local baseline:
 - the practical set now also includes explicit remote-failover policy coverage
   for both embedding and reranking, so remote-loss and remote-recovery
   guidance can be regression-tested alongside ordinary retrieval behavior
-- reranker-aware remote-fallback regression is currently green at `45/45`
-- reranker-aware remote-fallback ANN regression is also green at `45/45`
+- reranker-aware remote-fallback regression is currently green at `105/105`
+- reranker-aware remote-fallback ANN regression is also green at `105/105`
 - failover-oriented practical runs should use `FEMIND_EMBED_RUNTIME=remote-fallback`
   and `FEMIND_RERANK_RUNTIME=remote-fallback` so outage handling is exercised
   in the same path production uses

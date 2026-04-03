@@ -46,4 +46,4 @@ EOF
 bootstrap_fake_cuda
 
 scripts/run-release-gate.sh "$@"
-cargo publish --dry-run
+cargo publish --dry-run --allow-dirty

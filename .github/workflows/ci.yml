@@ -27,6 +27,8 @@ jobs:
             run: cargo test --features full
           - lane: docs
             run: cargo doc --features full --no-deps
+          - lane: release-preflight
+            run: scripts/run-release-preflight.sh
 
     steps:
       - name: Checkout

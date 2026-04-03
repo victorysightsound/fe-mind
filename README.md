@@ -56,8 +56,8 @@ The practical live-validation path is now established and repeatable:
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`
 - recommended CLI extraction default: Codex CLI `gpt-5.4-mini`
 - lower-cost CLI fallback: Codex CLI `gpt-5.1-codex-mini`
-- retrieval-only practical eval in `exact` mode currently passes `56/56`
-- retrieval-only practical eval in `ann` mode currently passes `56/56`
+- retrieval-only practical eval in `exact` mode currently passes `105/105`
+- retrieval-only practical eval in `ann` mode currently passes `105/105`
 - practical eval now includes explicit graph-linked state-history, aggregation,
   graph-connected, provenance/abstention, trust/procedural safety, and
   provenance/review-guardrail plus review-policy-transition coverage, not just

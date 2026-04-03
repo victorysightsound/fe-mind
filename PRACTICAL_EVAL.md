@@ -374,8 +374,8 @@ Current validated baseline:
 - extraction-only practical eval with DeepInfra `openai/gpt-oss-120b` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.4-mini` passes `4/4`
 - extraction-only practical eval with Codex CLI `gpt-5.1-codex-mini` passes `4/4`
-- retrieval-only practical eval with `vector_mode=exact` currently passes `50/50`
-- retrieval-only practical eval with `vector_mode=ann` currently passes `50/50`
+- retrieval-only practical eval with `vector_mode=exact` currently passes `105/105`
+- retrieval-only practical eval with `vector_mode=ann` currently passes `105/105`
 - summary artifact: `target/practical-eval/retrieval-exact.json`
 - practical coverage now includes explicit linked supersession/history,
   aggregation, graph-connected, provenance/abstention, and trust/procedural
