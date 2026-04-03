@@ -17,14 +17,23 @@ cargo doc --features full --no-deps
 hosts. It bootstraps a temporary fake CUDA toolkit so the full-feature crate
 checks do not require a real GPU during local or CI validation.
 
+`scripts/run-release-preflight.sh` runs the release gate and then performs a
+`cargo publish --dry-run` package check.
+
 Use `scripts/run-cuda-smoke.sh` on a real CUDA host to validate the native
 `cuda` feature path. That script requires a real toolkit and does not fall back
 to a fake CUDA stub.
+
+The GitHub Actions workflow mirrors the same split:
+
+- hosted lanes cover the release gate, default tests, full tests, and docs
+- the CUDA smoke lane is manual and targets a self-hosted CUDA runner
 
 ## Before A Release
 
 - Run `cargo fmt --check`
 - Run `scripts/run-release-gate.sh`
+- Run `scripts/run-release-preflight.sh`
 - Run `scripts/run-practical-eval.sh` if the practical live-validation pass is in scope
 - Run `scripts/run-cuda-smoke.sh` on a real CUDA host when that validation is in scope
 - Confirm `cargo test --features full`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo doc --features full --no-deps` are green

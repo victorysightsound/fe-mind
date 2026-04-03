@@ -1632,6 +1632,141 @@
     ]
   },
   {
+    "id": "remote-failover-embedding-policy",
+    "title": "Remote embedding loss should fall back and recover cleanly",
+    "category": "runtime-failover",
+    "goal": "Document the preferred remote-then-local embedding policy so retrieval can validate failover guidance directly.",
+    "records": [
+      {
+        "key": "remote-failover-preferred",
+        "timestamp": "2026-04-01T09:00:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "ops",
+          "source_verification": "verified"
+        },
+        "text": "When the preferred remote embedding host is healthy, FeMind should use remote MiniLM for embeddings and reranking."
+      },
+      {
+        "key": "remote-failover-fallback",
+        "timestamp": "2026-04-01T09:05:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "ops",
+          "source_verification": "verified"
+        },
+        "text": "If the remote embedding host fails or times out, FeMind should fall back to local CPU immediately and keep serving requests."
+      },
+      {
+        "key": "remote-failover-recovery",
+        "timestamp": "2026-04-01T09:10:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "ops",
+          "source_verification": "verified"
+        },
+        "text": "When the remote host is healthy again, FeMind should retry in the background and promote the remote host back automatically after verification."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What should FeMind do if the preferred remote embedding host fails?",
+        "expected_answer": "Fall back to local CPU immediately and keep serving requests.",
+        "required_fragments": [
+          "local CPU immediately",
+          "keep serving requests"
+        ],
+        "forbidden_fragments": [
+          "wait for manual intervention"
+        ]
+      },
+      {
+        "query": "What should FeMind do when the remote embedding host becomes healthy again?",
+        "expected_answer": "Retry in the background and promote the remote host back automatically after verification.",
+        "required_fragments": [
+          "retry in the background",
+          "promote the remote host back automatically"
+        ],
+        "forbidden_fragments": [
+          "manual toggle"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "remote-failover-reranker-policy",
+    "title": "Remote reranker loss should recover through the same policy",
+    "category": "runtime-failover",
+    "goal": "Keep reranking aligned with the same remote-primary and local-fallback contract as embeddings.",
+    "records": [
+      {
+        "key": "rerank-failover-preferred",
+        "timestamp": "2026-04-01T09:20:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "ops",
+          "source_verification": "verified"
+        },
+        "text": "The remote reranker is the preferred primary path when healthy."
+      },
+      {
+        "key": "rerank-failover-fallback",
+        "timestamp": "2026-04-01T09:25:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "ops",
+          "source_verification": "verified"
+        },
+        "text": "If the remote reranker fails, FeMind should use the local reranker fallback and keep search responsive."
+      },
+      {
+        "key": "rerank-failover-recovery",
+        "timestamp": "2026-04-01T09:30:00Z",
+        "source": "ops-note",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "ops",
+          "source_verification": "verified"
+        },
+        "text": "After the remote reranker recovers, FeMind should return to the remote primary path automatically."
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What should FeMind do if the remote reranker fails?",
+        "expected_answer": "Use the local reranker fallback and keep search responsive.",
+        "required_fragments": [
+          "local reranker fallback",
+          "keep search responsive"
+        ],
+        "forbidden_fragments": [
+          "manual intervention"
+        ]
+      },
+      {
+        "query": "What should FeMind do after the remote reranker recovers?",
+        "expected_answer": "Return to the remote primary path automatically.",
+        "required_fragments": [
+          "remote primary path automatically"
+        ],
+        "forbidden_fragments": [
+          "stay on fallback forever"
+        ]
+      }
+    ]
+  },
+  {
     "id": "trusted-procedural-conflict-resolution",
     "title": "Trusted procedural conflicts should prefer the stronger provenance source",
     "category": "trust-and-procedural-safety",

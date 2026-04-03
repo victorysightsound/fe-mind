@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Harden embed-service request limits, shutdown behavior, and remote error handling
+- Add shared backend policy state for remote fallback and recovery
+- Expand practical eval with explicit remote failover scenarios
+- Expand CI with separate default, full, docs, and manual CUDA smoke lanes
+- Add release preflight automation for release-gate plus `cargo publish --dry-run`
+
 ## v0.2.0
 
 - Publish the renamed `femind` crate as the successor to `mindcore`

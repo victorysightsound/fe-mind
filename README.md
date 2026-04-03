@@ -46,6 +46,11 @@ validation on an actual CUDA machine.
 Use `scripts/run-cuda-smoke.sh` on a real CUDA host when you need to validate
 the native `cuda` feature path itself.
 
+GitHub Actions mirrors that split:
+
+- hosted validation covers the release gate, default tests, full tests, and docs
+- the CUDA smoke lane is manual and runs only on a self-hosted CUDA runner
+
 The practical live-validation path is now established and repeatable:
 
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`

@@ -80,6 +80,11 @@ The curated eval set should cover these categories:
     objects from repeated trusted evidence without forcing benchmark-oriented
     summarization into the tuning loop.
 
+12. Remote failover and recovery policy
+    The system should preserve the documented remote-primary, local-fallback,
+    and remote-recovery guidance so outage handling stays explicit and
+    repeatable.
+
 ## Eval Artifact Layout
 
 The curated eval set lives under `eval/practical/`.
@@ -266,6 +271,19 @@ scripts/run-practical-eval.sh
 
 That path uses the remote GPU service first and falls back to the local Candle
 backends if the remote service is unavailable.
+
+Recommended remote-failover regression path when you want to exercise outage
+handling explicitly:
+
+```bash
+FEMIND_EMBED_RUNTIME=remote-fallback \
+FEMIND_RERANK_RUNTIME=remote-fallback \
+scripts/run-practical-eval.sh
+```
+
+That path uses the same remote-primary / local-fallback contract the
+production service uses, so failover guidance stays covered by the practical
+suite.
 
 When a retrieval check fails and you want raw keyword/vector/hybrid traces in
 the summary artifact, set:

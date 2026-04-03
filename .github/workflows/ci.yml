@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,9 +22,11 @@ jobs:
           - lane: release-gate
             run: scripts/run-release-gate.sh
           - lane: default-features
-            run: |
-              cargo test
-              cargo doc --no-deps
+            run: cargo test
+          - lane: full-features
+            run: cargo test --features full
+          - lane: docs
+            run: cargo doc --features full --no-deps
 
     steps:
       - name: Checkout
@@ -36,3 +39,18 @@ jobs:
         env:
           FEMIND_SKIP_PRACTICAL_EVAL: "1"
         run: ${{ matrix.run }}
+
+  cuda-smoke:
+    name: CUDA smoke
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, cuda]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run CUDA smoke
+        run: scripts/run-cuda-smoke.sh

@@ -153,6 +153,11 @@ FEMIND_EMBED_RUNTIME=remote-fallback \
 FEMIND_RERANK_RUNTIME=remote-fallback \
 scripts/run-practical-eval.sh
 
+# Remote-failover regression path
+FEMIND_EMBED_RUNTIME=remote-fallback \
+FEMIND_RERANK_RUNTIME=remote-fallback \
+scripts/run-practical-eval.sh
+
 # Include raw keyword/vector/hybrid traces for failed retrieval checks
 FEMIND_EVAL_EXPLAIN_FAILURES=1 \
 scripts/run-practical-eval.sh
@@ -202,8 +207,14 @@ Current local baseline:
 - the practical set now also includes higher-impact approval-class routing for
   auth bypass, destructive resets, and traffic cutovers, plus pending-review
   detection for those note types
+- the practical set now also includes explicit remote-failover policy coverage
+  for both embedding and reranking, so remote-loss and remote-recovery
+  guidance can be regression-tested alongside ordinary retrieval behavior
 - reranker-aware remote-fallback regression is currently green at `45/45`
 - reranker-aware remote-fallback ANN regression is also green at `45/45`
+- failover-oriented practical runs should use `FEMIND_EMBED_RUNTIME=remote-fallback`
+  and `FEMIND_RERANK_RUNTIME=remote-fallback` so outage handling is exercised
+  in the same path production uses
 - the practical set now also validates deterministic reflection over repeated
   trusted evidence for:
   - stable supported procedures
