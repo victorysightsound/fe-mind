@@ -43,6 +43,8 @@ sqlite3 .docs/femind_spec.db "SELECT section_id, title FROM sections ORDER BY so
 ```
 
 The Markdown docs in this repo should stay aligned with `.docs/femind_spec.db`.
+After editing spec/roadmap markdown, run `scripts/sync-docs-db.py` to refresh the
+canonical DB before relying on DIAL or release validation.
 
 ---
 

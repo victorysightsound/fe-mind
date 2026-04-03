@@ -13,15 +13,22 @@
 #![cfg(feature = "local-embeddings")]
 
 use femind::embeddings::pooling::cosine_similarity;
-use femind::embeddings::{CandleNativeBackend, EmbeddingBackend};
+use femind::embeddings::{
+    CandleNativeBackend, EmbeddingBackend, MINILM_CANONICAL_NAME, MINILM_MODEL_REPO,
+    MINILM_SHORT_NAME,
+};
 
 #[test]
 fn candle_backend_loads_and_embeds() {
-    let backend = CandleNativeBackend::new().expect("failed to load all-MiniLM-L6-v2");
+    let backend = CandleNativeBackend::new().expect("failed to load local-minilm");
 
     assert_eq!(backend.dimensions(), 384);
     assert!(backend.is_available());
-    assert_eq!(backend.model_name(), "all-MiniLM-L6-v2");
+    assert_eq!(backend.model_name(), MINILM_CANONICAL_NAME);
+    let compatibility = backend.compatibility_model_names();
+    assert!(compatibility.contains(&MINILM_CANONICAL_NAME.to_string()));
+    assert!(compatibility.contains(&MINILM_MODEL_REPO.to_string()));
+    assert!(compatibility.contains(&MINILM_SHORT_NAME.to_string()));
 
     let vec = backend
         .embed("authentication error with JWT token")

@@ -304,9 +304,7 @@ mod inner {
                 })
                 .or(Ok(Device::Cpu)),
             LocalEmbeddingDevice::Cuda => select_cuda_device(cuda_ordinal).map_err(|error| {
-                FemindError::ModelNotAvailable(format!(
-                    "CUDA device {cuda_ordinal} requested but unavailable: {error}"
-                ))
+                FemindError::ModelNotAvailable(cuda_request_error(cuda_ordinal, &error.to_string()))
             }),
         }
     }
@@ -318,7 +316,13 @@ mod inner {
 
     #[cfg(not(feature = "cuda"))]
     fn select_cuda_device(_ordinal: usize) -> std::result::Result<Device, String> {
-        Err("femind was built without the `cuda` feature".to_string())
+        Err("this build was compiled without the `cuda` feature".to_string())
+    }
+
+    fn cuda_request_error(cuda_ordinal: usize, error: &str) -> String {
+        format!(
+            "CUDA device {cuda_ordinal} requested but unavailable: {error}. Rebuild with `--features cuda` or use `--device cpu`."
+        )
     }
 
     pub(crate) fn describe_device(device: &Device) -> String {
@@ -337,6 +341,11 @@ mod inner {
     mod tests {
         use super::execution_mode_from_label;
 
+        #[cfg(not(feature = "cuda"))]
+        use super::select_device;
+        #[cfg(not(feature = "cuda"))]
+        use crate::embeddings::LocalEmbeddingDevice;
+
         #[test]
         fn cpu_like_labels_report_local_cpu() {
             assert_eq!(execution_mode_from_label("cpu"), "local-cpu");
@@ -348,6 +357,16 @@ mod inner {
             assert_eq!(execution_mode_from_label("cuda"), "local-gpu");
             assert_eq!(execution_mode_from_label("cuda:0"), "local-gpu");
             assert_eq!(execution_mode_from_label("device(cuda,0)"), "local-gpu");
+        }
+
+        #[cfg(not(feature = "cuda"))]
+        #[test]
+        fn explicit_cuda_request_reports_actionable_error() {
+            let err = select_device(LocalEmbeddingDevice::Cuda, 0).unwrap_err();
+            let message = err.to_string();
+            assert!(message.contains("compiled without the `cuda` feature"));
+            assert!(message.contains("--features cuda"));
+            assert!(message.contains("--device cpu"));
         }
     }
 }

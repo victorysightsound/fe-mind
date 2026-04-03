@@ -22,6 +22,30 @@ line remains legacy only. Non-LLM verification is currently green:
 - `cargo test --features full`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 
+## Validation
+
+The canonical local release gate is:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --features full
+cargo doc --features full --no-deps
+```
+
+Use `scripts/run-release-gate.sh` to run that same gate from one entry point.
+Set `FEMIND_SKIP_PRACTICAL_EVAL=1` when you want the build-and-doc gate only.
+
+CPU-only hosts do not need CUDA for the release gate above. The script
+bootstraps a temporary fake CUDA toolkit so the full-feature crate checks can
+run on hosted CI and other CPU-only machines.
+
+CUDA is only required for the real device smoke path and any host-specific GPU
+validation on an actual CUDA machine.
+
+Use `scripts/run-cuda-smoke.sh` on a real CUDA host when you need to validate
+the native `cuda` feature path itself.
+
 The practical live-validation path is now established and repeatable:
 
 - recommended API extraction default: DeepInfra `openai/gpt-oss-120b`

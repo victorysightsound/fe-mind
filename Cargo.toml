@@ -118,6 +118,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 sha2 = "0.10"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # Async runtime (only for vector-search background indexer and embedding inference)
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "net", "signal"], optional = true }

@@ -3002,7 +3002,7 @@ mod app {
                     store_scenario_records(engine, &scenario.records)?;
                 apply_scenario_relations(engine, &scenario.id, &scenario.relations, &ids_by_key)?;
                 let _ = store_results;
-                return Ok(ids_by_key);
+                Ok(ids_by_key)
             }
             RetrievalIngest::Extraction => {
                 if !scenario.relations.is_empty() {
@@ -3021,7 +3021,7 @@ mod app {
                     .collect::<Vec<_>>()
                     .join("\n");
                 let _ = engine.store_with_extraction(&raw_text, extractor)?;
-                return Ok(HashMap::new());
+                Ok(HashMap::new())
             }
             RetrievalIngest::Hybrid => {
                 let extractor =
@@ -3037,7 +3037,7 @@ mod app {
                     .collect::<Vec<_>>()
                     .join("\n");
                 let _ = engine.store_with_extraction(&raw_text, extractor)?;
-                return Ok(ids_by_key);
+                Ok(ids_by_key)
             }
         }
     }

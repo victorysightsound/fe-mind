@@ -5,8 +5,10 @@ use femind::embeddings::{
     MINILM_PROFILE, serve_remote_embedding_service_blocking,
 };
 use femind::reranking::{RERANKER_CANONICAL_NAME, RERANKER_PROFILE};
+use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<(), String> {
+    init_logging();
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let Some(first) = args.first().cloned() else {
         return run_serve(&[]);
@@ -23,6 +25,14 @@ fn main() -> Result<(), String> {
         }
         _ => run_serve(&args),
     }
+}
+
+fn init_logging() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .try_init();
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

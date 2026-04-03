@@ -3050,17 +3050,17 @@ fn query_requests_abstention_risk(query: &str) -> bool {
 
 pub(crate) fn query_requests_current_state(query: &str) -> bool {
     let normalized = normalize_text(query);
-    let tokens: Vec<_> = normalized.split_whitespace().collect();
+    let graph_lookup = query_requests_graph_lookup(query);
     normalized.contains("current")
         || normalized.contains("currently")
         || normalized.contains("right now")
-        || tokens.contains(&"now")
         || normalized.contains("latest")
         || normalized.contains("today")
         || normalized.contains("active")
         || normalized.contains("going with")
         || normalized.contains("using now")
         || normalized.contains("preferred now")
+        || (!graph_lookup && normalized.contains("now"))
         || normalized.contains("final")
 }
 

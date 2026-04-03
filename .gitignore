@@ -5,3 +5,7 @@
 .DS_Store
 !.docs/
 !.docs/femind_spec.db
+.dial/*.db
+.dial/*.db-shm
+.dial/*.db-wal
+.dial/task-ledger.md

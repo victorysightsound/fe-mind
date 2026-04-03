@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    name: Validation (${{ matrix.lane }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: release-gate
+            run: scripts/run-release-gate.sh
+          - lane: default-features
+            run: |
+              cargo test
+              cargo doc --no-deps
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run validation lane
+        env:
+          FEMIND_SKIP_PRACTICAL_EVAL: "1"
+        run: ${{ matrix.run }}

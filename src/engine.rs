@@ -3295,7 +3295,7 @@ impl ReflectionCluster {
 
     fn base_confidence(&self, config: &ReflectionConfig) -> CompositionConfidence {
         if self.support_count() >= config.min_support_count
-            && self.trusted_support_count >= config.min_trusted_support_count.max(1) + 1
+            && self.trusted_support_count > config.min_trusted_support_count
         {
             CompositionConfidence::High
         } else if self.qualifies(config) {
@@ -3561,11 +3561,11 @@ fn reflection_refresh_reasons(
     now: DateTime<Utc>,
 ) -> Vec<ReflectionRefreshReason> {
     match (object, current) {
-        (Some(_), None) => return vec![ReflectionRefreshReason::MissingPersisted],
+        (Some(_), None) => vec![ReflectionRefreshReason::MissingPersisted],
         (None, Some(_)) if policy.retire_when_no_longer_qualified => {
-            return vec![ReflectionRefreshReason::NoLongerQualifies];
+            vec![ReflectionRefreshReason::NoLongerQualifies]
         }
-        (None, Some(_)) | (None, None) => return Vec::new(),
+        (None, Some(_)) | (None, None) => Vec::new(),
         (Some(object), Some(current)) => {
             let mut reasons = Vec::new();
 
@@ -3802,18 +3802,18 @@ fn select_yes_no_evidence<'a>(
         }
     }
 
-    let grounded = evidence
-        .iter()
-        .max_by(|left, right| {
-            let left_score = query_literal_grounding_score(query, &left.text);
-            let right_score = query_literal_grounding_score(query, &right.text);
-            left_score.cmp(&right_score).then_with(|| {
-                left.score
-                    .partial_cmp(&right.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+    let grounded = match evidence.iter().max_by(|left, right| {
+        let left_score = query_literal_grounding_score(query, &left.text);
+        let right_score = query_literal_grounding_score(query, &right.text);
+        left_score.cmp(&right_score).then_with(|| {
+            left.score
+                .partial_cmp(&right.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         })
-        .expect("non-empty evidence");
+    }) {
+        Some(hit) => hit,
+        None => best,
+    };
 
     if query_literal_grounding_score(query, &grounded.text) > 0 {
         grounded

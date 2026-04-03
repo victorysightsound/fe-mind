@@ -1,6 +1,12 @@
 #[cfg(feature = "embed-service")]
 mod inner {
-    use std::{sync::Arc, time::Duration};
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::Duration,
+    };
 
     use axum::{
         Json, Router,
@@ -62,6 +68,7 @@ mod inner {
         request_timeout: Option<Duration>,
         max_batch_texts: usize,
         max_batch_documents: usize,
+        request_counter: Arc<AtomicU64>,
     }
 
     #[derive(Clone, serde::Serialize)]
@@ -206,7 +213,18 @@ mod inner {
                 request_timeout: options.request_timeout_secs.map(Duration::from_secs),
                 max_batch_texts: options.max_batch_texts,
                 max_batch_documents: options.max_batch_documents,
+                request_counter: Arc::new(AtomicU64::new(0)),
             };
+
+            tracing::info!(
+                service = "femind-embed-service",
+                model = %state.status.model,
+                execution_mode = %state.status.execution_mode,
+                device_label = %state.status.device_label,
+                request_timeout_secs = ?state.status.request_timeout_secs,
+                max_batch_texts = state.status.max_batch_texts,
+                "service initialized"
+            );
 
             let embed_routes = Router::new()
                 .route("/health", get(health))
@@ -287,13 +305,29 @@ mod inner {
         headers: HeaderMap,
         Json(request): Json<EmbedRequest>,
     ) -> impl IntoResponse {
+        let request_id = state.next_request_id();
         if let Some(response) = authorize(&headers, state.auth_token.as_deref()) {
             return response;
         }
+        tracing::info!(
+            request_id,
+            service = "femind-embed-service",
+            kind = "embed",
+            model = %request.model,
+            "request received"
+        );
         if request.model != MINILM_CANONICAL_NAME
             && request.model != MINILM_MODEL_REPO
             && request.model != MINILM_SHORT_NAME
         {
+            tracing::warn!(
+                request_id,
+                service = "femind-embed-service",
+                kind = "embed",
+                reason = "unsupported-model",
+                model = %request.model,
+                "rejecting request"
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
@@ -310,6 +344,15 @@ mod inner {
         if let Some(expected_profile) = request.expected_embedding_profile.as_deref()
             && expected_profile != MINILM_PROFILE
         {
+            tracing::warn!(
+                request_id,
+                service = "femind-embed-service",
+                kind = "embed",
+                reason = "profile-mismatch",
+                expected_profile = %expected_profile,
+                service_profile = %MINILM_PROFILE,
+                "rejecting request"
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
@@ -338,6 +381,15 @@ mod inner {
         };
 
         if text_inputs.len() > state.max_batch_texts {
+            tracing::warn!(
+                request_id,
+                service = "femind-embed-service",
+                kind = "embed",
+                reason = "batch-too-large",
+                batch_size = text_inputs.len(),
+                max_batch_texts = state.max_batch_texts,
+                "rejecting request"
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
@@ -361,6 +413,14 @@ mod inner {
             match tokio::time::timeout(timeout, embed_future).await {
                 Ok(join_result) => join_result,
                 Err(_) => {
+                    tracing::warn!(
+                        request_id,
+                        service = "femind-embed-service",
+                        kind = "embed",
+                        reason = "timeout",
+                        timeout_secs = timeout.as_secs(),
+                        "request timed out"
+                    );
                     return (
                         StatusCode::REQUEST_TIMEOUT,
                         Json(serde_json::json!({
@@ -391,6 +451,13 @@ mod inner {
             )
                 .into_response(),
             Ok(Ok(vectors)) => {
+                tracing::info!(
+                    request_id,
+                    service = "femind-embed-service",
+                    kind = "embed",
+                    embeddings = vectors.len(),
+                    "request completed"
+                );
                 let data = vectors
                     .into_iter()
                     .enumerate()
@@ -417,13 +484,29 @@ mod inner {
         headers: HeaderMap,
         Json(request): Json<RerankRequest>,
     ) -> impl IntoResponse {
+        let request_id = state.next_request_id();
         if let Some(response) = authorize(&headers, state.auth_token.as_deref()) {
             return response;
         }
+        tracing::info!(
+            request_id,
+            service = "femind-embed-service",
+            kind = "rerank",
+            model = %request.model,
+            "request received"
+        );
         if request.model != RERANKER_CANONICAL_NAME
             && request.model != RERANKER_MODEL_REPO
             && request.model != RERANKER_SHORT_NAME
         {
+            tracing::warn!(
+                request_id,
+                service = "femind-embed-service",
+                kind = "rerank",
+                reason = "unsupported-model",
+                model = %request.model,
+                "rejecting request"
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
@@ -439,6 +522,15 @@ mod inner {
         if let Some(expected_profile) = request.expected_reranker_profile.as_deref()
             && expected_profile != RERANKER_PROFILE
         {
+            tracing::warn!(
+                request_id,
+                service = "femind-embed-service",
+                kind = "rerank",
+                reason = "profile-mismatch",
+                expected_profile = %expected_profile,
+                service_profile = %RERANKER_PROFILE,
+                "rejecting request"
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
@@ -452,6 +544,13 @@ mod inner {
                 .into_response();
         }
         if request.query.trim().is_empty() || request.documents.is_empty() {
+            tracing::warn!(
+                request_id,
+                service = "femind-embed-service",
+                kind = "rerank",
+                reason = "empty-input",
+                "rejecting request"
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
@@ -461,6 +560,15 @@ mod inner {
                 .into_response();
         }
         if request.documents.len() > state.max_batch_documents {
+            tracing::warn!(
+                request_id,
+                service = "femind-embed-service",
+                kind = "rerank",
+                reason = "batch-too-large",
+                batch_size = request.documents.len(),
+                max_batch_documents = state.max_batch_documents,
+                "rejecting request"
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
@@ -486,6 +594,14 @@ mod inner {
             match tokio::time::timeout(timeout, rerank_future).await {
                 Ok(join_result) => join_result,
                 Err(_) => {
+                    tracing::warn!(
+                        request_id,
+                        service = "femind-embed-service",
+                        kind = "rerank",
+                        reason = "timeout",
+                        timeout_secs = timeout.as_secs(),
+                        "request timed out"
+                    );
                     return (
                         StatusCode::REQUEST_TIMEOUT,
                         Json(serde_json::json!({
@@ -516,6 +632,13 @@ mod inner {
             )
                 .into_response(),
             Ok(Ok(scores)) => {
+                tracing::info!(
+                    request_id,
+                    service = "femind-embed-service",
+                    kind = "rerank",
+                    scored = scores.len(),
+                    "request completed"
+                );
                 let results = scores
                     .into_iter()
                     .enumerate()
@@ -559,6 +682,12 @@ mod inner {
                 )
                     .into_response(),
             )
+        }
+    }
+
+    impl ServiceState {
+        fn next_request_id(&self) -> u64 {
+            self.request_counter.fetch_add(1, Ordering::Relaxed) + 1
         }
     }
 

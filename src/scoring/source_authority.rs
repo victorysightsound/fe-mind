@@ -126,8 +126,11 @@ impl std::fmt::Display for SourceAuthorityLevel {
 }
 
 /// App-facing policy for how contested reflected summaries should compose.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum ContestedSummaryPolicy {
+    #[default]
     PreferContestedAnswer,
     WinnerWithConflictNote,
     AbstainUntilResolved,
@@ -143,12 +146,6 @@ impl ContestedSummaryPolicy {
     }
 }
 
-impl Default for ContestedSummaryPolicy {
-    fn default() -> Self {
-        Self::PreferContestedAnswer
-    }
-}
-
 impl std::fmt::Display for ContestedSummaryPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -156,8 +153,11 @@ impl std::fmt::Display for ContestedSummaryPolicy {
 }
 
 /// App-facing policy for how much contested-answer detail should be surfaced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum ContestedCitationPolicy {
+    #[default]
     CiteBothSides,
     CiteWinnerOnly,
     SuppressSupportingDetail,
@@ -170,12 +170,6 @@ impl ContestedCitationPolicy {
             Self::CiteWinnerOnly => "cite-winner-only",
             Self::SuppressSupportingDetail => "suppress-supporting-detail",
         }
-    }
-}
-
-impl Default for ContestedCitationPolicy {
-    fn default() -> Self {
-        Self::CiteBothSides
     }
 }
 
