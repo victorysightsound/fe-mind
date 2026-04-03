@@ -1,3 +1,7 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::backend_policy::{BackendFailureClass, BackendMode, BackendPolicy};
 use crate::embeddings::EmbeddingBackend;
 use crate::error::{FemindError, Result};
 
@@ -11,6 +15,7 @@ pub struct FallbackBackend {
     primary: Option<Box<dyn EmbeddingBackend>>,
     fallback: Option<Box<dyn EmbeddingBackend>>,
     dims: usize,
+    policy: Arc<BackendPolicy>,
 }
 
 impl FallbackBackend {
@@ -21,6 +26,7 @@ impl FallbackBackend {
             primary: Some(backend),
             fallback: None,
             dims,
+            policy: Arc::new(BackendPolicy::new(Duration::from_secs(30))),
         }
     }
 
@@ -30,6 +36,7 @@ impl FallbackBackend {
             primary: None,
             fallback: None,
             dims,
+            policy: Arc::new(BackendPolicy::new(Duration::from_secs(30))),
         }
     }
 
@@ -46,6 +53,7 @@ impl FallbackBackend {
             primary: Some(api),
             fallback: Some(local),
             dims,
+            policy: Arc::new(BackendPolicy::new(Duration::from_secs(30))),
         }
     }
 
@@ -55,20 +63,49 @@ impl FallbackBackend {
             || self.fallback.as_ref().is_some_and(|b| b.is_available())
     }
 
+    pub fn backend_mode(&self) -> BackendMode {
+        self.policy.mode()
+    }
+
+    pub fn last_failure_message(&self) -> Option<String> {
+        self.policy.last_failure_message()
+    }
+
     /// Try primary, fall back to secondary on error.
     fn try_with_fallback<F, T>(&self, op: F) -> Result<T>
     where
         F: Fn(&dyn EmbeddingBackend) -> Result<T>,
     {
         if let Some(ref primary) = self.primary {
-            if primary.is_available() {
+            if self.policy.mode() == BackendMode::Offline {
+                return Err(FemindError::ModelNotAvailable(
+                    self.policy
+                        .last_failure_message()
+                        .unwrap_or_else(|| "remote embedding backend is offline".to_string()),
+                ));
+            }
+
+            if primary.is_available() && self.policy.should_attempt_primary() {
+                self.policy.begin_recovery_attempt();
                 match op(primary.as_ref()) {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        if self.fallback.is_some() {
-                            tracing::warn!("Primary embedding failed, falling back to local: {e}");
-                        } else {
-                            return Err(e);
+                    Ok(result) => {
+                        self.policy.record_success();
+                        return Ok(result);
+                    }
+                    Err(error) => {
+                        let class = BackendPolicy::classify_error(&error);
+                        self.policy.record_failure(class, error.to_string());
+                        match class {
+                            BackendFailureClass::Permanent => return Err(error),
+                            BackendFailureClass::Transient => {
+                                if self.fallback.is_some() {
+                                    tracing::warn!(
+                                        "Primary embedding failed, falling back to local: {error}"
+                                    );
+                                } else {
+                                    return Err(error);
+                                }
+                            }
                         }
                     }
                 }
@@ -142,6 +179,28 @@ mod tests {
     use super::*;
     use crate::embeddings::NoopBackend;
 
+    struct MismatchBackend;
+
+    impl EmbeddingBackend for MismatchBackend {
+        fn embed(&self, _text: &str) -> Result<Vec<f32>> {
+            Err(FemindError::RemoteProfileMismatch(
+                "profile mismatch".into(),
+            ))
+        }
+
+        fn dimensions(&self) -> usize {
+            384
+        }
+
+        fn is_available(&self) -> bool {
+            true
+        }
+
+        fn model_name(&self) -> &str {
+            "remote"
+        }
+    }
+
     #[test]
     fn with_backend() {
         let backend = FallbackBackend::new(Box::new(NoopBackend::new(384)));
@@ -193,10 +252,24 @@ mod tests {
             primary: None,
             fallback: Some(Box::new(NoopBackend::new(384))),
             dims: 384,
+            policy: Arc::new(BackendPolicy::new(Duration::from_secs(30))),
         };
 
         assert!(backend.is_available());
         let vec = backend.embed("test").expect("should use fallback");
         assert_eq!(vec.len(), 384);
+    }
+
+    #[test]
+    fn permanent_primary_failure_is_not_masked() {
+        let backend = FallbackBackend {
+            primary: Some(Box::new(MismatchBackend)),
+            fallback: Some(Box::new(NoopBackend::new(384))),
+            dims: 384,
+            policy: Arc::new(BackendPolicy::new(Duration::from_secs(30))),
+        };
+
+        let result = backend.embed("test");
+        assert!(matches!(result, Err(FemindError::RemoteProfileMismatch(_))));
     }
 }

@@ -20,6 +20,22 @@ pub enum FemindError {
     #[error("model not available: {0}")]
     ModelNotAvailable(String),
 
+    /// Remote service rejected the request because credentials were missing or invalid.
+    #[error("remote auth error: {0}")]
+    RemoteAuth(String),
+
+    /// Remote service timed out.
+    #[error("remote timeout: {0}")]
+    RemoteTimeout(String),
+
+    /// Remote service transport failed before a valid response was received.
+    #[error("remote transport error: {0}")]
+    RemoteTransport(String),
+
+    /// Remote service was unavailable or returned a temporary failure.
+    #[error("remote unavailable: {0}")]
+    RemoteUnavailable(String),
+
     /// JSON serialization/deserialization of MemoryRecord or metadata failed.
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
@@ -36,6 +52,10 @@ pub enum FemindError {
         /// The current embedding backend's model name.
         current: String,
     },
+
+    /// Remote service reported a profile or model mismatch.
+    #[error("remote profile mismatch: {0}")]
+    RemoteProfileMismatch(String),
 
     /// Schema migration failed (version mismatch, DDL error).
     #[error("migration error: {0}")]
@@ -77,6 +97,14 @@ mod tests {
         };
         assert!(err.to_string().contains("model-a"));
         assert!(err.to_string().contains("model-b"));
+    }
+
+    #[test]
+    fn remote_error_display() {
+        let auth = FemindError::RemoteAuth("token missing".into());
+        let mismatch = FemindError::RemoteProfileMismatch("expected foo".into());
+        assert!(auth.to_string().contains("remote auth error"));
+        assert!(mismatch.to_string().contains("remote profile mismatch"));
     }
 
     #[test]

@@ -47,6 +47,7 @@
 //! | `mcp-server` | MCP server interface |
 //! | `full` | All features except encryption and mcp-server |
 
+pub mod backend_policy;
 pub mod callbacks;
 pub mod context;
 pub mod embeddings;

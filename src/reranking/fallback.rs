@@ -1,3 +1,7 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::backend_policy::{BackendFailureClass, BackendMode, BackendPolicy};
 use crate::error::{FemindError, Result};
 use crate::traits::{RerankCandidate, RerankerBackend, ScoredResult};
 
@@ -5,6 +9,7 @@ use crate::traits::{RerankCandidate, RerankerBackend, ScoredResult};
 pub struct FallbackRerankerBackend {
     primary: Option<Box<dyn RerankerBackend>>,
     fallback: Option<Box<dyn RerankerBackend>>,
+    policy: Arc<BackendPolicy>,
 }
 
 impl FallbackRerankerBackend {
@@ -12,6 +17,7 @@ impl FallbackRerankerBackend {
         Self {
             primary: Some(backend),
             fallback: None,
+            policy: Arc::new(BackendPolicy::new(Duration::from_secs(30))),
         }
     }
 
@@ -19,6 +25,7 @@ impl FallbackRerankerBackend {
         Self {
             primary: None,
             fallback: None,
+            policy: Arc::new(BackendPolicy::new(Duration::from_secs(30))),
         }
     }
 
@@ -29,7 +36,16 @@ impl FallbackRerankerBackend {
         Self {
             primary: Some(remote),
             fallback: Some(local),
+            policy: Arc::new(BackendPolicy::new(Duration::from_secs(30))),
         }
+    }
+
+    pub fn backend_mode(&self) -> BackendMode {
+        self.policy.mode()
+    }
+
+    pub fn last_failure_message(&self) -> Option<String> {
+        self.policy.last_failure_message()
     }
 
     fn try_with_fallback(
@@ -38,13 +54,36 @@ impl FallbackRerankerBackend {
         candidates: Vec<RerankCandidate>,
     ) -> Result<Vec<ScoredResult>> {
         if let Some(primary) = self.primary.as_ref() {
-            match primary.rerank(query, candidates.clone()) {
-                Ok(result) => return Ok(result),
-                Err(error) => {
-                    if self.fallback.is_some() {
-                        tracing::warn!("primary reranker failed, falling back to local: {error}");
-                    } else {
-                        return Err(error);
+            if self.policy.mode() == BackendMode::Offline {
+                return Err(FemindError::ModelNotAvailable(
+                    self.policy
+                        .last_failure_message()
+                        .unwrap_or_else(|| "remote reranker backend is offline".to_string()),
+                ));
+            }
+
+            if self.policy.should_attempt_primary() {
+                self.policy.begin_recovery_attempt();
+                match primary.rerank(query, candidates.clone()) {
+                    Ok(result) => {
+                        self.policy.record_success();
+                        return Ok(result);
+                    }
+                    Err(error) => {
+                        let class = BackendPolicy::classify_error(&error);
+                        self.policy.record_failure(class, error.to_string());
+                        match class {
+                            BackendFailureClass::Permanent => return Err(error),
+                            BackendFailureClass::Transient => {
+                                if self.fallback.is_some() {
+                                    tracing::warn!(
+                                        "primary reranker failed, falling back to local: {error}"
+                                    );
+                                } else {
+                                    return Err(error);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -72,6 +111,8 @@ mod tests {
 
     struct IdentityReranker;
 
+    struct MismatchReranker;
+
     impl RerankerBackend for IdentityReranker {
         fn rerank(
             &self,
@@ -87,6 +128,18 @@ mod tests {
                     score_multiplier: candidate.score_multiplier,
                 })
                 .collect())
+        }
+    }
+
+    impl RerankerBackend for MismatchReranker {
+        fn rerank(
+            &self,
+            _query: &str,
+            _candidates: Vec<RerankCandidate>,
+        ) -> Result<Vec<ScoredResult>> {
+            Err(FemindError::RemoteProfileMismatch(
+                "profile mismatch".into(),
+            ))
         }
     }
 
@@ -106,5 +159,27 @@ mod tests {
             )
             .expect("rerank");
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn permanent_primary_failure_is_not_masked() {
+        let backend = FallbackRerankerBackend {
+            primary: Some(Box::new(MismatchReranker)),
+            fallback: Some(Box::new(IdentityReranker)),
+            policy: Arc::new(BackendPolicy::new(Duration::from_secs(30))),
+        };
+
+        let result = backend.rerank(
+            "query",
+            vec![RerankCandidate {
+                memory_id: 1,
+                text: "hello".into(),
+                score: 0.5,
+                raw_score: 0.5,
+                score_multiplier: 1.0,
+            }],
+        );
+
+        assert!(matches!(result, Err(FemindError::RemoteProfileMismatch(_))));
     }
 }

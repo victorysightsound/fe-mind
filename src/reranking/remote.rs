@@ -4,6 +4,7 @@ mod inner {
 
     use crate::error::{FemindError, Result};
     use crate::traits::{RerankCandidate, RerankerBackend, ScoredResult};
+    use ureq::{Error as UreqError, ErrorKind as UreqErrorKind};
 
     #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
     pub struct RemoteRerankerStatus {
@@ -161,13 +162,13 @@ mod inner {
                 .iter()
                 .any(|candidate| candidate == &status.model)
             {
-                return Err(FemindError::Embedding(format!(
+                return Err(FemindError::RemoteProfileMismatch(format!(
                     "remote reranker model mismatch: expected one of {:?} but got '{}'",
                     accepted_models, status.model
                 )));
             }
             if status.reranker_profile != self.expected_profile {
-                return Err(FemindError::Embedding(format!(
+                return Err(FemindError::RemoteProfileMismatch(format!(
                     "remote reranker profile mismatch: expected '{}' but got '{}'",
                     self.expected_profile, status.reranker_profile
                 )));
@@ -192,12 +193,12 @@ mod inner {
             if let Some(token) = self.auth_token.as_deref() {
                 request = request.set("Authorization", &format!("Bearer {token}"));
             }
-            let response = request.call().map_err(|e| {
-                FemindError::Embedding(format!("remote reranker status request failed: {e}"))
+            let response = request.call().map_err(|error| {
+                classify_remote_error("remote reranker status request failed", error)
             })?;
 
             response.into_json::<RemoteRerankerStatus>().map_err(|e| {
-                FemindError::Embedding(format!("remote reranker status parse failed: {e}"))
+                FemindError::RemoteUnavailable(format!("remote reranker status parse failed: {e}"))
             })
         }
 
@@ -217,12 +218,12 @@ mod inner {
             if let Some(token) = self.auth_token.as_deref() {
                 request = request.set("Authorization", &format!("Bearer {token}"));
             }
-            let response = request.send_json(&body).map_err(|e| {
-                FemindError::Embedding(format!("remote reranker request failed: {e}"))
-            })?;
+            let response = request
+                .send_json(&body)
+                .map_err(|error| classify_remote_error("remote reranker request failed", error))?;
 
             let mut parsed = response.into_json::<RemoteRerankResponse>().map_err(|e| {
-                FemindError::Embedding(format!("remote reranker parse failed: {e}"))
+                FemindError::RemoteUnavailable(format!("remote reranker parse failed: {e}"))
             })?;
             parsed.results.sort_by_key(|item| item.index);
             Ok(parsed
@@ -297,6 +298,37 @@ mod inner {
             builder = builder.timeout(timeout);
         }
         builder.build()
+    }
+
+    fn classify_remote_error(context: &str, error: UreqError) -> FemindError {
+        match error {
+            UreqError::Status(code, _) if code == 401 || code == 403 => {
+                FemindError::RemoteAuth(format!("{context}: HTTP {code}"))
+            }
+            UreqError::Status(code, _) if code == 408 || code == 504 => {
+                FemindError::RemoteTimeout(format!("{context}: HTTP {code}"))
+            }
+            UreqError::Status(code, _) if code == 429 || code == 503 => {
+                FemindError::RemoteUnavailable(format!("{context}: HTTP {code}"))
+            }
+            UreqError::Status(code, _) => {
+                FemindError::RemoteUnavailable(format!("{context}: HTTP {code}"))
+            }
+            UreqError::Transport(transport) => {
+                let message = transport.to_string();
+                if transport.kind() == UreqErrorKind::Io
+                    && message.to_ascii_lowercase().contains("timed out")
+                {
+                    FemindError::RemoteTimeout(format!("{context}: {message}"))
+                } else if transport.kind() == UreqErrorKind::Dns
+                    || transport.kind() == UreqErrorKind::ConnectionFailed
+                {
+                    FemindError::RemoteUnavailable(format!("{context}: {message}"))
+                } else {
+                    FemindError::RemoteTransport(format!("{context}: {message}"))
+                }
+            }
+        }
     }
 }
 

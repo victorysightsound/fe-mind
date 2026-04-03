@@ -68,6 +68,10 @@ struct FileEmbeddingServiceConfig {
     #[serde(default)]
     request_timeout_secs: Option<u64>,
     #[serde(default)]
+    max_request_body_bytes: Option<usize>,
+    #[serde(default)]
+    max_rerank_body_bytes: Option<usize>,
+    #[serde(default)]
     max_batch_texts: Option<usize>,
     #[serde(default)]
     max_batch_documents: Option<usize>,
@@ -95,6 +99,8 @@ struct FileLocalEmbeddingsConfig {
     execution_mode: Option<String>,
     #[serde(default)]
     device: Option<String>,
+    #[serde(default)]
+    max_request_body_bytes: Option<usize>,
     #[serde(default)]
     remote_service: Option<FileRemoteServiceConfig>,
 }
@@ -131,6 +137,8 @@ struct FileLocalRerankingConfig {
     #[serde(default)]
     device: Option<String>,
     #[serde(default)]
+    max_rerank_body_bytes: Option<usize>,
+    #[serde(default)]
     remote_service: Option<FileRemoteServiceConfig>,
 }
 
@@ -162,6 +170,8 @@ struct RemoteProbeStatus {
     #[serde(default)]
     request_timeout_secs: Option<u64>,
     #[serde(default)]
+    max_request_body_bytes: Option<usize>,
+    #[serde(default)]
     max_batch_texts: Option<usize>,
 }
 
@@ -190,6 +200,8 @@ struct RemoteRerankProbeStatus {
     device_label: Option<String>,
     #[serde(default)]
     request_timeout_secs: Option<u64>,
+    #[serde(default)]
+    max_rerank_body_bytes: Option<usize>,
     #[serde(default)]
     max_batch_documents: Option<usize>,
 }
@@ -246,6 +258,8 @@ struct StatusOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_service_timeout_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    max_request_body_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     remote_service_fallback_to_local: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_service_verify_profile: Option<bool>,
@@ -270,6 +284,8 @@ struct RerankStatusOutput {
     remote_service_base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_service_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_rerank_body_bytes: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_service_fallback_to_local: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -340,6 +356,20 @@ fn run_serve(args: &[String]) -> Result<(), String> {
                     format!("invalid --request-timeout-secs value '{value}': {error}")
                 })?);
             }
+            "--max-request-body-bytes" => {
+                i += 1;
+                let value = required_value(args, i, "--max-request-body-bytes")?;
+                options.max_request_body_bytes = value.parse::<usize>().map_err(|error| {
+                    format!("invalid --max-request-body-bytes value '{value}': {error}")
+                })?;
+            }
+            "--max-rerank-body-bytes" => {
+                i += 1;
+                let value = required_value(args, i, "--max-rerank-body-bytes")?;
+                options.max_rerank_body_bytes = value.parse::<usize>().map_err(|error| {
+                    format!("invalid --max-rerank-body-bytes value '{value}': {error}")
+                })?;
+            }
             "--max-batch-texts" => {
                 i += 1;
                 let value = required_value(args, i, "--max-batch-texts")?;
@@ -380,6 +410,12 @@ fn run_serve(args: &[String]) -> Result<(), String> {
             }
             if let Some(timeout) = service.request_timeout_secs {
                 options.request_timeout_secs = Some(timeout);
+            }
+            if let Some(max_bytes) = service.max_request_body_bytes {
+                options.max_request_body_bytes = max_bytes;
+            }
+            if let Some(max_bytes) = service.max_rerank_body_bytes {
+                options.max_rerank_body_bytes = max_bytes;
             }
             if let Some(max_batch) = service.max_batch_texts {
                 options.max_batch_texts = max_batch;
@@ -499,6 +535,11 @@ fn build_status_output(config: &FileConfig) -> Result<StatusOutput, String> {
         .clone()
         .unwrap_or_else(|| MINILM_CANONICAL_NAME.to_string());
     let dimensions = embeddings.dimensions.unwrap_or(MINILM_DIMENSIONS);
+    let max_request_body_bytes = embeddings
+        .local
+        .as_ref()
+        .and_then(|local| local.max_request_body_bytes)
+        .unwrap_or(1_048_576);
     let embedding_profile = if model == MINILM_CANONICAL_NAME
         || model == "sentence-transformers/all-MiniLM-L6-v2"
         || model == "all-MiniLM-L6-v2"
@@ -528,6 +569,7 @@ fn build_status_output(config: &FileConfig) -> Result<StatusOutput, String> {
                 .and_then(|local| local.device.clone()),
             remote_service_base_url: Some(probe.base_url),
             remote_service_timeout_secs: probe.timeout_secs,
+            max_request_body_bytes: Some(max_request_body_bytes),
             remote_service_fallback_to_local: Some(probe.fallback_to_local),
             remote_service_verify_profile: Some(probe.verify_profile),
             remote_service_auth_configured: Some(auth_configured),
@@ -547,6 +589,7 @@ fn build_status_output(config: &FileConfig) -> Result<StatusOutput, String> {
                 .and_then(|local| local.device.clone()),
             remote_service_base_url: None,
             remote_service_timeout_secs: None,
+            max_request_body_bytes: Some(max_request_body_bytes),
             remote_service_fallback_to_local: None,
             remote_service_verify_profile: None,
             remote_service_auth_configured: None,
@@ -574,6 +617,11 @@ fn build_rerank_status_output(config: &FileConfig) -> Result<Option<RerankStatus
         .model
         .clone()
         .unwrap_or_else(|| RERANKER_CANONICAL_NAME.to_string());
+    let max_rerank_body_bytes = reranking
+        .local
+        .as_ref()
+        .and_then(|local| local.max_rerank_body_bytes)
+        .unwrap_or(4_194_304);
 
     if execution_mode == "remote_service" {
         let probe = remote_rerank_probe_from_config(config)?;
@@ -594,6 +642,7 @@ fn build_rerank_status_output(config: &FileConfig) -> Result<Option<RerankStatus
                 .and_then(|local| local.device.clone()),
             remote_service_base_url: Some(probe.base_url),
             remote_service_timeout_secs: probe.timeout_secs,
+            max_rerank_body_bytes: Some(max_rerank_body_bytes),
             remote_service_fallback_to_local: Some(probe.fallback_to_local),
             remote_service_verify_profile: Some(probe.verify_profile),
             remote_service_auth_configured: Some(auth_configured),
@@ -611,6 +660,7 @@ fn build_rerank_status_output(config: &FileConfig) -> Result<Option<RerankStatus
                 .and_then(|local| local.device.clone()),
             remote_service_base_url: None,
             remote_service_timeout_secs: None,
+            max_rerank_body_bytes: Some(max_rerank_body_bytes),
             remote_service_fallback_to_local: None,
             remote_service_verify_profile: None,
             remote_service_auth_configured: None,
@@ -988,6 +1038,8 @@ fn print_serve_help() {
     println!("  --auth-token-env <name>     Resolve bearer token from environment");
     println!("  --auth-token-env-file <p>   Resolve bearer token from env file");
     println!("  --request-timeout-secs <n>  Max seconds for one embed request");
+    println!("  --max-request-body-bytes <n> Max bytes accepted for one embed request");
+    println!("  --max-rerank-body-bytes <n>  Max bytes accepted for one rerank request");
     println!("  --max-batch-texts <n>       Max texts accepted in one embed request");
     println!("  --max-batch-documents <n>   Max documents accepted in one rerank request");
 }

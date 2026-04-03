@@ -10,7 +10,7 @@ mod inner {
 
     use axum::{
         Json, Router,
-        extract::State,
+        extract::{DefaultBodyLimit, State},
         http::{HeaderMap, StatusCode},
         response::IntoResponse,
         routing::{get, post},
@@ -36,9 +36,14 @@ mod inner {
         pub device_mode: LocalEmbeddingDevice,
         pub cuda_ordinal: usize,
         pub request_timeout_secs: Option<u64>,
+        pub max_request_body_bytes: usize,
+        pub max_rerank_body_bytes: usize,
         pub max_batch_texts: usize,
         pub max_batch_documents: usize,
     }
+
+    const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 1_048_576;
+    const DEFAULT_MAX_RERANK_BODY_BYTES: usize = 4_194_304;
 
     impl Default for EmbedServiceOptions {
         fn default() -> Self {
@@ -50,6 +55,8 @@ mod inner {
                 device_mode: LocalEmbeddingDevice::Auto,
                 cuda_ordinal: 0,
                 request_timeout_secs: None,
+                max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
+                max_rerank_body_bytes: DEFAULT_MAX_RERANK_BODY_BYTES,
                 max_batch_texts: 32,
                 max_batch_documents: 32,
             }
@@ -66,6 +73,8 @@ mod inner {
         #[cfg(feature = "reranking")]
         rerank_status: RerankStatusResponse,
         request_timeout: Option<Duration>,
+        max_request_body_bytes: usize,
+        max_rerank_body_bytes: usize,
         max_batch_texts: usize,
         max_batch_documents: usize,
         request_counter: Arc<AtomicU64>,
@@ -89,6 +98,7 @@ mod inner {
         execution_mode: String,
         device_label: String,
         request_timeout_secs: Option<u64>,
+        max_request_body_bytes: usize,
         max_batch_texts: usize,
     }
 
@@ -104,6 +114,7 @@ mod inner {
         execution_mode: String,
         device_label: String,
         request_timeout_secs: Option<u64>,
+        max_rerank_body_bytes: usize,
         max_batch_documents: usize,
     }
 
@@ -181,6 +192,7 @@ mod inner {
                 execution_mode: backend.execution_mode().to_string(),
                 device_label: backend.device_label().to_string(),
                 request_timeout_secs: options.request_timeout_secs,
+                max_request_body_bytes: options.max_request_body_bytes,
                 max_batch_texts: options.max_batch_texts,
             };
             #[cfg(feature = "reranking")]
@@ -199,6 +211,7 @@ mod inner {
                 execution_mode: reranker.execution_mode().to_string(),
                 device_label: reranker.device_label().to_string(),
                 request_timeout_secs: options.request_timeout_secs,
+                max_rerank_body_bytes: options.max_rerank_body_bytes,
                 max_batch_documents: options.max_batch_documents,
             };
 
@@ -211,6 +224,8 @@ mod inner {
                 #[cfg(feature = "reranking")]
                 rerank_status,
                 request_timeout: options.request_timeout_secs.map(Duration::from_secs),
+                max_request_body_bytes: options.max_request_body_bytes,
+                max_rerank_body_bytes: options.max_rerank_body_bytes,
                 max_batch_texts: options.max_batch_texts,
                 max_batch_documents: options.max_batch_documents,
                 request_counter: Arc::new(AtomicU64::new(0)),
@@ -222,6 +237,7 @@ mod inner {
                 execution_mode = %state.status.execution_mode,
                 device_label = %state.status.device_label,
                 request_timeout_secs = ?state.status.request_timeout_secs,
+                max_request_body_bytes = state.status.max_request_body_bytes,
                 max_batch_texts = state.status.max_batch_texts,
                 "service initialized"
             );
@@ -230,6 +246,7 @@ mod inner {
                 .route("/health", get(health))
                 .route("/status", get(status_handler))
                 .route("/embed", post(embed))
+                .layer(DefaultBodyLimit::max(state.max_request_body_bytes))
                 .with_state(state.clone());
             let embed_prefix = normalize_prefix(&options.prefix);
             let mut router = if embed_prefix == "/" {
@@ -243,6 +260,7 @@ mod inner {
                     .route("/health", get(rerank_health))
                     .route("/status", get(rerank_status_handler))
                     .route("/rerank", post(rerank))
+                    .layer(DefaultBodyLimit::max(state.max_rerank_body_bytes))
                     .with_state(state);
                 router = router.nest("/rerank", rerank_routes);
             }
@@ -256,12 +274,38 @@ mod inner {
                 normalize_prefix(&options.prefix)
             );
             axum::serve(listener, router)
-                .with_graceful_shutdown(async {
-                    let _ = tokio::signal::ctrl_c().await;
-                })
+                .with_graceful_shutdown(shutdown_signal())
                 .await
                 .map_err(|error| error.to_string())
         })
+    }
+
+    async fn shutdown_signal() {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(signal) => signal,
+                Err(error) => {
+                    tracing::warn!("failed to install SIGTERM handler: {error}");
+                    let _ = tokio::signal::ctrl_c().await;
+                    return;
+                }
+            };
+
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = sigterm.recv() => {}
+            }
+            tracing::info!("shutdown signal received");
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            tracing::info!("shutdown signal received");
+        }
     }
 
     async fn health(State(state): State<ServiceState>) -> Json<HealthResponse> {
