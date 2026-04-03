@@ -4646,6 +4646,264 @@
     ]
   },
   {
+    "id": "reflection-contested-runtime-preset-operational-continuity",
+    "title": "Contested answer presets can bundle the continuity winner-note path",
+    "category": "reflection-composition",
+    "goal": "Apps can choose a named contested-answer preset per authority domain instead of setting summary and citation policy separately when they want the current winner plus an explicit conflict note.",
+    "authority_domain_policies": [
+      {
+        "domain": "runtime",
+        "authoritative_chains": [
+          "runtime-ops"
+        ],
+        "reference_chains": [
+          "deployment-docs"
+        ],
+        "contested_answer_preset": "operational-continuity"
+      },
+      {
+        "domain": "deployment",
+        "authoritative_chains": [
+          "deployment-docs"
+        ],
+        "reference_chains": [
+          "runtime-ops"
+        ],
+        "contested_answer_preset": "operational-continuity"
+      }
+    ],
+    "records": [
+      {
+        "key": "contested-preset-continuity-runtime-one",
+        "timestamp": "2026-03-31T18:10:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-startup-host-contested-preset-continuity",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service."
+      },
+      {
+        "key": "contested-preset-continuity-runtime-two",
+        "timestamp": "2026-03-31T18:15:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-startup-host-contested-preset-continuity",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Runtime startup guidance repeats the native Windows scheduled task at logon."
+      },
+      {
+        "key": "contested-preset-continuity-deployment-one",
+        "timestamp": "2026-03-31T17:50:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-startup-host-contested-preset-continuity",
+          "knowledge_summary": "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts."
+      },
+      {
+        "key": "contested-preset-continuity-deployment-two",
+        "timestamp": "2026-03-31T17:55:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-startup-host-contested-preset-continuity",
+          "knowledge_summary": "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 2,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_checks": [
+      {
+        "key": "femind-runtime-startup-host-contested-preset-continuity",
+        "expected_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_kind": "stable-procedure",
+        "expected_contested": true,
+        "min_support_count": 2,
+        "min_trusted_support_count": 2,
+        "min_authoritative_support_count": 2,
+        "min_authority_score_sum": 260,
+        "min_confidence": "medium"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the current supported startup path for femind-embed-service?",
+        "expected_answer": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_intent": "stable-summary",
+        "expected_reflection_preference": "prefer-current",
+        "expected_composed_basis": "reflected",
+        "expected_composed_rationale": "winner-with-conflict-note",
+        "expected_abstained": false,
+        "required_fragments": [
+          "Note: authoritative guidance remains contested by:",
+          "Keep femind-embed-service running inside WSL systemd before the Windows session starts."
+        ],
+        "forbidden_fragments": [
+          "This remains contested."
+        ]
+      }
+    ]
+  },
+  {
+    "id": "reflection-contested-runtime-preset-high-risk-abstain",
+    "title": "Contested answer presets can bundle a high-risk abstain path",
+    "category": "reflection-composition",
+    "goal": "Apps can select a single named contested-answer preset for higher-risk domains so FeMind abstains and suppresses supporting detail when authoritative disagreement remains unresolved.",
+    "authority_domain_policies": [
+      {
+        "domain": "runtime",
+        "authoritative_chains": [
+          "runtime-ops"
+        ],
+        "reference_chains": [
+          "deployment-docs"
+        ],
+        "contested_answer_preset": "high-risk-abstain"
+      },
+      {
+        "domain": "deployment",
+        "authoritative_chains": [
+          "deployment-docs"
+        ],
+        "reference_chains": [
+          "runtime-ops"
+        ],
+        "contested_answer_preset": "high-risk-abstain"
+      }
+    ],
+    "records": [
+      {
+        "key": "contested-preset-abstain-runtime-one",
+        "timestamp": "2026-03-31T18:10:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-startup-host-contested-preset-abstain",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Runtime operations docs say the native Windows scheduled task at logon launches femind-embed-service."
+      },
+      {
+        "key": "contested-preset-abstain-runtime-two",
+        "timestamp": "2026-03-31T18:15:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "runtime-ops",
+          "knowledge_key": "femind-runtime-startup-host-contested-preset-abstain",
+          "knowledge_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Runtime startup guidance repeats the native Windows scheduled task at logon."
+      },
+      {
+        "key": "contested-preset-abstain-deployment-one",
+        "timestamp": "2026-03-31T17:50:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-startup-host-contested-preset-abstain",
+          "knowledge_summary": "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Deployment docs say to keep femind-embed-service running inside WSL systemd before the Windows session starts."
+      },
+      {
+        "key": "contested-preset-abstain-deployment-two",
+        "timestamp": "2026-03-31T17:55:00Z",
+        "source": "project-doc",
+        "memory_type": "procedural",
+        "metadata": {
+          "source_trust": "trusted",
+          "source_kind": "project-doc",
+          "source_verification": "verified",
+          "source_chain": "deployment-docs",
+          "knowledge_key": "femind-runtime-startup-host-contested-preset-abstain",
+          "knowledge_summary": "Keep femind-embed-service running inside WSL systemd before the Windows session starts.",
+          "knowledge_kind": "stable-procedure"
+        },
+        "text": "Deployment bootstrap guidance repeats the WSL systemd startup path before Windows logon."
+      }
+    ],
+    "reflection": {
+      "min_support_count": 2,
+      "min_trusted_support_count": 1,
+      "max_objects": 4,
+      "persist": true
+    },
+    "reflection_checks": [
+      {
+        "key": "femind-runtime-startup-host-contested-preset-abstain",
+        "expected_summary": "Use the native Windows scheduled task at logon to launch femind-embed-service.",
+        "expected_kind": "stable-procedure",
+        "expected_contested": true,
+        "min_support_count": 2,
+        "min_trusted_support_count": 2,
+        "min_authoritative_support_count": 2,
+        "min_authority_score_sum": 260,
+        "min_confidence": "medium"
+      }
+    ],
+    "retrieval_checks": [
+      {
+        "query": "What is the current supported startup path for femind-embed-service?",
+        "expected_answer": "I don’t have a single resolved stable summary yet because authoritative guidance remains contested.",
+        "expected_intent": "stable-summary",
+        "expected_reflection_preference": "prefer-current",
+        "expected_composed_basis": "reflected",
+        "expected_composed_rationale": "contested-abstain-policy",
+        "expected_abstained": true,
+        "required_fragments": [
+          "I don’t have a single resolved stable summary yet because authoritative guidance remains contested."
+        ]
+      }
+    ]
+  },
+  {
     "id": "reflection-refresh-domain-policy-unresolved-conflict-retire",
     "title": "Reflection refresh should retire a persisted summary when unresolved domain conflict is disallowed",
     "category": "reflection-refresh-lifecycle",

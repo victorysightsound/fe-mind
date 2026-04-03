@@ -34,7 +34,7 @@ pub use secret_policy::{
     query_requests_sensitive_secret_detail, redact_secret_material, secret_class_from_metadata,
 };
 pub use source_authority::{
-    ContestedCitationPolicy, ContestedSummaryPolicy, SourceAuthorityDomain,
+    ContestedAnswerPreset, ContestedCitationPolicy, ContestedSummaryPolicy, SourceAuthorityDomain,
     SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy, SourceAuthorityLevel,
     SourceAuthorityPolicy, SourceAuthorityRegistry, SourceAuthorityScorer,
 };

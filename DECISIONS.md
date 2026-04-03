@@ -2469,6 +2469,55 @@ that answer.
   practical `97/97` exact, practical `97/97` ANN, live-library `58/58`,
   memloft-slice `90/90`
 
+## Decision 068: Add Domain-Aware Contested Answer Presets
+
+**Date:** 2026-04-02
+
+**Decision:** Add named contested-answer presets on top of the existing
+domain-policy controls so applications can choose a policy bundle per
+authority domain without setting contested-summary and contested-citation
+controls separately every time.
+
+**Context:** Decisions 066 and 067 made contested reflected answers
+application-facing at two separate layers:
+- the summary outcome
+- the citation/detail outcome
+
+That was the right low-level control surface, but it was too verbose for the
+common cases. In practice, applications tend to want a small number of stable
+bundles such as:
+- an explicit contested answer that cites both sides
+- a continuity-oriented winner-plus-note path
+- a higher-risk abstain path that suppresses supporting detail
+
+For a production memory engine, the low-level knobs should remain available,
+but the app-facing surface also needs opinionated presets that are easy to
+apply consistently across domains.
+
+**Consequences:**
+- `ContestedAnswerPreset` is now a first-class app-facing enum with:
+  - `explicit-contested`
+  - `winner-only`
+  - `operational-continuity`
+  - `minimal-disclosure`
+  - `high-risk-abstain`
+- `SourceAuthorityDomainPolicy` now supports
+  `with_contested_answer_preset(...)`
+- `SourceAuthorityRegistry` now supports
+  `with_contested_answer_preset(...)` and
+  `set_contested_answer_preset(...)`
+- `MemoryEngineBuilder` now exposes `contested_answer_preset(...)`
+- presets expand into the existing summary and citation policies, and callers
+  can still override either underlying policy afterward
+- the practical harness now supports `contested_answer_preset` inside
+  `authority_domain_policies`
+- the engine-first suite now includes:
+  - `reflection-contested-runtime-preset-operational-continuity`
+  - `reflection-contested-runtime-preset-high-risk-abstain`
+- Remote-GPU validation is green after the change:
+  practical `99/99` exact, practical `99/99` ANN, live-library `58/58`,
+  memloft-slice `90/90`
+
 ---
 
 ## Open Questions

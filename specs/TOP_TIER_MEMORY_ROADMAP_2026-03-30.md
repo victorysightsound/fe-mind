@@ -279,6 +279,9 @@ Current status after the 2026-03-30 trust/safety pass:
     - cite both sides
     - cite only the current winner
     - suppress supporting detail entirely in higher-risk domains
+  - the app-facing layer should also expose named contested-answer presets so
+    applications can choose stable domain defaults without repeating both
+    lower-level controls everywhere
 
 ### 6. Keep Evaluation Engine-Centric
 

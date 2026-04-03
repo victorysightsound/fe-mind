@@ -241,6 +241,18 @@ The practical live-validation path is now established and repeatable:
     all supporting detail
   - when more than one relevant authority domain matches a contested query,
     FeMind uses the strictest matching citation policy
+- apps can now set a single named contested-answer preset per authority
+  domain too:
+  - `SourceAuthorityDomainPolicy::with_contested_answer_preset(...)`
+  - `MemoryEngineBuilder::contested_answer_preset(...)`
+  - supported presets are:
+    - `explicit-contested`
+    - `winner-only`
+    - `operational-continuity`
+    - `minimal-disclosure`
+    - `high-risk-abstain`
+  - presets are convenience bundles over the summary and citation policies,
+    and callers can still override either underlying control afterward
 - stable-summary promotion is now application-facing too:
   callers can choose `auto`, `prefer-reflection`, or `prefer-source` for
   stable-summary retrieval and composition instead of accepting only the

@@ -72,10 +72,10 @@ pub mod prelude {
     pub use crate::error::{FemindError, Result};
     pub use crate::memory::store::StoreResult;
     pub use crate::scoring::{
-        ContestedCitationPolicy, ContestedSummaryPolicy, ReviewApprovalTemplate, ReviewPolicyClass,
-        ReviewScope, ReviewSeverity, ReviewStatus, SecretClass, SourceAuthorityDomain,
-        SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy, SourceAuthorityLevel,
-        SourceAuthorityPolicy, SourceAuthorityRegistry,
+        ContestedAnswerPreset, ContestedCitationPolicy, ContestedSummaryPolicy,
+        ReviewApprovalTemplate, ReviewPolicyClass, ReviewScope, ReviewSeverity, ReviewStatus,
+        SecretClass, SourceAuthorityDomain, SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy,
+        SourceAuthorityLevel, SourceAuthorityPolicy, SourceAuthorityRegistry,
     };
     pub use crate::search::{
         QueryIntent, QueryRoute, ReflectionSearchPreference, SearchBuilder, SearchDepth,

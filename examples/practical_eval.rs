@@ -42,8 +42,9 @@ mod app {
     use femind::reranking::{RERANKER_CANONICAL_NAME, RerankerRuntime};
     use femind::scoring::redact_secret_material;
     use femind::scoring::{
-        ContestedCitationPolicy, ContestedSummaryPolicy, SourceAuthorityDomain,
-        SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy, SourceAuthorityLevel,
+        ContestedAnswerPreset, ContestedCitationPolicy, ContestedSummaryPolicy,
+        SourceAuthorityDomain, SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy,
+        SourceAuthorityLevel,
     };
     use femind::search::{QueryIntent, QueryRoute, SearchMode, StableSummaryPolicy};
     use femind::traits::{LlmCallback, MemoryRecord, MemoryType, RerankerBackend};
@@ -175,6 +176,8 @@ mod app {
         delegated_kinds: Vec<String>,
         #[serde(default)]
         reference_kinds: Vec<String>,
+        #[serde(default)]
+        contested_answer_preset: Option<String>,
         #[serde(default)]
         contested_summary_policy: Option<String>,
         #[serde(default)]
@@ -3371,6 +3374,11 @@ mod app {
         for kind in &policy.reference_kinds {
             domain_policy = domain_policy.with_reference_kind(kind);
         }
+        if let Some(contested_answer_preset) = &policy.contested_answer_preset {
+            domain_policy = domain_policy.with_contested_answer_preset(
+                parse_contested_answer_preset(contested_answer_preset)?,
+            );
+        }
         if let Some(contested_summary_policy) = &policy.contested_summary_policy {
             domain_policy = domain_policy.with_contested_summary_policy(
                 parse_contested_summary_policy(contested_summary_policy)?,
@@ -3383,6 +3391,24 @@ mod app {
         }
 
         Ok(domain_policy)
+    }
+
+    fn parse_contested_answer_preset(
+        value: &str,
+    ) -> Result<ContestedAnswerPreset, Box<dyn std::error::Error>> {
+        match value.trim().to_lowercase().as_str() {
+            "explicit-contested" | "explicit" => Ok(ContestedAnswerPreset::ExplicitContested),
+            "winner-only" => Ok(ContestedAnswerPreset::WinnerOnly),
+            "operational-continuity" | "continuity" => {
+                Ok(ContestedAnswerPreset::OperationalContinuity)
+            }
+            "minimal-disclosure" | "minimal" => Ok(ContestedAnswerPreset::MinimalDisclosure),
+            "high-risk-abstain" | "risk-abstain" => Ok(ContestedAnswerPreset::HighRiskAbstain),
+            other => Err(format!(
+                "unknown contested_answer_preset '{other}', expected explicit-contested | winner-only | operational-continuity | minimal-disclosure | high-risk-abstain"
+            )
+            .into()),
+        }
     }
 
     fn parse_contested_summary_policy(

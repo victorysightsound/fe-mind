@@ -12,17 +12,18 @@ use crate::memory::MemoryStore;
 use crate::memory::store::StoreResult;
 use crate::reranking::RerankerRuntime;
 use crate::scoring::{
-    CompositeScorer, ContestedCitationPolicy, ContestedSummaryPolicy, ImportanceScorer,
-    MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer, ReviewApprovalTemplate,
-    ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity, ReviewStatus, SecretClass,
-    SourceAuthorityDomain, SourceAuthorityDomainPolicy, SourceAuthorityKindPolicy,
-    SourceAuthorityPolicy, SourceAuthorityRegistry, SourceProvenanceScorer, SourceTrustScorer,
-    detect_review_flag, effective_review_status, evidence_contains_secret_material,
-    infer_authority_domain, infer_authority_domains, query_requests_private_infra_guidance,
-    query_requests_secret_location_or_reference, query_requests_sensitive_secret_detail,
-    redact_secret_material, review_expires_at, review_policy_class_matches_query,
-    review_scope_matches_query, secret_class_from_metadata, source_authority_rank_for_domains,
-    source_authority_score_sum_for_domains, source_provenance_rank, source_trust_level,
+    CompositeScorer, ContestedAnswerPreset, ContestedCitationPolicy, ContestedSummaryPolicy,
+    ImportanceScorer, MemoryTypeScorer, ProceduralSafetyScorer, RecencyScorer,
+    ReviewApprovalTemplate, ReviewPolicyClass, ReviewSafetyScorer, ReviewScope, ReviewSeverity,
+    ReviewStatus, SecretClass, SourceAuthorityDomain, SourceAuthorityDomainPolicy,
+    SourceAuthorityKindPolicy, SourceAuthorityPolicy, SourceAuthorityRegistry,
+    SourceProvenanceScorer, SourceTrustScorer, detect_review_flag, effective_review_status,
+    evidence_contains_secret_material, infer_authority_domain, infer_authority_domains,
+    query_requests_private_infra_guidance, query_requests_secret_location_or_reference,
+    query_requests_sensitive_secret_detail, redact_secret_material, review_expires_at,
+    review_policy_class_matches_query, review_scope_matches_query, secret_class_from_metadata,
+    source_authority_rank_for_domains, source_authority_score_sum_for_domains,
+    source_provenance_rank, source_trust_level,
 };
 use crate::search::StableSummaryPolicy;
 use crate::search::builder::SearchBuilder;
@@ -4814,6 +4815,19 @@ impl<T: MemoryRecord> MemoryEngineBuilder<T> {
         self
     }
 
+    /// Apply a named contested-answer preset for one domain.
+    ///
+    /// Presets bundle the contested-summary and contested-citation policy.
+    /// Callers can still override either individual policy afterward.
+    pub fn contested_answer_preset(
+        mut self,
+        domain: SourceAuthorityDomain,
+        preset: ContestedAnswerPreset,
+    ) -> Self {
+        Arc::make_mut(&mut self.authority_registry).set_contested_answer_preset(domain, preset);
+        self
+    }
+
     /// Set the embedding backend for vector search.
     ///
     /// When set, `SearchMode::Auto` uses hybrid FTS5 + vector search.
@@ -6135,6 +6149,29 @@ mod tests {
             !answer.answer.contains(
                 "Keep femind-embed-service running inside WSL systemd before the Windows session starts."
             )
+        );
+    }
+
+    #[test]
+    fn builder_contested_answer_preset_applies_bundled_domain_policy() {
+        let engine = MemoryEngine::<RichTestMem>::builder()
+            .contested_answer_preset(
+                SourceAuthorityDomain::RuntimeOps,
+                ContestedAnswerPreset::MinimalDisclosure,
+            )
+            .build()
+            .expect("build");
+
+        let registry = engine.authority_registry();
+        let domains = [SourceAuthorityDomain::RuntimeOps];
+
+        assert_eq!(
+            registry.contested_summary_policy_for_domains(&domains),
+            ContestedSummaryPolicy::WinnerWithConflictNote
+        );
+        assert_eq!(
+            registry.contested_citation_policy_for_domains(&domains),
+            ContestedCitationPolicy::SuppressSupportingDetail
         );
     }
 

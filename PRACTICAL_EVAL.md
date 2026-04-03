@@ -484,6 +484,17 @@ Current validated baseline:
   - this lets applications decide whether a contested answer should expose the
     competing authoritative summary, only the current leading summary, or no
     supporting detail at all
+- grouped `authority_domain_policies` can now also set
+  `contested_answer_preset` as a named bundle over both contested controls
+  when applications want a simpler per-domain policy surface
+  - supported values are:
+    - `explicit-contested`
+    - `winner-only`
+    - `operational-continuity`
+    - `minimal-disclosure`
+    - `high-risk-abstain`
+  - explicit `contested_summary_policy` and `contested_citation_policy`
+    entries still win if the scenario wants to override the preset
 - callers can now set an explicit stable-summary promotion policy:
   - `auto`
   - `prefer-reflection`

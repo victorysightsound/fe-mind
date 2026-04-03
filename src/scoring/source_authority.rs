@@ -185,6 +185,58 @@ impl std::fmt::Display for ContestedCitationPolicy {
     }
 }
 
+/// App-facing preset bundling contested-summary and citation policy together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ContestedAnswerPreset {
+    ExplicitContested,
+    WinnerOnly,
+    OperationalContinuity,
+    MinimalDisclosure,
+    HighRiskAbstain,
+}
+
+impl ContestedAnswerPreset {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitContested => "explicit-contested",
+            Self::WinnerOnly => "winner-only",
+            Self::OperationalContinuity => "operational-continuity",
+            Self::MinimalDisclosure => "minimal-disclosure",
+            Self::HighRiskAbstain => "high-risk-abstain",
+        }
+    }
+
+    pub fn summary_policy(self) -> ContestedSummaryPolicy {
+        match self {
+            Self::ExplicitContested | Self::WinnerOnly => {
+                ContestedSummaryPolicy::PreferContestedAnswer
+            }
+            Self::OperationalContinuity | Self::MinimalDisclosure => {
+                ContestedSummaryPolicy::WinnerWithConflictNote
+            }
+            Self::HighRiskAbstain => ContestedSummaryPolicy::AbstainUntilResolved,
+        }
+    }
+
+    pub fn citation_policy(self) -> ContestedCitationPolicy {
+        match self {
+            Self::ExplicitContested | Self::OperationalContinuity => {
+                ContestedCitationPolicy::CiteBothSides
+            }
+            Self::WinnerOnly => ContestedCitationPolicy::CiteWinnerOnly,
+            Self::MinimalDisclosure | Self::HighRiskAbstain => {
+                ContestedCitationPolicy::SuppressSupportingDetail
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ContestedAnswerPreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceAuthorityPolicy {
     pub domain: SourceAuthorityDomain,
@@ -308,6 +360,12 @@ impl SourceAuthorityDomainPolicy {
         self.contested_citation_policy = Some(policy);
         self
     }
+
+    pub fn with_contested_answer_preset(mut self, preset: ContestedAnswerPreset) -> Self {
+        self.contested_summary_policy = Some(preset.summary_policy());
+        self.contested_citation_policy = Some(preset.citation_policy());
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -393,6 +451,15 @@ impl SourceAuthorityRegistry {
         policy: ContestedCitationPolicy,
     ) -> Self {
         self.set_contested_citation_policy(domain, policy);
+        self
+    }
+
+    pub fn with_contested_answer_preset(
+        mut self,
+        domain: SourceAuthorityDomain,
+        preset: ContestedAnswerPreset,
+    ) -> Self {
+        self.set_contested_answer_preset(domain, preset);
         self
     }
 
@@ -598,6 +665,16 @@ impl SourceAuthorityRegistry {
 
         self.contested_citation_policies
             .push(ContestedCitationDomainPolicy::new(domain, policy));
+        self
+    }
+
+    pub fn set_contested_answer_preset(
+        &mut self,
+        domain: SourceAuthorityDomain,
+        preset: ContestedAnswerPreset,
+    ) -> &mut Self {
+        self.set_contested_summary_policy(domain, preset.summary_policy());
+        self.set_contested_citation_policy(domain, preset.citation_policy());
         self
     }
 
@@ -1360,6 +1437,41 @@ mod tests {
                 SourceAuthorityDomain::Security,
             ]),
             ContestedCitationPolicy::SuppressSupportingDetail
+        );
+        assert_eq!(
+            registry.contested_citation_policy_for_domains(&[SourceAuthorityDomain::RuntimeOps]),
+            ContestedCitationPolicy::CiteWinnerOnly
+        );
+    }
+
+    #[test]
+    fn contested_answer_preset_applies_both_policies() {
+        let registry = SourceAuthorityRegistry::new().with_contested_answer_preset(
+            SourceAuthorityDomain::RuntimeOps,
+            ContestedAnswerPreset::HighRiskAbstain,
+        );
+
+        assert_eq!(
+            registry.contested_summary_policy_for_domains(&[SourceAuthorityDomain::RuntimeOps]),
+            ContestedSummaryPolicy::AbstainUntilResolved
+        );
+        assert_eq!(
+            registry.contested_citation_policy_for_domains(&[SourceAuthorityDomain::RuntimeOps]),
+            ContestedCitationPolicy::SuppressSupportingDetail
+        );
+    }
+
+    #[test]
+    fn contested_answer_preset_can_be_overridden_by_explicit_policy() {
+        let registry = SourceAuthorityRegistry::new().with_domain_policy(
+            SourceAuthorityDomainPolicy::new(SourceAuthorityDomain::RuntimeOps)
+                .with_contested_answer_preset(ContestedAnswerPreset::OperationalContinuity)
+                .with_contested_citation_policy(ContestedCitationPolicy::CiteWinnerOnly),
+        );
+
+        assert_eq!(
+            registry.contested_summary_policy_for_domains(&[SourceAuthorityDomain::RuntimeOps]),
+            ContestedSummaryPolicy::WinnerWithConflictNote
         );
         assert_eq!(
             registry.contested_citation_policy_for_domains(&[SourceAuthorityDomain::RuntimeOps]),
