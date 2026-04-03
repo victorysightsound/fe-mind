@@ -46,7 +46,7 @@ The GitHub Actions workflow mirrors the same split:
 3. Bump the version and update `CHANGELOG.md`.
 4. Run a dry-run package check:
    ```bash
-   cargo publish --dry-run
+   scripts/run-release-preflight.sh
    ```
 5. Publish the crate when the package audit is clean:
    ```bash

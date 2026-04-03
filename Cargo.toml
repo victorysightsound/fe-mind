@@ -12,6 +12,14 @@ repository = "https://github.com/victorysightsound/fe-mind"
 keywords = ["memory", "ai", "agent", "search", "embedding"]
 categories = ["database", "text-processing"]
 readme = "README.md"
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "examples/**",
+    "src/**",
+    "tests/**",
+]
 
 [features]
 default = ["fts5"]
