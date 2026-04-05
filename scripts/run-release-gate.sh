@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 set -euo pipefail
 
 bootstrap_fake_cuda() {
@@ -187,7 +187,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --features full
 cargo doc --features full --no-deps
 
-if [[ "${FEMIND_SKIP_PRACTICAL_EVAL:-0}" == "1" || "${FEMIND_SKIP_PRACTICAL_EVAL:l}" == "true" ]]; then
+skip_practical_eval="$(printf '%s' "${FEMIND_SKIP_PRACTICAL_EVAL:-0}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${skip_practical_eval}" == "1" || "${skip_practical_eval}" == "true" ]]; then
   exit 0
 fi
 
