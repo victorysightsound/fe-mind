@@ -17,6 +17,10 @@ session-context
 
 **Status:** local repo/crate rename to `fe-mind` / `femind` is complete. External publication work is still pending.
 
+FeMind also exposes a stable surface for the shared FeSuite harness at
+`../fe-harness/`, so scenario fixtures can reset memory-backed state and run
+repeatable retrieval checks.
+
 ---
 
 ## Key Files

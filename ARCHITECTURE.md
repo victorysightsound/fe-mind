@@ -365,6 +365,8 @@ pub enum MemoryType {
 
 /// Consumers implement this for their memory types.
 /// femind handles storage, indexing, search, and decay.
+/// The shared FeSuite harness at ../fe-harness/ uses this same surface for
+/// resettable memory-backed fixture scenarios.
 pub trait MemoryRecord: Send + Sync + Serialize + DeserializeOwned + 'static {
     /// Unique identifier
     fn id(&self) -> Option<i64>;

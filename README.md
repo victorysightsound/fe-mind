@@ -4,6 +4,9 @@ A standalone Rust crate providing a pluggable, feature-gated memory engine for A
 
 Handles persistent storage, keyword search (FTS5), vector search (candle), hybrid retrieval (RRF), graph relationships, memory consolidation, cognitive decay modeling, and token-budget-aware context assembly.
 
+FeMind also participates directly in the shared suite harness at `../fe-harness/`
+through deterministic record-seeding, retrieval, and bounded-context scenarios.
+
 ## Design Principles
 
 - **Library, not framework** — projects call into FeMind, not the other way around
