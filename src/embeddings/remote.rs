@@ -415,7 +415,7 @@ mod inner {
         use super::*;
         use crate::embeddings::NoopBackend;
         use std::io::{Read, Write};
-        use std::net::{TcpListener, TcpStream};
+        use std::net::{Shutdown, TcpListener, TcpStream};
         use std::thread;
 
         fn serve_once(
@@ -440,9 +440,7 @@ mod inner {
             status_payload: &serde_json::Value,
             embed_payload: &serde_json::Value,
         ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-            let mut buffer = [0_u8; 8192];
-            let bytes = stream.read(&mut buffer)?;
-            let request = String::from_utf8_lossy(&buffer[..bytes]);
+            let request = read_http_request(stream)?;
             let body = if request.starts_with("GET /status") {
                 serde_json::to_string(status_payload)?
             } else if request.starts_with("POST /embed") {
@@ -457,7 +455,56 @@ mod inner {
             );
             stream.write_all(response.as_bytes())?;
             stream.flush()?;
+            stream.shutdown(Shutdown::Write)?;
             Ok(())
+        }
+
+        fn read_http_request(
+            stream: &mut TcpStream,
+        ) -> std::result::Result<String, Box<dyn std::error::Error>> {
+            let mut buffer = Vec::with_capacity(8192);
+            let mut chunk = [0_u8; 1024];
+            let mut header_end = None;
+            let mut content_length = 0_usize;
+
+            loop {
+                let bytes = stream.read(&mut chunk)?;
+                if bytes == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..bytes]);
+
+                if header_end.is_none()
+                    && let Some(position) =
+                        buffer.windows(4).position(|window| window == b"\r\n\r\n")
+                {
+                    let end = position + 4;
+                    header_end = Some(end);
+                    content_length = parse_content_length(&buffer[..end]);
+                }
+
+                if let Some(end) = header_end
+                    && buffer.len() >= end + content_length
+                {
+                    break;
+                }
+            }
+
+            Ok(String::from_utf8_lossy(&buffer).into_owned())
+        }
+
+        fn parse_content_length(headers: &[u8]) -> usize {
+            String::from_utf8_lossy(headers)
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    if name.eq_ignore_ascii_case("content-length") {
+                        value.trim().parse::<usize>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0)
         }
 
         #[test]
